@@ -1,0 +1,67 @@
+name: ci
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: guard, unit tests, install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # publish-guard.sh scans the tree for deny-listed patterns (baseline:
+      # config/denylist.public.txt). A private, org-specific denylist can be
+      # layered in via the PUBLISH_GUARD_DENYLIST secret; forks and external
+      # PRs won't have it, so the guard still runs against the public
+      # baseline alone. The guard shells out to `grep -rniI --exclude-dir
+      # --exclude` plus a `grep -v -F` filter (see scripts/publish-guard.sh)
+      # -- all long-standing GNU grep options (-r/-n/-i/-I, --exclude-dir,
+      # --exclude, -v, -F), and ubuntu-latest ships GNU grep by default, so
+      # no BSD/GNU flag divergence applies here.
+      - name: publish guard
+        env:
+          DENY: ${{ secrets.PUBLISH_GUARD_DENYLIST }}
+        run: |
+          set -euo pipefail
+          if [ -n "$DENY" ]; then
+            printf '%s\n' "$DENY" > /tmp/deny.txt
+            PUBLISH_GUARD_DENYLIST=/tmp/deny.txt bash scripts/publish-guard.sh
+          else
+            bash scripts/publish-guard.sh
+          fi
+
+      # test-publish-guard.sh, test-attributions.sh and test-install.sh are
+      # named explicitly (they're the primary coverage for the guard, the
+      # attribution manifest, and the installer); every other scripts/test-*.sh
+      # harness runs in the loop below. test-install-platforms.sh is excluded
+      # here -- it needs npx + network to pull rulesync and is by far the
+      # slowest harness, so it runs in its own job (below) to keep unit-test
+      # feedback fast.
+      - name: unit tests
+        run: |
+          set -euo pipefail
+          bash scripts/test-publish-guard.sh
+          bash scripts/test-attributions.sh
+          bash scripts/test-install.sh
+          for t in scripts/test-*.sh; do
+            case "$t" in
+              *test-install-platforms.sh|*test-publish-guard.sh|*test-attributions.sh|*test-install.sh) continue ;;
+            esac
+            echo "=== $t ==="
+            bash "$t"
+          done
+
+  platform-smoke:
+    name: platform smoke (rulesync)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Installs codex/copilot/gemini/antigravity via rulesync, which needs
+      # network access to fetch rulesync@16.7.0 through npx. ubuntu-latest
+      # ships Node/npx already, so no setup-node step is needed.
+      - name: platform smoke (rulesync)
+        run: bash scripts/test-install-platforms.sh

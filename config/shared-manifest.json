@@ -1,0 +1,13 @@
+{
+  "description": "Skills/agents this repo owns as the canonical source, that consumer repos copy verbatim as REAL files, since Claude Code does not discover symlinked skills/agents (its loader walks real directories) — hooks are shared via symlink instead, because they execute by path. Entries are repo-relative paths into this Master (e.g. \"plugins/core-lifecycle/skills/ci-status\"); the consumer always receives them FLAT, at .claude/skills/<basename> or .claude/agents/<basename>.md. A bare name with no slash is still accepted and resolves against the pre-plugins layout (<master>/skills/<name>, <master>/agents/<name>.md) so an older Master checkout keeps working. Workflow: edit here, run scripts/sync-shared.sh <repo> to propagate, and scripts/drift-check-shared.sh <repo> to flag stale copies. Skills/agents meant to be copied once and adapted locally are NOT listed here — only entries a consumer should keep byte-identical to this source belong in this manifest.",
+  "shared_skills": [
+    "plugins/core-lifecycle/skills/ci-status",
+    "plugins/core-lifecycle/skills/issue-brief",
+    "plugins/core-lifecycle/skills/review-pr",
+    "plugins/core-lifecycle/skills/reproduce-then-fix",
+    "plugins/writing/skills/ste-writing"
+  ],
+  "shared_agents": [
+    "plugins/core-lifecycle/agents/code-reviewer"
+  ]
+}

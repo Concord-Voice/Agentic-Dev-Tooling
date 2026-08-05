@@ -1,0 +1,7 @@
+{
+  "name": "core-lifecycle",
+  "version": "0.1.0",
+  "description": "Full development lifecycle: /dev-lifecycle orchestrator, /issue-creation, /pr-creation, /enhanced-pr-review, /ci-status, /review-pr, /issue-brief, /reproduce-then-fix, plus the generic agent roster and design-panel workflow.",
+  "author": { "name": "agentic-dev-tooling contributors" },
+  "license": "MIT"
+}

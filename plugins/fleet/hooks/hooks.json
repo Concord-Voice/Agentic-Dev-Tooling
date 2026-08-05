@@ -1,0 +1,13 @@
+{
+  "description": "Fleet session handshake — emits the arrival/completion contract on SessionStart, and a short no-op notice on resume/clear/compact.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-handshake.sh\"", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}

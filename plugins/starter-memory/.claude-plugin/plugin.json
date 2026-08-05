@@ -1,0 +1,7 @@
+{
+  "name": "starter-memory",
+  "version": "0.1.0",
+  "description": "Optional starter memory pack: curated generic facts about gh/git/CI/subagent workflows.",
+  "author": { "name": "agentic-dev-tooling contributors" },
+  "license": "MIT"
+}

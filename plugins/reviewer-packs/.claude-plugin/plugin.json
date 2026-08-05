@@ -1,0 +1,7 @@
+{
+  "name": "reviewer-packs",
+  "version": "0.1.0",
+  "description": "Specialist reviewers: migration-reviewer, red-team methodology, plus fill-in templates for RBAC, crypto, and deployment-config reviewers. red-team pairs well with external vulnerability-scanning skills (e.g. a vulnhunt-style scanner) when your setup provides them; it ships with none declared.",
+  "author": { "name": "agentic-dev-tooling contributors" },
+  "license": "MIT"
+}

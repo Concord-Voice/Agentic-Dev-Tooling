@@ -1,0 +1,30 @@
+{
+  "_template": [
+    "TEMPLATE: copy this directory out of imports/, drop this _template key, and complete every FILL below.",
+    "FILL: rename this plugin and the skills/org-tooling-router directory for your organization (keep them in sync).",
+    "FILL: replace every 'your organization' string below with your organization or team name.",
+    "FILL: adjust capabilities and defaultPrompt to match what your router skill actually tells Codex to do."
+  ],
+  "name": "org-tooling-router",
+  "version": "0.1.0",
+  "description": "Codex plugin routing to your organization's shared tooling master, repository instructions, and migration workflows.",
+  "author": {
+    "name": "your organization"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Org Tooling Router",
+    "shortDescription": "Use your organization's shared tooling in Codex.",
+    "longDescription": "Routes Codex to the shared dev-tooling master, repository AGENTS.md files, and migrated Claude assets without duplicating project knowledge.",
+    "developerName": "your organization",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use the org tooling router for this workspace.",
+      "Read the nearest AGENTS.md before changing a repository in this organization."
+    ]
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/drift-remediation.schema.json",
+  "title": "Drift Remediation Config",
+  "description": "Mapping from warn-only pre-commit drift hook ids to canonical remediation commands. Consumed by the docs-reviewer and docs-writer agents. See docs/superpowers/specs/2026-04-23-763-drift-hook-integration-design.md for the design.",
+  "type": "object",
+  "required": ["hooks"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference for editor tooling."
+    },
+    "hooks": {
+      "type": "object",
+      "description": "Map of pre-commit hook id to remediation descriptor. Key MUST match an id: field in .pre-commit-config.yaml.",
+      "additionalProperties": {
+        "$ref": "#/$defs/remediation"
+      }
+    }
+  },
+  "$defs": {
+    "remediation": {
+      "type": "object",
+      "required": ["script", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "script": {
+          "type": "string",
+          "pattern": "^\\./.+",
+          "description": "Path to the remediation script, relative to repo root. Must be executable."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Arguments passed to the script when invoked by docs-writer Mode 5."
+        },
+        "auto_apply": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, docs-writer Mode 5 invokes the script and stages the resulting diff. If false, Mode 5 emits a proposed-fix note instead. Only opt in for deterministic, idempotent scripts."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 10,
+          "description": "One-line summary of what the remediation does. Shown in findings and triage output."
+        }
+      }
+    }
+  }
+}

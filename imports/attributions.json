@@ -1,0 +1,172 @@
+[
+  {
+    "name": "core-lifecycle",
+    "type": "skills+agents",
+    "author": "agentic-dev-tooling contributors",
+    "origin": "custom",
+    "upstream_url": null,
+    "upstream_license": null,
+    "version_pin": null,
+    "modifications": null
+  },
+  {
+    "name": "guardrails",
+    "type": "hooks",
+    "author": "agentic-dev-tooling contributors",
+    "origin": "custom",
+    "upstream_url": null,
+    "upstream_license": null,
+    "version_pin": null,
+    "modifications": null
+  },
+  {
+    "name": "release-ops",
+    "type": "skills",
+    "author": "agentic-dev-tooling contributors",
+    "origin": "custom",
+    "upstream_url": null,
+    "upstream_license": null,
+    "version_pin": null,
+    "modifications": null
+  },
+  {
+    "name": "reviewer-packs",
+    "type": "agents+templates",
+    "author": "agentic-dev-tooling contributors",
+    "origin": "custom",
+    "upstream_url": null,
+    "upstream_license": null,
+    "version_pin": null,
+    "modifications": null
+  },
+  {
+    "name": "fleet",
+    "type": "hooks+skill",
+    "author": "agentic-dev-tooling contributors",
+    "origin": "custom",
+    "upstream_url": null,
+    "upstream_license": null,
+    "version_pin": null,
+    "modifications": null
+  },
+  {
+    "name": "writing",
+    "type": "skills",
+    "author": "agentic-dev-tooling contributors",
+    "origin": "custom",
+    "upstream_url": null,
+    "upstream_license": null,
+    "version_pin": null,
+    "modifications": "covers create-migration and ipc-channel-audit (original custom skills); ste-writing within this pack is vendored and has its own imported record below"
+  },
+  {
+    "name": "starter-memory",
+    "type": "knowledge",
+    "author": "agentic-dev-tooling contributors",
+    "origin": "custom",
+    "upstream_url": null,
+    "upstream_license": null,
+    "version_pin": null,
+    "modifications": null
+  },
+  {
+    "name": "scripts",
+    "type": "scripts",
+    "author": "agentic-dev-tooling contributors",
+    "origin": "custom",
+    "upstream_url": null,
+    "upstream_license": null,
+    "version_pin": null,
+    "modifications": null
+  },
+  {
+    "name": "config",
+    "type": "config",
+    "author": "agentic-dev-tooling contributors",
+    "origin": "custom",
+    "upstream_url": null,
+    "upstream_license": null,
+    "version_pin": null,
+    "modifications": null
+  },
+  {
+    "name": "ste-writing",
+    "type": "skill",
+    "author": "woosal1337",
+    "origin": "imported",
+    "upstream_url": "https://github.com/woosal1337/blog/tree/b912d5fa59f368253683af2ebfac64ad6d08312d/videos/ep01-the-cure-for-ai-slop",
+    "upstream_license": "MIT",
+    "version_pin": "b912d5fa59f368253683af2ebfac64ad6d08312d",
+    "modifications": "generalized wording; vendored with LICENSE.upstream kept beside the tree in plugins/writing/skills/ste-writing"
+  },
+  {
+    "name": "rulesync",
+    "type": "dependency",
+    "author": "dyoshikawa",
+    "origin": "imported",
+    "upstream_url": "https://github.com/dyoshikawa/rulesync",
+    "upstream_license": "MIT",
+    "version_pin": "16.7.0",
+    "modifications": null
+  },
+  {
+    "name": "superpowers",
+    "type": "marketplace plugin",
+    "author": "Jesse Vincent (obra)",
+    "origin": "referenced",
+    "upstream_url": "https://github.com/obra/superpowers",
+    "upstream_license": "MIT",
+    "version_pin": null,
+    "modifications": "distributed via the official Anthropic marketplace (source.url points at github.com/obra/superpowers.git); fetched from upstream at install time, never vendored"
+  },
+  {
+    "name": "pr-review-toolkit",
+    "type": "marketplace plugin",
+    "author": "Anthropic",
+    "origin": "referenced",
+    "upstream_url": "https://github.com/anthropics/claude-plugins-official/tree/main/plugins/pr-review-toolkit",
+    "upstream_license": "Apache-2.0",
+    "version_pin": null,
+    "modifications": "first-party Anthropic marketplace plugin; a real dispatch dependency named in _shared/pr-review-agent-dispatch.md and dispatchable-skills.md, fetched from upstream at install time, never vendored"
+  },
+  {
+    "name": "mattpocock-skills",
+    "type": "marketplace plugin",
+    "author": "Matt Pocock",
+    "origin": "referenced",
+    "upstream_url": "https://github.com/mattpocock/skills",
+    "upstream_license": "MIT",
+    "version_pin": null,
+    "modifications": "fetched from upstream marketplace at install time; never vendored"
+  },
+  {
+    "name": "ponytail",
+    "type": "marketplace plugin",
+    "author": "DietrichGebert",
+    "origin": "referenced",
+    "upstream_url": "https://github.com/DietrichGebert/ponytail",
+    "upstream_license": "MIT",
+    "version_pin": null,
+    "modifications": "fetched from its own upstream marketplace at install time; never vendored"
+  },
+  {
+    "name": "graphify",
+    "type": "tool",
+    "author": "safishamsi",
+    "origin": "referenced",
+    "upstream_url": "https://github.com/Graphify-Labs/graphify",
+    "upstream_license": "Apache-2.0 OR MIT",
+    "version_pin": null,
+    "modifications": "fetch-only by policy — external CLI dependency, not vendored; dual-licensed upstream (LICENSE + LICENSE-MIT), github.com/safishamsi/graphify is the same project's original owner path"
+  },
+  {
+    "name": "dev-lifecycle",
+    "type": "skill",
+    "author": "agentic-dev-tooling contributors",
+    "origin": "derived",
+    "upstream_url": null,
+    "upstream_license": null,
+    "version_pin": null,
+    "modifications": "phase-gate pattern derived from superpowers plan-execution discipline"
+  }
+]

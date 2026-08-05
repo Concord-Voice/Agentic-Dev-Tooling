@@ -1,0 +1,7 @@
+{
+  "name": "release-ops",
+  "version": "0.1.0",
+  "description": "Release operations: /release-notes, /release-checklist, /weekly-deps, /phase-status, /feedback-triage.",
+  "author": { "name": "agentic-dev-tooling contributors" },
+  "license": "MIT"
+}

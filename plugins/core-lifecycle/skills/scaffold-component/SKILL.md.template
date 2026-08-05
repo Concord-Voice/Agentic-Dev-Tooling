@@ -1,0 +1,84 @@
+---
+name: scaffold-component
+description: Scaffold a new UI component with its styles, tests, and the project's conventions
+argument-hint: [ComponentName]
+disable-model-invocation: true
+allowed-tools:
+  - Write
+  - Read
+  - Grep
+  - Glob
+  - Bash(mkdir *)
+  # FILL: add the verify commands for your stack, e.g. Bash(npm run lint *),
+  # Bash(npx tsc --noEmit *) — allowed-tools is pre-approval, so anything
+  # unlisted prompts rather than fails.
+---
+
+<!-- TEMPLATE: copy to .claude/skills/scaffold-component/SKILL.md and complete every FILL slot before use. -->
+
+Scaffold a new UI component named **$0** following this project's conventions.
+
+<!-- FILL: your component conventions — point at the rules/style doc that
+     defines them (e.g. `docs/rules/frontend.md`), or state them inline if you
+     have no such doc yet. -->
+
+Paths below assume a layout of `apps/desktop/src/components/` for components and
+`apps/desktop/tests/unit/components/` for their tests — **adjust every path to
+your layout.**
+
+## Files to Create
+
+### 1. Component — `apps/desktop/src/components/$0/$0.<ext>`
+
+<!-- FILL: your component skeleton. Paste a minimal, idiomatic component for
+     your framework, using `$0` wherever the component name belongs — imports,
+     the props type declaration, the component body, and the export style you
+     standardize on. Cover at least:
+       - the framework import line(s) and the co-located style import
+       - how props are declared and typed (a named type/interface, not inline)
+       - the component signature and return shape
+       - default vs. named export
+     e.g. for React + TypeScript: an interface `$0Props`, a
+     `const $0: React.FC<$0Props>` body, and a default export. -->
+
+**Rules:**
+- One component per file, file named for the component, name in the project's
+  casing convention.
+- Props declared with a named type — never an inline object literal in the
+  signature.
+- Co-locate the style file with the component.
+- No escape-hatch types (`any` and equivalents) — use explicit types.
+- Never inject unsanitized HTML (`dangerouslySetInnerHTML` and its equivalents)
+  without an explicit sanitizer.
+- <!-- FILL: your state-management access pattern — the store/context/hook the
+     component should read from, and the subscription style that avoids
+     over-rendering (e.g. selector functions rather than whole-store reads).
+     Delete this bullet if components in this project take state only via props. -->
+
+### 2. Styles — `apps/desktop/src/components/$0/$0.<style-ext>`
+
+<!-- FILL: your styling convention — the class-naming scheme (BEM, CSS modules,
+     utility classes, styled-components), the design tokens or custom properties
+     available for theming, and the file extension. State explicitly whether a
+     component may emit global styles; the default answer should be no. -->
+
+- Scoped to this component — no global styles.
+
+### 3. Tests — `apps/desktop/tests/unit/components/$0/$0.test.<ext>`
+
+<!-- FILL: your test skeleton. Paste a minimal passing test for your runner and
+     rendering library, using `$0` for the component name. Cover:
+       - the imports for your test runner, render helper, and the component
+       - any required per-test setup (store reset, provider wrapper, timer or
+         network mocks) in a `beforeEach`
+       - one smoke assertion that the component renders -->
+
+**Test rules:**
+- Reset shared state in `beforeEach` so tests cannot leak into each other.
+  <!-- FILL: the exact reset helper(s) to call, or "none" if the project's
+       test setup resets automatically. -->
+- Query by accessible role or visible text in preference to test-only IDs.
+- <!-- FILL: your API-mocking approach for component tests (request-interception
+     layer vs. stubbing the fetch client) and when each is appropriate. -->
+- Coverage target: <!-- FILL: your project's minimum coverage percentage for
+  new component code. -->

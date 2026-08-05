@@ -1,0 +1,99 @@
+---
+name: scaffold-endpoint
+description: Scaffold a new REST API endpoint with its handler, router registration, and tests
+argument-hint: "[METHOD] [/api/path] [module]"
+disable-model-invocation: true
+allowed-tools:
+  - Write
+  - Read
+  - Grep
+  - Glob
+  # FILL: add the build/verify commands for your stack, e.g. Bash(go vet *),
+  # Bash(go build *), Bash(npm run typecheck *) — allowed-tools is
+  # pre-approval, so anything unlisted prompts rather than fails.
+---
+
+<!-- TEMPLATE: copy to .claude/skills/scaffold-endpoint/SKILL.md and complete every FILL slot before use. -->
+
+Scaffold a new REST API endpoint following this project's conventions.
+
+**Method:** $0 | **Path:** $1 | **Module:** $2
+
+<!-- FILL: the naming constraint on $2 for your language (e.g. "must be a valid
+     Go package name — lowercase, no hyphens", or "must be a valid directory
+     name under src/routes/"). -->
+
+<!-- FILL: your handler + route + test conventions — point at the rules doc(s)
+     that define them (e.g. `docs/rules/backend.md`) plus any endpoint prompt
+     template you keep, or state them inline if you have no such doc yet. -->
+
+Paths below assume a layout of `services/api/internal/` for handler modules —
+**adjust every path to your layout.**
+
+## Files to Create/Modify
+
+### 1. Handler — `services/api/internal/$2/handlers.<ext>`
+
+<!-- FILL: your handler skeleton and the construction pattern it follows.
+     Paste a minimal, idiomatic handler for your framework. Cover:
+       - how dependencies reach the handler (constructor-injected struct,
+         closure, DI container, module-scoped singletons)
+       - request binding and validation, naming the exact binding call you
+         standardize on and the one you forbid
+       - how the authenticated principal is read out of the request context
+       - the success and error response shapes
+     e.g. a handler struct holding a DB pool, cache client, and logger, with a
+     `NewHandler(...)` constructor and one method per route. -->
+
+**Rules:**
+- Validate and bind input before touching anything else; reject malformed input
+  with the project's 400 response shape.
+- <!-- FILL: the exact binding/validation call to use and the one to reject
+     (many frameworks ship a convenience binder that silently writes an error
+     response or aborts — name which is which). -->
+- <!-- FILL: how to read the authenticated principal, set by your auth
+     middleware, and what to do when it is absent. -->
+- Parameterized queries only — never build SQL by string formatting or
+  concatenation with request data.
+- Release every acquired resource on all paths (result sets, file handles,
+  locks, spans).
+- Wrap errors with context as they propagate, preserving the original for
+  sentinel matching.
+- Always return immediately after writing a response — never fall through into
+  a second write.
+- Client-facing error messages stay generic; details go to the log, not the
+  response body.
+
+### 2. Router — register the handler
+
+<!-- FILL: the exact file that owns route registration (e.g.
+     `services/api/internal/api/router.go`), the route group $1 belongs in, and
+     the middleware chain the route must carry — auth, permission check, rate
+     limit, request logging. State which middleware is non-optional. -->
+
+### 3. Tests — `services/api/internal/$2/handlers_test.<ext>`
+
+Required test cases:
+- Happy path (valid input → correct response + status code)
+- Validation error (bad input → 400)
+- Auth error (missing/invalid credential → 401)
+- Permission error (insufficient role → 403)
+- Not found (invalid ID → 404)
+- Server error (dependency failure → 500)
+
+<!-- FILL: your test conventions — the runner and assertion library, the
+     subtest/table-test idiom you standardize on, how the assert-vs-require
+     split works (preconditions abort, checks accumulate), and how dependencies
+     are faked (in-memory double, container, transactional rollback). -->
+
+### 4. Verify
+
+<!-- FILL: the build and static-analysis commands that must pass before this
+     scaffold is considered done. Replace the examples below with your real
+     ones, and mirror them into `allowed-tools` in the frontmatter. -->
+
+```bash
+# Adjust these to your stack.
+go vet ./...
+go build ./...
+```

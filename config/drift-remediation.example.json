@@ -1,0 +1,10 @@
+{
+  "$schema": "./drift-remediation.schema.json",
+  "hooks": {
+    "base-settings-drift": {
+      "script": "./scripts/drift-check.sh",
+      "auto_apply": false,
+      "description": "Report any GLOBAL hook command present in config/base.settings.json but missing from this repo's .claude/settings.json."
+    }
+  }
+}

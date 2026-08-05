@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+PUBLISH_GUARD_DENYLIST="${PUBLISH_GUARD_DENYLIST:-$HOME/.config/agentic-dev-tooling/denylist.private.txt}" \
+  bash "$(git rev-parse --show-toplevel)/scripts/publish-guard.sh"

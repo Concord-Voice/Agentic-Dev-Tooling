@@ -1,0 +1,7 @@
+{
+  "name": "guardrails",
+  "version": "0.1.0",
+  "description": "Safety hooks: destructive-command gate, env/secret protection, sensitive-path protection, secret detection, auto-format, test reminders, issue-creation nudge, applied-migration protection.",
+  "author": { "name": "agentic-dev-tooling contributors" },
+  "license": "MIT"
+}
