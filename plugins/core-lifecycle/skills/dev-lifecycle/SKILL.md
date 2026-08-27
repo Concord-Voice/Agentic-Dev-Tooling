@@ -671,9 +671,26 @@ Reconciliation complete. Recommended actions:
 Apply fixes and reply to bot review comments? [yes / review each / skip]
 ```
 
-**Per-comment replies:** When dismissing or addressing a bot's findings, reply to each inline comment individually with feedback. Use the reply templates defined in `/enhanced-pr-review` (Fixed, Dismissed FP, Dismissed intentional). Do NOT post a single top-level review comment summarizing all responses.
+**Phase 8 does not end when the fixes land. It ends when every finding has a recorded decision.**
 
-**Review loop discipline:** After applying reconciliation fixes:
+Applying fixes and deciding findings are different acts, and only the first leaves a trace by default. A fix commit records *that* code changed; nothing in it says which reviewer comment it answers, and a correctly-dismissed finding leaves no artifact at all. The result is a PR whose conversations are closed but whose decisions are unrecoverable — the reviewer cannot tell whether their finding was fixed, rejected on merit, or simply lost.
+
+So Phase 8's exit condition is the **disposition ledger** defined in [`/enhanced-pr-review` Post-Report](../enhanced-pr-review/SKILL.md): every in-scope conversation carries one reply with the reasoning plus a `cv-disposition` marker (`accepted` / `rejected` / `deferred` / `undecided`), and every triage row carries the `Thread` handle tying it to the conversation it answers. Bot reviewers post a summary comment and then one comment per finding, so both surfaces need answering — the per-finding threads through their markers, the summary comments through the Phase 3.5 reconciliation post.
+
+Three things follow, none optional:
+
+1. **`/enhanced-pr-review` posts its Phase 3.5 reconciliation post to the PR** — one comment, edited in place on re-runs, reconciling every reviewer's findings, every subagent's findings, and the decision on each. It posts whether or not the PR is merge-ready; a stalled review needs the record more than a clean one does.
+2. **A `deferred` decision is not complete until its follow-up issue exists.** The gate calls `gh issue view` and fails closed, and rejects a PR number in an issue's place. If the issue was never filed the finding is not deferred — it is unaddressed, and routes back to Fix-in-PR.
+3. **Verify mechanically, not by assertion:**
+
+   ```bash
+   .claude/skills/enhanced-pr-review/check-review-dispositions.sh "<PR>"
+   ```
+
+   Exit 0 → the ledger is complete. Exit 1 → the blocking list names each gap. Exit 2 → the check could not run; treat as UNKNOWN and re-run, never as clean.
+
+
+**Review loop discipline:** each cycle closes its own findings — a finding surfaced by a fix commit gets a disposition like any other, because the ledger covers the review as it stands at HEAD. After applying reconciliation fixes:
 
 1. Make a fix commit (or a batch of related fixes), push, and let CI re-run (loop back to Phase 6).
 2. If a bot triggers a new review on the fix commit, review the **new** findings only. Do NOT re-run `/enhanced-pr-review` from the top.
@@ -687,17 +704,23 @@ Apply fixes and reply to bot review comments? [yes / review each / skip]
 
 **Catalog Dispatch:** consult `## Phase 9: MERGE-READY` in [`dispatchable-skills.md`](../_shared/dispatchable-skills.md). The merge command itself (`gh pr merge --squash`) is the always-dispatch primary. Candidates (when a version tag will be cut): `/release-notes`, `/engineering:deploy-checklist`.
 
-### Step 9.1 — Pre-merge thread-resolution gate (programmatic, non-negotiable)
+### Step 9.1 — Pre-merge disposition gate (programmatic, non-negotiable)
 
-Before presenting the merge prompt, invoke the thread-resolution check from [`/enhanced-pr-review` Phase 4](../enhanced-pr-review/SKILL.md). The check queries unresolved bot review threads via the GraphQL `reviewThreads` field — the REST `pulls/{n}/comments` endpoint does not surface resolution state.
+Before presenting the merge prompt, run the gate. It is a script, not a judgment call:
 
-Run Step 4.1 of `/enhanced-pr-review` directly (do NOT re-run the full reconciliation — Phases 1–3 are already complete from Phase 8). Branch on the result:
+```bash
+.claude/skills/enhanced-pr-review/check-review-dispositions.sh "$0"
+```
 
-- **`✅ All bot review threads resolved`** → proceed to Step 9.1.5.
-- **Auto-resolvable threads only** (developer replied but never clicked Resolve) → offer batch-resolve per Step 4.3, then re-run.
-- **Blocking threads** (no developer reply, OR resolved by a `[bot]` autofix agent without a Phase 1.7 `Verified-correct` disposition) → print the blocking list, instruct the developer to reply with fix-commit SHA / dismissal rationale / explicit defer (or land the Phase 1.7 correction for an autonomous-resolved thread), and exit. Do NOT proceed to Step 9.2. The developer re-invokes `/dev-lifecycle $0` after addressing.
+Branch on the exit code — and on nothing else:
 
-This gate exists because the human "All reviews addressed" prompt is too easy to nod through when N inline threads are still unresolved on GitHub — those threads then surface as stale noise on every future review of the same file.
+- **Exit 0** → every in-scope conversation carries a decision, every deferral names an issue that exists, and the Phase 3.5 reconciliation post accounts for every reviewer that spoke. Proceed to Step 9.1.5.
+- **Exit 1** → the blocking list is printed, one line per gap. Threads carrying a disposition but never marked resolved are batch-resolvable per [`/enhanced-pr-review` Step 4.3](../enhanced-pr-review/SKILL.md) (which defers to the same script); everything else needs a decision recorded. Do NOT proceed to Step 9.2.
+- **Exit 2** → the check could not be made. This is **UNKNOWN, not clean** — a rate-limited or auth-failed lookup returns no violations, and reading that as a pass is the exact failure the fail-closed exit exists to prevent. Re-run before merging.
+
+Do not re-run the full reconciliation — Phases 1–3 completed in Phase 8.
+
+This gate exists because the human "All reviews addressed" prompt is too easy to nod through. Threads a reviewer bot closed with no human reply look identical, at the merge prompt, to threads that were answered carefully — and the difference is exactly what the ledger records. The gate makes it visible without blocking the well-handled ones.
 
 ### Step 9.1.5 — Consolidated merge-approval gate (required-review rule)
 

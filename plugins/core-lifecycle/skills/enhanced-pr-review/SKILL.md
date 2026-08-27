@@ -440,21 +440,23 @@ Output the triage table. The **Source(s)** column names each reviewer explicitly
 - **Line-level findings** (inline review comments, subagent findings) populate `File:Line` with a specific path:line; the Finding column holds the line-level description.
 - **PR-level verdicts / recommendations** (a verdict-only reviewer's overall judgment, a Quality-Gate result, a release-signal version-bump recommendation, a review summary) leave `File:Line` blank or marked `—`; the Finding column carries the overall verdict or recommendation. These rows describe the PR as a whole.
 
+**The `Thread` column is REQUIRED on every row.** It carries the GraphQL thread ID (`PRRT_…`, from Step 4.1's `id` field) for a line-level finding, or the top-level comment's `id` for a PR-level verdict; `—` only for a subagent finding with no GitHub conversation behind it. This is what makes a decision *addressable* — without it the table records that N findings were fixed but never which conversation each fix answers, so nothing downstream can check that the finding a commit claims to close is the finding whose thread got resolved.
+
 **Row ordering: BLOCK rows first.** Any row with a `BLOCK` severity (a release-signal recommending a version bump while the bump is absent — only when `.release_signal` is configured — or any subagent finding flagged blocking-merge) sorts to the top of the table regardless of category. The developer sees blockers first; everything else is below.
 
 ```
 Enhanced PR Review Report — PR #$0
 ──────────────────────────────────────────────────────────────────────────
-| # | Finding | File:Line | Source(s) | Category | Triage | Action |
-|---|---------|-----------|-----------|----------|--------|--------|
-| 1 | ⚠ BLOCK: <subagent blocking-merge finding, or release-signal version-bump if .release_signal is set> | — / path:line | <reviewer> | PR-level / Subagent-only | — | **Resolve before merge** |
-| 2 | ⚠ BLOCK: autofix "fix" does not close the finding — <original finding> still live at HEAD | src/api/users.go:142 | Autofix: <login> (autofix) + <reviewer> (finding) | Autofix-handled | UNVERIFIED → Incorrect-fix | **Fix** |
-| 3 | Verdict-only reviewer: ✅ Approved — "No issues found." (stale if it re-approved an unverified autofix HEAD) | — | Bot: <login> | PR-level verdict | — | Note (no action needed) |
-| 4 | Quality Gate passed (0 new issues) | — | <reviewer> | PR-level verdict | — | Note (no action needed) |
-| 5 | Missing nil-check before deref | src/api/users.go:142 | @code-reviewer + <bot> | Agreed | — | Fix |
-| 6 | Authorization scope check missing | src/api/dm.go:88 | @code-reviewer | Subagent-only | — | Fix |
-| 7 | Incomplete effect dependency list | src/ui/components/X.tsx:34 | <bot> | Bot-only | Auto: FP (.claude/rules/{file}) | Dismiss |
-| 8 | Approach disagreement on retry policy | src/net/index.ts:201 | <bot> + @code-reviewer | Conflict | — | Developer decision |
+| # | Finding | File:Line | Thread | Source(s) | Category | Triage | Action |
+|---|---------|-----------|--------|-----------|----------|--------|--------|
+| 1 | ⚠ BLOCK: <subagent blocking-merge finding, or release-signal version-bump if .release_signal is set> | — / path:line | `PRRT_…` | <reviewer> | PR-level / Subagent-only | — | **Resolve before merge** |
+| 2 | ⚠ BLOCK: autofix "fix" does not close the finding — <original finding> still live at HEAD | src/api/users.go:142 | `PRRT_…` | Autofix: <login> (autofix) + <reviewer> (finding) | Autofix-handled | UNVERIFIED → Incorrect-fix | **Fix** |
+| 3 | Verdict-only reviewer: ✅ Approved — "No issues found." (stale if it re-approved an unverified autofix HEAD) | — | `PRRT_…` | Bot: <login> | PR-level verdict | — | Note (no action needed) |
+| 4 | Quality Gate passed (0 new issues) | — | `PRRT_…` | <reviewer> | PR-level verdict | — | Note (no action needed) |
+| 5 | Missing nil-check before deref | src/api/users.go:142 | `PRRT_…` | @code-reviewer + <bot> | Agreed | — | Fix |
+| 6 | Authorization scope check missing | src/api/dm.go:88 | `PRRT_…` | @code-reviewer | Subagent-only | — | Fix |
+| 7 | Incomplete effect dependency list | src/ui/components/X.tsx:34 | `PRRT_…` | <bot> | Bot-only | Auto: FP (.claude/rules/{file}) | Dismiss |
+| 8 | Approach disagreement on retry policy | src/net/index.ts:201 | `PRRT_…` | <bot> + @code-reviewer | Conflict | — | Developer decision |
 
 Summary: BLOCK rows: N | Autofix-handled: N (N verified, N unverified→fix) | PR-level verdicts: N | Agreed: N | Bot-only: N (N valid, N FP) | Subagent-only: N | Conflicts: N
 Bots that posted: <list each bot from the `bot` field with its contribution, e.g. "Copilot (N findings), SonarCloud (1 verdict)">
@@ -464,42 +466,143 @@ Autofix footprint: <agent display name> — N commits, N thread-resolutions (N v
 Recommended next steps:
 1. Fix all Agreed + valid Bot-only + Subagent-only findings
 2. Review Conflicts and decide
-3. Reply to each bot comment thread with your feedback
+3. Carry every row to a disposition recorded in its thread (Post-Report)
+4. Post/update the Phase 3.5 reconciliation post, then run `.claude/skills/enhanced-pr-review/check-review-dispositions.sh`
 ```
 
 If NO bots posted findings (the filter returned an empty array in Phase 1), the report should explicitly call that out — an empty bot-findings section is itself a signal (bots either agree the PR is clean, or they haven't reviewed yet).
 
 ---
 
-## Post-Report — Interactive Phase
+## Post-Report — Interactive Phase (the disposition ledger)
 
-After the developer reviews the table:
+Every row is carried to a **disposition** — a recorded decision written into the conversation the finding came from. The ledger is that set of decisions. It is complete when `.claude/skills/enhanced-pr-review/check-review-dispositions.sh` exits 0, and Phase 4 will not pass until it does.
 
-**For findings marked Fix:** apply the fixes or invoke `@docs-writer` for documentation fixes.
+### The four dispositions (closed set)
 
-**For findings marked Dismiss:** draft a reply to the bot comment thread:
+| Disposition | Means | `evidence:` field |
+|---|---|---|
+| `accepted` | The finding is valid and the fix has landed. | the commit SHA that landed it (7–40 hex) |
+| `rejected` | Declined — false positive, intentional behavior, or the finding stopped existing (duplicate, code removed). | the rule/convention path the rejection rests on, or the row it duplicates |
+| `deferred` | Tracked as follow-up work. | `#NNN` — **the issue must already exist**; the gate calls `gh issue view` and fails closed if it does not, and rejects a PR number in an issue's place |
+| `undecided` | Genuinely open and known to be — it needs someone else's call, or a design decision first. | what it waits on |
+
+`undecided` **blocks the gate**, exactly like a thread with no marker. It is not an escape hatch. What it buys is the difference between *"we know this is open and here is what it waits on"* and *"nobody decided and nobody noticed"* — two states that look identical in a silent thread. Recording an open question truthfully is always available, which is what makes mis-filing it as `rejected` or `deferred` to clear the gate indefensible rather than merely discouraged.
+
+Nothing else is a disposition. "Acknowledged", a 👍, and a bot's own thread-resolve are not decisions on record.
+
+`deferred` records the *outcome*; it does not justify one. The justification still passes §2.5.1's allowlist and the §2.5.2 radius test. This table adds only that the promised issue must be *verifiable* at merge time — a follow-up that was never filed is an accepted finding wearing a deferral's clothes.
+
+### The reply shape
+
+Each in-scope thread gets one reply with two parts, in this order:
+
+1. **The reasoning, in prose** — what you concluded and what you checked. This is the part a human reads six months from now.
+2. **One marker line** — `<!-- cv-disposition: <verb> evidence: <value> -->`
+
+```markdown
+Fixed in `e5c34d0`. Good catch — it also caught a second-order effect of an earlier
+change in this PR, so the regression test now pins both.
+
+<!-- cv-disposition: accepted evidence: e5c34d0 -->
+```
+
+The marker is an HTML comment, invisible in the rendered PR — the reviewer sees only your prose. It exists so the gate can verify a decision was made without trying to parse whether prose constitutes one.
 
 ```bash
 gh api repos/${REPO}/pulls/$0/comments/{comment_id}/replies \
-  -X POST -f body="{reply text}"
+  -X POST -F body=@reply.md
 ```
 
-The `/replies` endpoint works for any bot's comment regardless of which GitHub app posted it — the thread-reply contract is endpoint-level, not author-specific.
+Stage the body to a file: marker text contains `<`/`>` and shell-quoting a multi-line body with backticks is where this breaks.
 
-Reply templates:
-- Fixed: `"Fixed in {sha}. {brief description}."`
-- Dismissed (FP): `"This follows the project convention in .claude/rules/{file} — {brief explanation}."`
-- Dismissed (intentional): `"This is intentional — {brief explanation}."`
+**Write the marker yourself.** The gate reads markers only from non-bot authors with an `OWNER`/`MEMBER`/`COLLABORATOR` association, so a marker a bot posts — or a drive-by account — does not count.
 
-**For Conflicts:** wait for developer decision, then apply.
+**For findings marked Fix:** apply the fix, then disposition the thread `accepted` with the SHA that landed it. A fix that landed without its marker leaves the ledger incomplete even though the code is correct.
+
+**For Conflicts:** wait for the developer decision, then disposition with whichever verb it selected.
+
+---
+
+## Phase 3.5 — The reconciliation post (REQUIRED when any reviewer spoke)
+
+This skill posts its own comment to the PR: the single artifact reconciling every review signal — each bot's findings, each specialist subagent's findings, and the decision on each — into one record that lives with the PR rather than in terminal scrollback.
+
+**It posts regardless of merge-readiness.** A review whose outcome is "three deferred, one still under discussion" needs this record more than a clean one does. That is why it is here and not folded into Phase 6: Phase 6's artifact is gated behind the §6.0 honesty gate and only ever appears on a PR that is *ready*, so a stalled PR would carry no record of what was decided at all.
+
+**Why the summary comments make this mandatory.** Bots post a summary comment enumerating their findings and then one inline comment per finding. Top-level conversation comments have no thread and no Resolve affordance — GitHub offers nowhere to record a decision against them — so no per-thread gate can ever reach that surface. PRs are routinely observed with zero review threads and several top-level bot comments, where a thread-only gate reports "all threads resolved" over a surface it never read.
+
+### 3.5.1 — Shape
+
+The first line is the marker; the gate keys on it and on the reviewer names in the body.
+
+```markdown
+<!-- cv-review-reconciliation -->
+## 🔍 Review Reconciliation — PR #<n>
+
+**Reviewed at HEAD:** `<sha>` · **Reviewer:** @<gh_user> · via `/enhanced-pr-review`
+
+### Reviewers consulted
+| Reviewer | Surface | Findings | Answered in |
+|---|---|---|---|
+| <bot display name> | N inline + 1 summary | N | threads |
+| <verdict-only bot> | Quality Gate | 0 new issues | this post |
+| @code-reviewer | subagent | N | rows N |
+
+### Decisions
+| # | Finding | Source(s) | Thread | Decision | Evidence |
+|---|---|---|---|---|---|
+| 1 | <finding> | <reviewer> | `PRRT_…` | ✅ Accepted | fixed in `<sha>` |
+| 2 | <finding> | <reviewer> | `PRRT_…` | ❌ Rejected | <rule path or measurement> |
+| 3 | <finding> | @code-reviewer | `PRRT_…` | ⏭ Deferred | #NNN — category A, out-of-radius |
+
+**Ledger:** N findings · N accepted · N rejected · N deferred · 0 undecided
+```
+
+Reviewer names must match the roster: either the literal login, or the `name` your `.claude/repo-config.json` `.bots[]` entry declares for it. Registering a bot for a nicer display name is the same config edit that gives it a display name in the Phase 3 table — the gate reads the same roster, so the two cannot drift.
+
+**Required vs. example.** Only two elements are required, and they are the two the gate checks: the `<!-- cv-review-reconciliation -->` marker, and a **Reviewers consulted** list naming every reviewer that spoke. The **Decisions** table below is an *example* of the house format — useful, conventional, and not machine-verified. **What the gate verifies, and what is convention.** The check confirms exactly three things: that exactly one post exists, that a repo member (not a bot) authored it, and that every reviewer which spoke on any of the three surfaces is named in it. It does **not** parse the Decisions table, cross-check `Thread` handles, or count rows. The table shape above is the house format a reader relies on; the reviewer-coverage clause is the part with teeth. Do not read "REQUIRED" as "machine-verified in full".
+
+### 3.5.2 — Post once, then edit in place
+
+```bash
+EXISTING=$(gh api "repos/${REPO}/issues/$0/comments" \
+  --jq '[.[] | select(.body | test("<!--\\s*cv-review-reconciliation\\s*-->")) | .id] | first // empty')
+
+if [ -n "$EXISTING" ]; then
+  gh api "repos/${REPO}/issues/comments/${EXISTING}" -X PATCH -F body=@reconciliation.md
+else
+  gh pr comment "$0" --body-file reconciliation.md
+fi
+```
+
+The gate requires **exactly one**. Re-running after a fix commit updates the existing comment; it never adds a second, so the PR carries one current record rather than a pile of superseded ones.
+
+### 3.5.3 — Verify
+
+```bash
+.claude/skills/enhanced-pr-review/check-review-dispositions.sh "$0"
+```
+
+Exit 0 → proceed. Exit 1 → the blocking list is printed. Exit 2 → the check could not be made; treat as UNKNOWN, never as clean.
+
+**What a green run proves, and what it does not.** It proves the decisions are recorded, addressable and auditable. It does **not** prove a human made them: `gh` authenticates as the repo owner, so an agent's reply is authored by a `User` and clears the non-bot filter exactly as the developer's would. The gate cannot distinguish them and does not try. What changes is that the reasoning is written down in one reviewable place instead of terminal scrollback. Never cite a green run as evidence that a person reviewed anything.
 
 ---
 
 ## Phase 4 — Pre-merge thread resolution check
 
-This phase runs **after** all fix commits land and CI is green. It exists to gate `/dev-lifecycle` Phase 9 (MERGE-READY) on the invariant: every bot-authored review thread is either marked resolved on GitHub or has a developer reply explaining why it stays open.
+This phase runs **after** all fix commits land and CI is green. It gates `/dev-lifecycle` Phase 9 (MERGE-READY) on one invariant: **every in-scope review conversation carries a recorded human decision** — a Phase 3.5 disposition marker — and the reconciliation post accounts for every reviewer that spoke.
 
-Without this gate, a developer can mechanically green-light merge with unresolved bot threads — those threads then surface as stale review noise on every future PR review of the same file. The gate is cheap and the cost of skipping it compounds.
+Run the check; it is the gate, and the rest of this phase is how to read and clear its output:
+
+```bash
+.claude/skills/enhanced-pr-review/check-review-dispositions.sh "$0"
+```
+
+Exit 0 → proceed. Exit 1 → the blocking list is printed; clear it. Exit 2 → the lookup failed; treat as UNKNOWN, never as clean.
+
+**Why the invariant is "carries a decision", not "was resolved by a human".** The obvious alternative — *a thread resolved by a `[bot]` actor is blocking unless an autofix re-review cleared it* — misfires in both directions when measured. Reviewer bots resolve their own threads as routine housekeeping once a developer has replied, so that rule blocks a large majority of well-handled threads; a gate that blocks the common good case gets overridden as routine, and an overridden gate stops catching the threads that received no reply at all. Keying on the presence of a human disposition clears the housekeeping and catches the silence. Phase 1.7 is unaffected: an autofix agent's *code change* still needs its `Verified-correct` disposition under §6.0 precondition 9.
 
 ### Step 4.1 — Query unresolved review threads
 
@@ -538,8 +641,7 @@ gh api graphql -f query="
   }
 }" --jq '[
   .data.repository.pullRequest.reviewThreads.nodes[]
-  | select(.comments.nodes[0].author.__typename == "Bot")
-  | select(.isResolved == false or ((.resolvedBy.login // "") | test("\\[bot\\]$")))
+  | select(.isResolved == false or .comments.nodes[0].author.__typename == "Bot")
   | {
       thread_id: .id,
       path: .path,
@@ -549,7 +651,10 @@ gh api graphql -f query="
       resolved_by_bot: ((.resolvedBy.login // "") | test("\\[bot\\]$")),
       bot: .comments.nodes[0].author.login,
       first_comment: (.comments.nodes[0].body | .[0:140]),
-      has_dev_reply: ([.comments.nodes[] | select(.author.__typename != "Bot")] | length > 0)
+      has_dev_reply: ([.comments.nodes[] | select(.author.__typename != "Bot")] | length > 0),
+      has_disposition: ([.comments.nodes[]
+                         | select(.author.__typename != "Bot")
+                         | select(.body | test("<!--\\s*cv-disposition:\\s*[a-z]+"))] | length > 0)
     }
 ]'
 ```
@@ -562,67 +667,38 @@ The `comments(first: 100)` window covers virtually all real-world thread depths 
 
 ### Step 4.2 — Categorize threads
 
+Categorize on **the disposition**, then on the resolve flag — in that order.
+
 | Condition | Action |
 |---|---|
-| `is_resolved: false` AND `has_dev_reply: true` | **Auto-resolvable** — developer already replied, just needs the resolve flag. Surface for batch-resolve. |
-| `is_resolved: false` AND `has_dev_reply: false` | **Blocking** — no reply, no resolution. Must address before merge. |
-| `resolved_by_bot: true` AND Phase 1.7 disposition = `Verified-correct` | **Resolved (verified)** — the autofix change was re-reviewed and confirmed against the original finding. Counts as resolved. |
-| `resolved_by_bot: true` AND Phase 1.7 disposition ≠ `Verified-correct` (or no disposition yet) | **Blocking (autonomous-resolved, unverified)** — a `[bot]` marked it resolved but the fix is not verified. Re-open it: the `isResolved` flag alone is NOT a resolution. Its Phase 1.7 Fix must land before merge; do NOT batch-resolve it and do NOT count it toward the resolution gate. |
+| `has_disposition: true` AND `is_resolved: true` | **Clear.** A decision is on record and the thread is closed. The resolver's identity does not matter. |
+| `has_disposition: true` AND `is_resolved: false` | **Auto-resolvable** — decision recorded, only the flag missing. Batch-resolve. |
+| `has_disposition: false` | **Blocking** — no decision on record, whatever the flag says and whoever set it. A reply without a marker, a thumbs-up, and a bot's self-resolve are all this row. |
+| disposition is `deferred` | **Blocking until the issue is verified** to exist (`gh issue view`) and to be an issue rather than a PR. |
+| **Additionally:** a Phase 1.7 footprint action not `Verified-correct` | **Blocking** — independent of this table; §6.0 precondition 9 owns it. A `cv-disposition` marker does not discharge it. |
 
-**A bot resolver never satisfies the resolution invariant on the strength of the flag.** Only a human resolver or a Phase 1.7 `Verified-correct` disposition clears a thread. This closes the exact hole the pre-patch `select(.isResolved == false)` opened, where an autofix-agent-resolved thread vanished from the query and the skill printed "safe to proceed to merge" over an unfixed finding.
+**A marker is only a marker when an authorized human wrote it.** The check reads markers from non-bot authors with an `OWNER`/`MEMBER`/`COLLABORATOR` association only — so a bot echoing the format, or a drive-by account, leaves the thread reading as undecided.
 
 ### Step 4.3 — Report and gate
 
-Greenlight only when **no row is blocking and none is pending auto-resolve** — i.e. every row the query returned (if any) is categorized `Resolved (verified)`. Two cases print the success message and exit:
+**Defer to the script's exit code.** Step 4.1's query is shown above so a reader can see what the gate reads; it is not a second, hand-run procedure with its own criteria. Everything below branches on the exit code and nothing else.
 
-- **Zero rows** — no unresolved threads and no bot-resolved threads. Print `✅ All bot review threads resolved. Safe to proceed to merge.`
-- **Rows exist, but all are `Resolved (verified)`** — every `resolved_by_bot: true` row carries a `Verified-correct` Phase 1.7 disposition, and there are no `is_resolved: false` rows. Print `✅ All bot review threads resolved (autofix actions re-verified). Safe to proceed to merge.` The query intentionally keeps these rows (the `resolvedBy.login ~ [bot]` clause) so they can be reconciled against Phase 1.7; once reconciled to `Verified-correct` they count as resolved, not blocking. Without this case a PR whose only threads are verified-bot-resolved would fall through all branches and never print a greenlight.
+- **Exit 0** → print `✅ All review conversations carry a decision. Safe to proceed to merge.`
+- **Exit 1** → the blocking list is printed, one line per gap. Clear them:
+  - *no disposition* → reply with reasoning plus a `cv-disposition` marker (Post-Report).
+  - *replied but no marker* → append the marker; the reasoning is already there.
+  - *unfiled deferral* → file the issue, or fix in-PR. A promise is not a deferral.
+  - *reconciliation gaps* → update the Phase 3.5 post in place; never add a second.
+  - *autofix action still UNVERIFIED* → land the Phase 1.7 Fix. A `cv-disposition` marker does NOT discharge §6.0 precondition 9.
+- **Exit 2** → UNKNOWN. Re-run; never read it as clean.
 
-**A `resolved_by_bot: true` row WITHOUT a `Verified-correct` disposition never greenlights** — the `isResolved` flag alone is not a resolution, so it is a blocking thread (below).
-
-If only auto-resolvable threads → present them and offer batch-resolve:
-
-```
-N bot threads have developer replies but were not marked resolved on GitHub:
-  <path>:<line> — <bot> — <first 80 chars of comment>
-  ...
-
-Mark all N as resolved? [yes / review each / skip]
-```
-
-For `yes`, resolve via GraphQL mutation, looping over the `thread_id` field surfaced by Step 4.1:
+Threads that carry a disposition but were never marked resolved on GitHub are the one auto-resolvable class. Offer batch-resolve:
 
 ```bash
-# Pipe the Step 4.1 output (saved to a variable or file) through jq to extract thread IDs:
-RESOLVABLE_IDS=$(<Step 4.1 jq output> | jq -r '.[] | select(.has_dev_reply == true and .resolved_by_bot != true) | .thread_id')
-
-# Per thread (resolveReviewThread takes a thread ID, not a number):
-echo "$RESOLVABLE_IDS" | while read THREAD_ID; do
-  [ -z "$THREAD_ID" ] && continue
-  gh api graphql -f query='mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }' -F id="${THREAD_ID}"
-done
+gh api graphql -f query='mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }' -F id="$THREAD_ID"
 ```
 
-The `thread_id` field in the Step 4.1 output (added via the top-level `id` selector on `reviewThreads.nodes`) is the GraphQL ID required by `resolveReviewThread.threadId` — it is NOT the integer thread number visible in PR URLs.
-
-If blocking threads exist → **refuse to greenlight merge**. Blocking = `is_resolved: false` with no dev reply, **OR** `resolved_by_bot: true` without a `Verified-correct` Phase 1.7 disposition:
-
-```
-❌ N blocking bot threads:
-  <path>:<line> — <bot> — no developer reply — <first 80 chars>
-  <path>:<line> — <bot> — resolved by <autofix-login>, UNVERIFIED (Phase 1.7: <disposition>) — <first 80 chars>
-  ...
-
-These threads must be addressed before /dev-lifecycle Phase 9:
-  - no-dev-reply threads: reply with fix-commit SHA, dismissal rationale, or explicit defer.
-  - autonomous-resolved-unverified threads: land the Phase 1.7 Fix (correction/revert), then the
-    thread's finding is genuinely closed. Do NOT re-resolve the thread over the autofix agent's
-    unverified fix — that re-manufactures the green this gate exists to catch.
-
-Run `/enhanced-pr-review $0` again after the fixes land, or escalate to the developer to handle out-of-band.
-```
-
-`/dev-lifecycle` Phase 9 should treat the Step 4.3 exit status as a hard gate — do not proceed to `gh pr merge` if Phase 4 reports blocking threads.
+Resolve only threads whose disposition is recorded — resolving one without a decision is precisely the silent close this gate exists to catch.
 
 ---
 
@@ -695,7 +771,7 @@ The approval artifact may be emitted ONLY if ALL of the following hold. If ANY f
 3. **Every blocking Quality-Gate / SAST check = passed.** A `PENDING` / queued / not-yet-reported check is **NOT** a pass. Wait for the result; never approve ahead of a gate that has not reported.
 4. **All required CI checks green** — `gh pr checks $0` shows zero `fail` and zero `pending` in the required set. **Pending ≠ green.** Report the actual state, never the assumed-imminent one.
 5. **(Only when `.release_signal` is configured)** the release signal = ALL CLEAR or SATISFIED, or an explicitly-approved defer per §2.6.4. When `.release_signal` is absent, this precondition does not exist — skip it.
-6. **Zero unresolved bot review threads** — consume Phase 4 Step 4.1's result at the current HEAD, and re-run Step 4.1 now if it isn't fresh. (When Phase 6 is invoked directly rather than via `/dev-lifecycle` Step 9.1.5, there is no prior Phase 4 run to consume — run Step 4.1 here.)
+6. **The disposition ledger is complete** — the check exits 0 at the current HEAD. **Exit 2 fails this precondition** — an unverifiable ledger is not a clean one. Consume Phase 4 Step 4.1's result at the current HEAD, and re-run Step 4.1 now if it isn't fresh. (When Phase 6 is invoked directly rather than via `/dev-lifecycle` Step 9.1.5, there is no prior Phase 4 run to consume — run Step 4.1 here.)
 7. **Every `Fix`-marked finding is actually resolved** — verify by reading `gh pr diff $0` / the fix-commit SHAs, not by asserting it. A finding you intended to fix but didn't push is still open.
 8. **HEAD is the commit being approved** — no unpushed local fixes. The artifact references the current HEAD SHA. If the active ruleset dismisses stale reviews on push (the common configuration), **any later push dismisses the approval** — so Phase 6 is genuinely the last step before merge. If a fix still needs to land, you are not in Phase 6 yet.
 9. **No UNVERIFIED autonomous-agent (autofix) action remains** (Phase 1.7). Every footprint action carries a disposition; every non-`Verified-correct`, non-`No-finding` disposition has a landed Fix commit (verify by diff per precondition 7). A thread resolved by a `[bot]` actor counts toward precondition 6 **only** with a `Verified-correct` disposition — never on the `isResolved` flag alone. A manufactured green — the agent resolved a thread it did not fix, a reviewer bot re-approved a cosmetic change, or a failing test was deleted/skipped to green CI — does NOT satisfy this gate. If any footprint action is still `UNVERIFIED`, or any bot-resolved thread lacks a `Verified-correct` disposition, this precondition FAILS. A **`No-finding`** disposition (a benign non-autofix commit that §1.7.2 tied to no finding and no thread) is informational and does NOT block — it is not an UNVERIFIED action, so it never fails this gate. When Phase 1.7 reported `Autofix footprint: none detected`, this precondition is trivially satisfied.
@@ -738,11 +814,9 @@ Use this exact shape every time, so the approval record is uniform and greppable
 | CI checks | ✅ N/N required green | |
 | Release signal *(only if `.release_signal` configured)* | ALL CLEAR / SATISFIED / deferred (#NNN) | |
 | Bot review threads | ✅ 0 unresolved | |
+| Disposition ledger | ✅ N/N decided | N accepted · N rejected · N deferred · 0 undecided |
 
-**Final decisions on triage findings:**
-- <finding> → Fixed in `<sha>`
-- <finding> → Dismissed (FP): <reason + .claude/rules ref>
-- <finding> → Deferred: <category A–D, issue #NNN>
+**Decisions:** recorded in the Phase 3.5 reconciliation post (link it) — N findings, 0 undecided. Not restated here: that post is edited in place, and a second copy would be a snapshot from a different moment that starts disagreeing with it the first time a decision changes.
 
 **Verdict: APPROVED FOR MERGE.** Every merge-gate signal is green and every finding is resolved or properly dispositioned.
 
@@ -813,7 +887,9 @@ gh pr merge $0 --squash --admin
 - Does not wait for bots to finish reviewing (assumes review is already complete — bots typically post within 1–3 min of `ready_for_review`)
 - Does not replace `/review-pr` — it calls `/review-pr` and adds bot reconciliation on top
 - Does not distinguish between a bot's `NEUTRAL` check-run state and its inline comments: a bot can post a `NEUTRAL` check (the summary declining to judge the PR) while still posting individual BUG_PREDICTION-style inline comments. Always check both the `reviews` endpoint AND the `comments` endpoint.
-- Does not auto-resolve threads that lack a developer reply — silent auto-resolve would erase bot signal that the developer never engaged with
+- Does not let a `deferred` decision stand on a promise — the named issue must exist at merge time and be an issue, not a PR
+- Does not treat a disposition marker as discharging Phase 1.7 — the two gates ask different questions and neither answers the other
+- Does not auto-resolve threads that lack a recorded disposition — a reply alone is not a decision; the `cv-disposition` marker is. Silent auto-resolve would erase reviewer signal nobody decided on
 - Does not trust an autonomous autofix agent's commits, thread replies, or thread resolutions as verified. Phase 1.7 re-reviews each action against the original finding — reconstructing the finding if the agent erased it by re-approving itself — and routes every non-`Verified-correct` disposition to the Fix path. It does NOT autonomously revert or rewrite the agent's commits; corrections and reverts are Fix rows the developer confirms (preserving the no-auto-fix invariant above)
 - Does not count a bot-resolved review thread toward the Phase 4 resolution gate or the Phase 6 honesty gate on the strength of the `isResolved` flag alone — only a Phase 1.7 `Verified-correct` disposition (or a human resolver) clears it. A green CI check, a reviewer bot's re-approval, and a bot-set resolved flag can all be manufactured by the autofix agent and are re-verified, not trusted
 - Does not defer findings unless the rationale matches one of the closed allowlist categories (A–D in §2.5.1) AND passes the format-level gate (§2.5.4) AND has explicit developer approval after the categorical match is established
