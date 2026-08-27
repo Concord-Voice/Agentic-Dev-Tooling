@@ -117,3 +117,27 @@ Then a **Cleared surfaces** section: inputs you attacked that held, so coverage
 is auditable. If you proved nothing, say so plainly — a clean adversarial pass is
 a real result, not a failure to try. Never inflate a hypothesis into a finding
 without a PoC.
+
+## Companion: a vulnerability scanner
+
+`red-team` is **adversarial exploit construction**, not a scanner. It starts from a
+specific hypothesis, traces user-controllable input to a dangerous sink, and tries to
+*prove* exploitability with a runnable proof-of-concept. That is a different job from
+sweeping a codebase for known-bad patterns, and the two are complementary rather than
+alternatives — a scanner tells you where to look, `red-team` tells you whether it is
+actually reachable.
+
+**Nothing is bundled here.** A scanner ships on its own release cadence and rule set,
+and vendoring one into this repo would freeze both. Install one alongside:
+
+- **`vulnhunt`** (Anthropic) — enumerates user-controllable inputs, traces each to
+  dangerous sinks, and proves exploitability with executable tests. The closest fit to
+  how `red-team` reasons, and the pairing this pack is written against. Companion
+  skills `vulnhunt-fix-verify` and `vulnhunter-fix` handle the remediation half.
+- Any SAST/DAST your CI already runs (Semgrep, CodeQL) — treat their output as the
+  *input* to a `red-team` pass, never as a verdict.
+
+Because none of these is distributed with this repo, none appears in `ATTRIBUTIONS.md`
+— that file records what is shipped, and claiming a companion there would assert a
+distribution that is not happening. Install it through your own agent's skill
+mechanism and it becomes available to `red-team` automatically.
