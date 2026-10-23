@@ -28,6 +28,7 @@ fi
 # ${REPO_ROOT:+$REPO_ROOT/}.claude/repo-config.json pattern every sibling hook
 # uses — repo-config.sh's own default only fires from `git rev-parse` against
 # cwd, which can diverge from REPO_ROOT (e.g. a hook run from a subdirectory).
+# shellcheck disable=SC2034 # read by the sourced repo-config.sh
 RC_FILE="${REPO_ROOT:+$REPO_ROOT/}.claude/repo-config.json"
 # shellcheck source=/dev/null
 source "$REPO_ROOT/scripts/repo-config.sh" 2>/dev/null || true

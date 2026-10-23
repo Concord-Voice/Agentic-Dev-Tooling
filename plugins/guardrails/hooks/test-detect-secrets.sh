@@ -14,6 +14,7 @@ fail=0; pass=0
 check() { if eval "$2"; then pass=$((pass+1)); else echo "FAIL: $1"; fail=$((fail+1)); fi; }
 
 # run <json-prompt> -> captures combined output in $OUT, exit code in $RC
+# shellcheck disable=SC2034 # OUT/RC are read by the eval'd check expressions
 run() { OUT="$(printf '%s' "$1" | bash "$HOOK" 2>&1)"; RC=$?; }
 
 # 1. Benign prose mentioning db engines → PASS (exit 0)
@@ -64,7 +65,7 @@ check "empty-userinfo credential URI blocks"        '[ "$RC" -eq 2 ]'
 
 # 9. Credential URI mid-sentence → BLOCK (exit 2) — tightening must not
 # require the URI to start the line or be surrounded by whitespace.
-U9=admin; P9=pw123; URL9="mysql://${U9}:${P9}@10.0.0.5/main"
+U9='admin'; P9=pw123; URL9="mysql://${U9}:${P9}@10.0.0.5/main"
 run "$(printf '{"prompt":"please set it to %s before deploying"}' "$URL9")"
 check "mid-sentence credential URI blocks"          '[ "$RC" -eq 2 ]'
 

@@ -144,6 +144,21 @@ looks like it leaked.
 Contributors: run `git config core.hooksPath .githooks` once after cloning to
 activate the local pre-commit publish guard.
 
+## Static analysis
+CI (`.github/workflows/static-analysis.yml`) runs two blocking jobs:
+
+- **ShellCheck** (pinned v0.11.0) via `.github/scripts/lint-shell.sh`, over every
+  tracked shell script. It blocks on errors and warnings, plus SC2251
+  (a bare `! cmd` that `set -e` ignores, which silently disables a test
+  assertion). Other info/style notes are advisory.
+- **Semgrep** (pinned 1.180.0; `r/bash`, `p/python`, `p/github-actions`,
+  `p/security-audit`, `p/secrets`) fails on WARNING and ERROR findings.
+
+Fix findings rather than suppress them. A genuine false positive gets an
+instance-level `# shellcheck disable=SCxxxx # reason` or
+`# nosemgrep: <rule-id> -- reason`; never disable a rule repository-wide. Run
+`.github/scripts/lint-shell.sh` locally before pushing shell changes.
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE). Third-party imports keep their own upstream

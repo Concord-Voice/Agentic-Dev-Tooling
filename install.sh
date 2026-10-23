@@ -163,6 +163,7 @@ install_rulesync_platform() {
 
   local stage; stage=$(mktemp -d)
   local genout; genout=$(mktemp -d)
+  # shellcheck disable=SC2064 # expand now: these locals are out of scope when EXIT fires
   trap "rm -rf '$stage' '$genout'" EXIT
   # Stage a claudecode-shaped project for rulesync import.
   ( PROJECT="$stage" USER_SCOPE=0 WITH_FLEET=0 FORCE=1 install_claude ) >/dev/null
