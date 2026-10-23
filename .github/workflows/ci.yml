@@ -10,7 +10,7 @@ jobs:
     name: guard, unit tests, install
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # publish-guard.sh scans the tree for deny-listed patterns (baseline:
       # config/denylist.public.txt). A private, org-specific denylist can be
@@ -58,7 +58,7 @@ jobs:
     name: platform smoke (rulesync)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Installs codex/copilot/gemini/antigravity via rulesync, which needs
       # network access to fetch rulesync@16.7.0 through npx. ubuntu-latest
