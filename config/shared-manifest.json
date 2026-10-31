@@ -5,7 +5,8 @@
     "plugins/core-lifecycle/skills/issue-brief",
     "plugins/core-lifecycle/skills/review-pr",
     "plugins/core-lifecycle/skills/reproduce-then-fix",
-    "plugins/writing/skills/ste-writing"
+    "plugins/writing/skills/ste-writing",
+    "plugins/writing/skills/i-have-adhd"
   ],
   "shared_agents": [
     "plugins/core-lifecycle/agents/code-reviewer"

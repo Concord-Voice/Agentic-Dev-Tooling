@@ -57,7 +57,7 @@
     "upstream_url": null,
     "upstream_license": null,
     "version_pin": null,
-    "modifications": "covers create-migration and ipc-channel-audit (original custom skills); ste-writing within this pack is vendored and has its own imported record below"
+    "modifications": "covers create-migration and ipc-channel-audit (original custom skills); ste-writing and i-have-adhd within this pack are vendored and have their own imported records below"
   },
   {
     "name": "starter-memory",
@@ -98,6 +98,16 @@
     "upstream_license": "MIT",
     "version_pin": "b912d5fa59f368253683af2ebfac64ad6d08312d",
     "modifications": "generalized wording; vendored with LICENSE.upstream kept beside the tree in plugins/writing/skills/ste-writing"
+  },
+  {
+    "name": "i-have-adhd",
+    "type": "skill",
+    "author": "Ayoub Ghriss",
+    "origin": "imported",
+    "upstream_url": "https://github.com/ayghri/i-have-adhd/tree/1ecea1993b7fce257ffbd686c070948b5e07eda6/skills/i-have-adhd",
+    "upstream_license": "MIT",
+    "version_pin": "1ecea1993b7fce257ffbd686c070948b5e07eda6",
+    "modifications": "none; SKILL.md only (upstream hooks and plugin manifests not vendored), with LICENSE.upstream kept beside the tree in plugins/writing/skills/i-have-adhd"
   },
   {
     "name": "rulesync",

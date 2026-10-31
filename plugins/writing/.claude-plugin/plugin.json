@@ -1,7 +1,7 @@
 {
   "name": "writing",
   "version": "0.1.0",
-  "description": "Writing and audit utilities: /ste-writing (ASD-STE100), /ipc-channel-audit, /create-migration.",
+  "description": "Writing and audit utilities: /ste-writing (ASD-STE100), /i-have-adhd (action-first output style), /ipc-channel-audit, /create-migration.",
   "author": { "name": "agentic-dev-tooling contributors" },
   "license": "MIT"
 }

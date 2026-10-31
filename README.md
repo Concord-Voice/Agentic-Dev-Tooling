@@ -80,7 +80,7 @@ marketplace or in combination via `install.sh`:
 | `release-ops` | `/release-notes`, `/release-checklist`, `/weekly-deps`, `/phase-status`, `/feedback-triage`. |
 | `reviewer-packs` | Specialist reviewers: `migration-reviewer`, the `red-team` exploit-construction methodology, plus fill-in templates for RBAC, crypto, and deployment-config reviewers you complete for your own stack. |
 | `fleet` | Multi-session supervision (`/supervise` + session handshake). Requires the Claude Code desktop session-management MCP; degrades to a no-op elsewhere. Opt-in via `--with-fleet`. |
-| `writing` | `/ste-writing` (ASD-STE100 plain technical English), `/ipc-channel-audit`, `/create-migration`. |
+| `writing` | `/ste-writing` (ASD-STE100 plain technical English), `/i-have-adhd` (opt-in action-first output style for ADHD readers; "stop adhd mode" ends it), `/ipc-channel-audit`, `/create-migration`. |
 | `starter-memory` | Optional curated pack of generic facts about `gh`/git/CI/subagent workflows, useful as a seed for your own project memory. Not auto-loaded — see [`plugins/starter-memory/README.md`](plugins/starter-memory/README.md) for how to consume it. |
 
 Full per-pack descriptions live in
@@ -114,8 +114,9 @@ exported. It is never installed automatically; copy it into your own
 ## Third-party & attribution
 
 Nothing here is vendored except where a confirmed redistribution license
-allows it — `plugins/writing/skills/ste-writing` is the one exception, kept
-with its upstream `LICENSE.upstream` beside the tree. Everything else in the
+allows it — `plugins/writing/skills/ste-writing` and
+`plugins/writing/skills/i-have-adhd` are the two exceptions, each kept with its
+upstream `LICENSE.upstream` beside the tree. Everything else in the
 launch roster (`superpowers`, `mattpocock-skills`, `pr-review-toolkit`,
 `ponytail`, `graphify`, and `rulesync` itself) is fetched from its own
 upstream source at use time — via `install.sh imports`, a Claude Code
