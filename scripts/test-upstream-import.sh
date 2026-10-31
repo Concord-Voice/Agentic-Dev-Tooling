@@ -20,7 +20,7 @@ git add -A && git commit -qm base && base=$(git rev-parse HEAD)
 git init -q -b main "$down" && cd "$down" || exit 1
 mkdir -p svc .github/workflows && printf 'ONE-private\ntwo\nthree\nfour\n' > svc/a.txt
 echo secret-deploy > .github/workflows/deploy-prod.yml
-echo '{"upstream":"Org/Up","import":["svc/"],"private":[".github/workflows/deploy-"]}' > .github/upstream-sync.json
+echo '{"upstream":"Org/Up","import":["svc/"],"private":[".github/workflows/deploy-"],"scrub":["[internal]","internal development reference omitted"]}' > .github/upstream-sync.json
 echo "$base" > .github/upstream-sync.lock
 git add -A && git commit -qm base
 
@@ -63,6 +63,15 @@ cd "$up" && git reset -q --hard HEAD~1 && echo '+ [internal]/x' >> svc/b.txt && 
 run; rc=$?
 check "marker on a line starting with + refused (got $rc)" '[[ $rc -eq 1 ]]'
 reset
+cd "$up" && git reset -q --hard HEAD~1
+
+# A downstream that lists no scrub strings imports the same line.
+cd "$down" && jq 'del(.scrub)' .github/upstream-sync.json > c.json && mv c.json .github/upstream-sync.json && git commit -qam no-scrub
+cd "$up" && echo '+ [internal]/x' >> svc/b.txt && git commit -qam scrub4
+run; rc=$?
+check "no scrub list: marker line imports (got $rc)" '[[ $rc -eq 0 ]]'
+reset
+git -C "$down" reset -q --hard HEAD~1
 cd "$up" && git reset -q --hard HEAD~1
 
 # 4. Upstream edits a file downstream deleted: refused, lock unchanged.
