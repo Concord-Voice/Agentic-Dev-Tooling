@@ -17,7 +17,7 @@ expanded permissions deny/allow list, and optional third-party hook entries.
 | Hook | Tool | When it fires | What it does |
 |---|---|---|---|
 | [`auto-format.sh`](auto-format.sh) | PostToolUse(Edit/Write) | After every file edit | Runs the appropriate formatter (prettier, gofmt) on the changed file. |
-| [`destructive-commands.sh`](destructive-commands.sh) | PreToolUse(Bash) | Before every Bash command | Blocks `git branch -D`, `DROP TABLE`, `pkill`, etc. — destructive patterns beyond the settings.json deny list. See "Scoped bypass channels" below. |
+| [`destructive-commands.sh`](destructive-commands.sh) | PreToolUse(Bash) | Before every Bash command | Blocks force-push (not `--force-with-lease`), `git reset --hard`, `git clean -f`, recursive `rm`, working-tree `git checkout`/`git restore`, `git branch -D`, `DROP TABLE`, `pkill`, etc. A best-effort regex guard: it covers common forms, not every shell construct, so keep the settings.json deny list too. Needs `perl` (standard on macOS and most Linux images) to read quoted spans; without it the hook blocks every Bash command. See "Scoped bypass channels" below. |
 | [`detect-secrets.sh`](detect-secrets.sh) | UserPromptSubmit | On prompt submit | Scans the submitted prompt for likely secrets (AWS keys, GitHub tokens, PEM blobs, etc.) and blocks submission on a high-confidence match. |
 | [`issue-creation-nudge.sh`](issue-creation-nudge.sh) | UserPromptSubmit | On prompt submit | Nudges toward `/issue-creation` when the user describes new work. |
 | [`protect-applied-migrations.sh`](protect-applied-migrations.sh) | PreToolUse(Edit) | Before editing a migration file | Blocks edits to migrations that already shipped to production. |
@@ -45,7 +45,7 @@ The hook string-matches the prefix in the command text (NOT the inherited env va
 
 **Logging.** Every bypass invocation emits `BYPASS: branch delete authorized (CLAUDE_HOOK_ALLOW_BRANCH_DELETE=1): <command>` to stderr. Post-hoc transcript review can identify every bypass event.
 
-**Out of scope.** The bypass is scoped to `git branch -D` ONLY. `git push --force`, `git reset --hard`, `rm -rf`, `pkill`, etc. continue to block unconditionally (and most of them via the settings.json deny list, separate from this hook).
+**Out of scope.** The bypass is scoped to `git branch -D` ONLY. `git push --force`, `git reset --hard`, `rm -rf`, `pkill`, etc. continue to block unconditionally.
 
 **Plugin-cache customization.** The `commit-commands:clean_gone` skill lives in the upstream plugin cache and must be customized to use the env prefix. The customization is documented in `.claude/rules/plugin-cache-customization.md` (installed there by `install.sh claude`; source: [`docs/rules/plugin-cache-customization.md`](../../../docs/rules/plugin-cache-customization.md)), and the bypass itself is covered by [`scripts/test-hooks.sh`](../../../scripts/test-hooks.sh). The auto-mode classifier blocks agent-side edits to upstream plugin files, so the customization is a one-time manual step after merge (re-applied after each plugin upgrade per the rule file's "Re-applying after a plugin upgrade" procedure).
 

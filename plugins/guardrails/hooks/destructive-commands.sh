@@ -1,9 +1,9 @@
 #!/bin/bash
 # destructive-commands.sh — PreToolUse hook for Bash
-# Warns on destructive commands that supplement the .claude/settings.json
-# deny list (which blocks force-push, hard reset, rm -rf, etc. — those
-# patterns are NOT enforced here; this hook covers additional patterns
-# the deny list doesn't catch).
+# Blocks destructive commands. It checks force-push, hard reset, git clean,
+# recursive rm and working-tree checkout/restore itself. It is a best-effort regex
+# guard, not a parser: it covers common forms, not every shell construct, so keep
+# the .claude/settings.json deny list too. Without perl it blocks every Bash command.
 #
 # Scoped bypass: the `commit-commands:clean_gone` skill needs to issue
 # `git branch -D` to clean up [gone] branches. A per-invocation env-var prefix
@@ -59,10 +59,57 @@ if [[ "$COMMAND" =~ $BYPASS_PREFIX_RE ]]; then
     # shell metacharacters are not allowed.
 fi
 
-# Additional destructive patterns NOT in the .claude/settings.json deny list.
-# (rm -rf, git push --force, git reset --hard, etc. are deny-list-enforced
-# and never reach this hook — when this regex matches, the user really is
-# typing one of THESE specific patterns.)
+# Work-discarding and history-rewriting git/rm operations, best effort: a regex
+# over the command text, not a parser. Git patterns only match in command
+# position (see CMD_POS below), so a commit message
+# that mentions one is not blocked. Quoted strings are dropped before matching for
+# the same reason. --force-with-lease (with or without --force-if-includes) and
+# index-only `git restore --staged` stay allowed.
+# A quoted script handed to sh/bash/zsh -c or eval is executed, so it is scanned too.
+# Quoted spans are read left to right, so the first quote opens the span and an
+# apostrophe inside double quotes is inert. A quoted single word ("." or 'src') is an
+# argument, so it is kept. A double-quoted span holding $( or a backtick is executed
+# by the shell, so its text stays visible. Any other quoted span is prose and becomes
+# the placeholder `_` with no padding, so a quoted value stays one word, whether it
+# stands alone (-C "/tmp/a b") or is glued to an option (-c user.name="A B").
+SCAN=$(printf '%s' "$COMMAND" | perl -0777 -pe 's/"((?:[^"\\]|\\.)*)"|\x27([^\x27]*)\x27/my $d = defined $1; my $t = $d ? $1 : $2; ($d && $t =~ m{\$\(|`}) ? " $t " : ($t =~ m{^\S*$} ? $t : "_")/ge') || {
+    echo "BLOCKED: perl not available or failed — destructive-commands hook cannot evaluate command" >&2
+    exit 2
+}
+# Quote-aware, so an escaped quote inside the script (bash -c "echo \"a\" && rm -rf x") does not end it.
+INNER=$(printf '%s' "$COMMAND" | perl -0777 -ne 'while (/(?:\b(?:sh|bash|zsh)\s+-[a-zA-Z]*c|\beval)\s+(?:"((?:[^"\\]|\\.)*)"|\x27([^\x27]*)\x27)/g) { my $t = defined $1 ? $1 : $2; $t =~ s/\\(.)/$1/g if defined $1; print "$t\n" }') || {
+    echo "BLOCKED: perl failed — destructive-commands hook cannot evaluate command" >&2
+    exit 2
+}
+[ -n "$INNER" ] && SCAN="$SCAN; $(printf '%s' "$INNER" | tr '\n' ';')"
+# Command position: start, after ; & | ( { ! or a backtick, then any VAR=value
+# assignments and wrapper words (then/do/else, sudo, env, time, nohup, command,
+# exec, xargs and their flags) that run the next word as the command.
+CMD_POS='(^|[;&|({!`])[[:space:]]*(([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*|then|do|else|sudo|env|time|nohup|command|exec|xargs|-[a-zA-Z-]+)[[:space:]]+)*'
+# An absolute or relative path to git (/usr/bin/git) counts as git. Global options
+# such as -C <path>, --work-tree <path>, -c <name>=<value> or --no-pager may sit
+# before the subcommand.
+GIT='([^[:space:];&|]*/)?git(\s+(-[Cc]\s+[^[:space:];&|]+|--(git-dir|work-tree|namespace)\s+[^[:space:];&|]+|--[a-z][a-z-]*(=[^[:space:];&|]*)?))*'
+DESTRUCTIVE_RE="${CMD_POS}${GIT}\s+push\b[^;&|]*(\s--force(\s|$)|\s-[a-zA-Z]*f[a-zA-Z]*(\s|$)|\s\+[^[:space:]]+)"
+DESTRUCTIVE_RE+="|${CMD_POS}${GIT}\s+reset\b[^;&|]*\s--hard"
+DESTRUCTIVE_RE+="|${CMD_POS}${GIT}\s+clean\b[^;&|]*\s(-[a-zA-Z]*f|--force)"
+DESTRUCTIVE_RE+="|${CMD_POS}${GIT}\s+checkout\b[^;&|]*\s\.{1,2}/?(\s|$)"
+RESTORE_RE="${CMD_POS}${GIT}\s+restore\b[^;&|]*\s\.{1,2}/?(\s|$)"
+DESTRUCTIVE_RE+="|(^|[;&|([:space:]])rm(\s+[^;&|]*)?\s(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)(\s|$)"
+restore_hits_worktree() { # --staged alone only touches the index; judged per command segment
+    local seg
+    while IFS= read -r seg; do
+        echo "$seg" | grep -qE "$RESTORE_RE" || continue
+        echo "$seg" | grep -qE '\s(--staged|-S)(\s|$)' || return 0
+        echo "$seg" | grep -qE '\s(--worktree(=[^[:space:]]*)?|-[a-zA-Z]*W[a-zA-Z]*)(\s|$)' && return 0
+    done < <(printf '%s\n' "$SCAN" | tr ';&|' '\n')
+    return 1
+}
+if echo "$SCAN" | grep -qE "$DESTRUCTIVE_RE" || restore_hits_worktree; then
+    echo "BLOCKED: Potentially destructive command detected: $COMMAND" >&2
+    exit 2
+fi
+
 if echo "$COMMAND" | grep -qE '(DROP\s+(TABLE|DATABASE|INDEX)|TRUNCATE\s|DELETE\s+FROM|git\s+branch\s+-D|git\s+stash\s+drop|git\s+reflog\s+expire|pkill|killall)'; then
     echo "BLOCKED: Potentially destructive command detected: $COMMAND" >&2
     # If the command matches the bare `git branch -D` pattern, hint at the

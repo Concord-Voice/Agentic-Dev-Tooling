@@ -37,6 +37,28 @@ out="$(run test-reminder.sh "$TMP/db/migrations/001_x.sql")"; echo "$out" | grep
 out="$(run test-reminder.sh "$TMP/src/widget.go")"; echo "$out" | grep -q "DOCS-REMINDER" || fail "reminder: docs reminder didn't fire"; echo "$out" | grep -q "_test.go" || fail "reminder: coverage nag missing"
 [ "$(run test-reminder.sh "$TMP/README.md")" = "0|" ] || fail "reminder: skip_ext md should be silent"
 
+# ---- destructive-commands: enforced in the hook, not only by a settings deny list ----
+dc() { printf '{"tool_input":{"command":"%s"}}' "$1" | bash "$HOOKS/destructive-commands.sh" >/dev/null 2>&1; echo $?; }
+for c in "git push --force origin main" "git push -f" "git reset --hard HEAD~1" "git clean -fd" "rm -rf build" "cd x && rm -r y" "git checkout -- ." \
+         "git push origin +main" "git push origin b -fu" "git restore --staged --worktree ." "rm --recursive x" \
+         "rm -f -r x" "git checkout -- ./" "git checkout HEAD -- ." "git restore ." "git clean --force" "find . | xargs rm -rf" "bash -c \\\"rm -rf build\\\"" "sh -c 'git reset --hard'" \
+         "git diff --staged && git restore ." "git restore --staged . && git restore ." "git restore \\\".\\\"" "git restore '.'" \
+         "git commit -m \\\"don't\\\" && git reset --hard && git commit -m \\\"it's\\\"" "echo \\\"\$(rm -rf x)\\\"" \
+         "git restore --staged --worktree=true ." "git restore -SW ." \
+         "git -C /tmp/x reset --hard HEAD" "git -c advice.detachedHead=false reset --hard" "git --no-pager push -f" \
+         "env git reset --hard" "sudo git reset --hard" "time git push -f" "/usr/bin/git reset --hard" "GIT_DIR=.git git reset --hard" \
+         "{ git reset --hard; }" "if true; then git reset --hard; fi" "! git reset --hard" "ls | xargs git push -f" \
+         "git -C \\\"/tmp/a b\\\" reset --hard" "git --work-tree . reset --hard" "bash -lc \\\"rm -rf x\\\"" 'bash -c \"echo \\\"a\\\" && rm -rf x\"' \
+         "git -c user.name=\\\"A B\\\" push --force" "git -c alias.x='a b' reset --hard"; do
+  [ "$(dc "$c")" = 2 ] || fail "destructive: should block: $c"
+done
+for c in "git push --force-with-lease origin b" "git push -u origin b" "git reset --soft HEAD~1" "rm file.txt" "git checkout -- src/a.ts" "npm run format" \
+         "git commit -m 'fix git reset --hard docs'" "git commit -m 'document git push --force handling'" \
+         "git push --force-with-lease --force-if-includes origin topic" "git restore --staged ." \
+         "git commit -m 'Prevent rm -rf from running'" "git -C \\\"/tmp/a b\\\" status" "time make test" "git -c user.name=\\\"A B\\\" status"; do
+  [ "$(dc "$c")" = 0 ] || fail "destructive: should allow: $c"
+done
+
 # ---- auto-format: empty/absent file path is a clean no-op ----
 [ "$(run auto-format.sh "")" = "0|" ] || fail "auto-format: empty path should no-op"
 
