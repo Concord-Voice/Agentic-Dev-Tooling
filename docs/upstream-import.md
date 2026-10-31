@@ -24,7 +24,7 @@ The script stops with exit 1, before staging anything, when:
 
 - an `import` prefix overlaps a `private` one;
 - the upstream commit does not descend from the lock;
-- the diff adds an `[internal]` token. That's damage from the public-repo scrub; fix it upstream first.
+- the diff adds a scrub marker (`[internal]`, or "internal development reference omitted"). That's damage from the public-repo scrub; fix it upstream first.
 
 Exit 2 means it hit conflicts. The lock is staged and the conflicted files are left unmerged. Upstream changes outside `import` are listed as skipped and not applied.
 

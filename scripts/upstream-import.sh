@@ -19,8 +19,8 @@
 #      silent overwrite.
 #   2. Refuses, before applying anything, when: an `import` prefix overlaps a
 #      `private` one; the new upstream commit doesn't descend from the lock; a
-#      changed line adds an `[internal]` scrub token (publication-scrub damage
-#      coming back).
+#      changed line adds a publication-scrub marker (`[internal]` or
+#      "internal development reference omitted"): scrub damage coming back.
 #   3. Writes the new lock and stages everything. The caller commits and opens
 #      the pull request; nothing here pushes.
 #
@@ -69,7 +69,7 @@ fi
 git fetch -q --no-tags "$up" HEAD
 patch=$(mktemp); trap 'rm -f "$patch"' EXIT
 git -C "$up" diff --binary --no-renames "$old" "$new" -- "${paths[@]}" > "$patch"
-scrub=$(grep -E '^\+[^+].*\[internal\]|^\+\[internal\]' "$patch" || true)
+scrub=$(grep -E '^\+([^+]|$)' "$patch" | grep -E '\[internal\]|internal development reference omitted' || true)
 [[ -z "$scrub" ]] || fail "the upstream diff adds [internal] scrub tokens; fix them upstream first:
 $scrub"
 

@@ -54,6 +54,10 @@ run; rc=$?
 check "[internal] refused (got $rc)" '[[ $rc -eq 1 ]] && grep -q "scrub" "$tmp/out"'
 check "nothing staged after a refusal" 'git -C "$down" diff --cached --quiet'
 reset
+cd "$up" && git reset -q --hard HEAD~1 && echo '// Issue: internal development reference omitted' >> svc/b.txt && git commit -qam scrub2
+run; rc=$?
+check "reference-omitted marker refused (got $rc)" '[[ $rc -eq 1 ]]'
+reset
 
 # 4. Overlapping prefixes are a config error.
 cd "$down" && echo '{"import":["svc/"],"private":["svc/secret"]}' > .github/upstream-sync.json && git commit -qam overlap
