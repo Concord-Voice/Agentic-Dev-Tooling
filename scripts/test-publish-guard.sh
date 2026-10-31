@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 fails=0
 t() { local desc=$1 want=$2; shift 2
-  if "$@" >/dev/null 2>&1; then got=0; else got=1; fi
+  if "$@" >/dev/null 2>&1; then got=0; else got=$?; fi
   [ "$got" = "$want" ] && echo "ok: $desc" || { echo "FAIL: $desc (want exit $want, got $got)"; fails=1; }; }
 
 # This file is NOT excluded from the guard's own tree-wide scan (it used to be, which
@@ -78,6 +78,13 @@ echo "made by acmecorp" >> "$tmp7/tree/README.md"
 t "denied word outside the literal still fails, same file" 1 env PUBLISH_GUARD_DENYLIST="$tmp7/deny.txt" PUBLISH_GUARD_ALLOWLIST="$tmp7/allow.txt" bash scripts/publish-guard.sh "$tmp7/tree"
 echo "![b](https://x/badgeXproject=acmecorp_tools)" > "$tmp7/tree/README.md"
 t "allowlist entry is a fixed string, not a regex" 1 env PUBLISH_GUARD_DENYLIST="$tmp7/deny.txt" PUBLISH_GUARD_ALLOWLIST="$tmp7/allow.txt" bash scripts/publish-guard.sh "$tmp7/tree"
+printf 'acmecorp-db\n' > "$tmp7/short.txt"
+t "allowlist entry under 12 chars is refused" 2 env PUBLISH_GUARD_DENYLIST="$tmp7/deny.txt" PUBLISH_GUARD_ALLOWLIST="$tmp7/short.txt" bash scripts/publish-guard.sh "$tmp7/tree"
+printf 'xx-acmecorp-yy\n' > "$tmp7/deny2.txt"; printf 'x-acmecorp-yy\n' > "$tmp7/sub.txt"
+t "allowlist entry inside a denied pattern is refused" 2 env PUBLISH_GUARD_DENYLIST="$tmp7/deny2.txt" PUBLISH_GUARD_ALLOWLIST="$tmp7/sub.txt" bash scripts/publish-guard.sh "$tmp7/tree"
+printf 'badge.project=acmecorp_tools\r\n' > "$tmp7/crlf.txt"
+echo "![b](https://x/badge.project=acmecorp_tools&m=1)" > "$tmp7/tree/README.md"
+t "CRLF allowlist entry still matches" 0 env PUBLISH_GUARD_DENYLIST="$tmp7/deny.txt" PUBLISH_GUARD_ALLOWLIST="$tmp7/crlf.txt" bash scripts/publish-guard.sh "$tmp7/tree"
 rm -rf "$tmp7"
 
 # ---- I2: the real repo's own repo-config.example.json (sanctioned

@@ -35,10 +35,20 @@ for lit in "${SANCTIONED_LITERALS[@]}"; do redact+="s|${lit}||g;"; done
 # Private sanctioned literals: file named by $PUBLISH_GUARD_ALLOWLIST (kept OUTSIDE
 # this repo; CI injects via secret), one exact string per line. Same content-granular
 # redaction as above, so an allowed literal never blinds a file or a line. Entries are
-# escaped, so they match as fixed strings, never as regexes.
+# escaped, so they match as fixed strings, never as regexes. An entry that is short, or
+# that could erase a denied pattern everywhere (it sits inside the pattern, or the
+# pattern matches all of it), is refused with exit 2 rather than silently blinding the guard.
 if [ -n "${PUBLISH_GUARD_ALLOWLIST:-}" ] && [ -f "$PUBLISH_GUARD_ALLOWLIST" ]; then
   while IFS= read -r lit; do
+    lit=${lit%$'\r'}
     [ -z "$lit" ] && continue
+    if [ "${#lit}" -lt 12 ]; then echo "publish-guard: allowlist entry too short (min 12 chars)" >&2; exit 2; fi
+    while IFS= read -r p; do
+      [ -z "$p" ] && continue
+      if printf '%s' "$p" | grep -qiF -- "$lit" || printf '%s' "$lit" | grep -qix -- "$p"; then
+        echo "publish-guard: allowlist entry too broad (it could erase a denied pattern)" >&2; exit 2
+      fi
+    done <<< "$patterns"
     lit=$(printf '%s' "$lit" | sed 's/[][\\.*^$|]/\\&/g')
     redact+="s|${lit}||g;"
   done < "$PUBLISH_GUARD_ALLOWLIST"

@@ -23,7 +23,7 @@ A portable library of AI development tools: skills, agents, hooks, and guardrail
 
 ## Introduction
 
-Concord Voice is a privacy-first place to talk with your friends, your community, or your team. It gives you voice calls, video, screen sharing, and chat. Your device encrypts each message before it leaves, so our servers hold only scrambled data that we cannot read. You can use our hosted service, or you can run the same software on your own hardware.
+Concord Voice is a privacy-first place to talk with your friends, your community, or your team. It gives you voice calls, video, screen sharing, and chat. Your device encrypts each message before it leaves, so our servers store your messages only as scrambled data that we cannot read. You can use our hosted service, or you can run the same software on your own hardware.
 
 Concord Voice uses AI coding assistants every day. This repository shares the tools that keep those assistants safe and consistent.
 Anyone can use them.
@@ -179,10 +179,10 @@ for every third-party import live in
 
 ### Maintenance note
 
-This public repo is exported from a private internal "Master" tooling repo,
-not maintained by hand-editing generated content in place. If you send a PR
-against a file that looks generated (most of `plugins/`), it may be
-superseded by the next export rather than a true merge conflict — PRs are
+This public repo is the upstream. A private internal tooling repo imports
+from it, so edits made here flow down. Most of `plugins/` is generated
+content rather than hand-edited, so a PR against a file that looks generated
+may be superseded by the next regeneration rather than a true merge conflict — PRs are
 most durable when they target `install.sh`, the templates under
 `plugins/reviewer-packs/templates/` and `*.template` files, or genuinely
 repo-local content like this README. Every publish is scrubbed through
