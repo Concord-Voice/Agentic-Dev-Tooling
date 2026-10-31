@@ -32,7 +32,7 @@
     {
       "name": "writing",
       "source": "./plugins/writing",
-      "description": "Writing and audit utilities: /ste-writing (ASD-STE100), /ipc-channel-audit, /create-migration."
+      "description": "Writing and audit utilities: /ste-writing (ASD-STE100), /i-have-adhd (action-first output style), /ipc-channel-audit, /create-migration."
     },
     {
       "name": "starter-memory",

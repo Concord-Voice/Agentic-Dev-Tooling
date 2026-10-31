@@ -36,7 +36,7 @@ Generated from imports/attributions.json — do not edit by hand.
 - Type: skills  |  Origin: custom
 - Author: agentic-dev-tooling contributors
 - Upstream: —  |  License: —  |  Pin: —
-- Modifications: covers create-migration and ipc-channel-audit (original custom skills); ste-writing within this pack is vendored and has its own imported record below
+- Modifications: covers create-migration and ipc-channel-audit (original custom skills); ste-writing and i-have-adhd within this pack are vendored and have their own imported records below
 
 ## starter-memory
 - Type: knowledge  |  Origin: custom
@@ -61,6 +61,12 @@ Generated from imports/attributions.json — do not edit by hand.
 - Author: woosal1337
 - Upstream: https://github.com/woosal1337/blog/tree/b912d5fa59f368253683af2ebfac64ad6d08312d/videos/ep01-the-cure-for-ai-slop  |  License: MIT  |  Pin: b912d5fa59f368253683af2ebfac64ad6d08312d
 - Modifications: generalized wording; vendored with LICENSE.upstream kept beside the tree in plugins/writing/skills/ste-writing
+
+## i-have-adhd
+- Type: skill  |  Origin: imported
+- Author: Ayoub Ghriss
+- Upstream: https://github.com/ayghri/i-have-adhd/tree/1ecea1993b7fce257ffbd686c070948b5e07eda6/skills/i-have-adhd  |  License: MIT  |  Pin: 1ecea1993b7fce257ffbd686c070948b5e07eda6
+- Modifications: none; SKILL.md only (upstream hooks and plugin manifests not vendored), with LICENSE.upstream kept beside the tree in plugins/writing/skills/i-have-adhd
 
 ## rulesync
 - Type: dependency  |  Origin: imported

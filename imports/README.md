@@ -1,8 +1,8 @@
 # Third-party imports — fetch from source
 
 Nothing here is vendored except where a confirmed redistribution license allows it
-(see `plugins/writing/skills/ste-writing`, the one exception — its upstream `LICENSE`
-is kept beside the tree). Everything else in the launch roster is installed from
+(see `plugins/writing/skills/ste-writing` and `plugins/writing/skills/i-have-adhd`,
+the two exceptions — each keeps its upstream `LICENSE` beside the tree). Everything else in the launch roster is installed from
 upstream at use time, not copied into this repo. Full detail, including license and
 pin info, lives in `imports/attributions.json` (source of truth) and the generated
 `ATTRIBUTIONS.md` (human-readable render — regenerate with
