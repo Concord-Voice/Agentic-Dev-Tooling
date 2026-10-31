@@ -67,8 +67,10 @@ field, not a label (see `.claude/rules/labels.md`). Read it per issue and bucket
 the option names, in the order `.project.fields.priority.options` declares:
 
 ```bash
-gh project item-list "$(rc_get '.project.number')" --owner "$(rc_get '.project.owner' '@me')" \
-  --format json --limit 500 \
+PN="$(rc_get '.project.number')"; PO="$(rc_get '.project.owner' '@me')"
+# --limit caps the total fetched, so ask for the whole board.
+TOTAL="$(gh project view "$PN" --owner "$PO" --format json --jq '.items.totalCount')"
+gh project item-list "$PN" --owner "$PO" --format json --limit "$TOTAL" \
   | jq -r --arg repo "$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
       '.items[] | select(.content.repository == $repo and .content.number != null)
        | "\(.content.number)\t\(.priority // "")"'
