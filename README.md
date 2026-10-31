@@ -1,4 +1,41 @@
-# agentic-dev-tooling
+# Agentic-Dev-Tooling
+
+<a href="https://sonarcloud.io/summary/new_code?id=Concord-Voice_Agentic-Dev-Tooling"><img align="right" src="https://sonarcloud.io/api/project_badges/quality_gate?project=Concord-Voice_Agentic-Dev-Tooling" alt="Quality gate" /></a>
+
+[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=Concord-Voice_Agentic-Dev-Tooling&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=Concord-Voice_Agentic-Dev-Tooling)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=Concord-Voice_Agentic-Dev-Tooling&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=Concord-Voice_Agentic-Dev-Tooling)
+[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=Concord-Voice_Agentic-Dev-Tooling&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=Concord-Voice_Agentic-Dev-Tooling)
+[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=Concord-Voice_Agentic-Dev-Tooling&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=Concord-Voice_Agentic-Dev-Tooling)
+[![ci](https://github.com/Concord-Voice/Agentic-Dev-Tooling/actions/workflows/ci.yml/badge.svg)](https://github.com/Concord-Voice/Agentic-Dev-Tooling/actions/workflows/ci.yml)
+[![static-analysis](https://github.com/Concord-Voice/Agentic-Dev-Tooling/actions/workflows/static-analysis.yml/badge.svg)](https://github.com/Concord-Voice/Agentic-Dev-Tooling/actions/workflows/static-analysis.yml)
+
+[![AI Code Assurance](https://sonarcloud.io/api/project_badges/ai_code_assurance?project=Concord-Voice_Agentic-Dev-Tooling)](https://sonarcloud.io/summary/new_code?id=Concord-Voice_Agentic-Dev-Tooling)
+[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![security](https://img.shields.io/badge/security-policy-green)](https://github.com/Concord-Voice/.github/blob/main/SECURITY.md)
+[![platforms](https://img.shields.io/badge/platforms-Claude%20Code%20%7C%20Codex%20%7C%20Copilot%20%7C%20Antigravity-blue)](./CAPABILITIES.md)
+[![SonarQube Cloud](https://sonarcloud.io/images/project_badges/sonarcloud-dark.svg)](https://sonarcloud.io/summary/new_code?id=Concord-Voice_Agentic-Dev-Tooling)
+
+A portable library of AI development tools: skills, agents, hooks, and guardrails.
+
+**Website:** [www.concordvoice.com](https://www.concordvoice.com) | **Wiki:** [Agentic-Dev-Tooling wiki](https://github.com/Concord-Voice/Agentic-Dev-Tooling/wiki) | **Security:** security@concordvoice.com
+
+---
+
+## Introduction
+
+Concord Voice is a privacy-first place to talk with your friends, your community, or your team. It gives you voice calls, video, screen sharing, and chat. Your device encrypts each message before it leaves, so our servers hold only scrambled data that we cannot read. You can use our hosted service, or you can run the same software on your own hardware.
+
+Concord Voice uses AI coding assistants every day. This repository shares the tools that keep those assistants safe and consistent.
+Anyone can use them.
+
+One source tree installs into several AI coding tools. Each tool supports a different subset, and [CAPABILITIES.md](CAPABILITIES.md) lists the gaps honestly.
+Read it before you trust a hook to survive the trip to another platform.
+
+For guides and background, see the [Agentic-Dev-Tooling wiki](https://github.com/Concord-Voice/Agentic-Dev-Tooling/wiki).
+
+---
+
+## Technical overview
 
 A portable, attributed library of AI dev-tooling — skills, agents, hooks,
 guardrail scripts, MCP config templates, and an installer — refined over
@@ -10,7 +47,7 @@ verified per-platform coverage — including the gaps — is documented in
 [`CAPABILITIES.md`](CAPABILITIES.md); read it before you rely on a hook or
 subagent surviving conversion to a non-Claude platform.
 
-## Quickstart
+### Quickstart
 
 Clone the repo, `cd` into it, then run one `install.sh` command per platform
 you use. Every command accepts `--project <path>` (default: current
@@ -68,7 +105,7 @@ or copy `scripts/repo-config.sh` and `docs/rules/*.md` into your repo by hand �
 otherwise the config-driven steps degrade to their defaults and rules-file
 references resolve to nothing.
 
-### Keeping a repo current
+#### Keeping a repo current
 
 `install.sh claude` records what it wrote in `.claude/.agentic-dev-tooling.lock`. Commit
 that file with the install. On a later run, a file that still matches the lock takes the
@@ -79,7 +116,7 @@ schedule, copy [`templates/sync-tooling.yml`](templates/sync-tooling.yml) into y
 `.github/workflows/`. It opens one draft PR when something changed, using a GitHub App token it
 mints at runtime (`SYNC_APP_CLIENT_ID` variable, `SYNC_APP_PRIVATE_KEY` secret).
 
-## What's inside
+### What's inside
 
 Seven themed plugins, installable individually via the Claude Code
 marketplace or in combination via `install.sh`:
@@ -97,7 +134,7 @@ marketplace or in combination via `install.sh`:
 Full per-pack descriptions live in
 [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json).
 
-## Configuration
+### Configuration
 
 Most skills read an optional `.claude/repo-config.json` at your repo's root —
 the portability seam between this generic tooling and your project's
@@ -122,7 +159,7 @@ exported. It is never installed automatically; copy it into your own
 `quality_gate.enabled` in `repo-config.json`. See
 [`config/mcp-README.md`](config/mcp-README.md) for setup.
 
-## Third-party & attribution
+### Third-party & attribution
 
 Nothing here is vendored except where a confirmed redistribution license
 allows it — `plugins/writing/skills/ste-writing` and
@@ -140,7 +177,7 @@ render is [`ATTRIBUTIONS.md`](ATTRIBUTIONS.md) (regenerate with
 for every third-party import live in
 [`imports/README.md`](imports/README.md).
 
-## Maintenance note
+### Maintenance note
 
 This public repo is exported from a private internal "Master" tooling repo,
 not maintained by hand-editing generated content in place. If you send a PR
@@ -156,7 +193,7 @@ looks like it leaked.
 Contributors: run `git config core.hooksPath .githooks` once after cloning to
 activate the local pre-commit publish guard.
 
-## Static analysis
+### Static analysis
 CI (`.github/workflows/static-analysis.yml`) runs two blocking jobs:
 
 - **ShellCheck** (pinned v0.11.0) via `.github/scripts/lint-shell.sh`, over every
@@ -171,7 +208,29 @@ instance-level `# shellcheck disable=SCxxxx # reason` or
 `# nosemgrep: <rule-id> -- reason`; never disable a rule repository-wide. Run
 `.github/scripts/lint-shell.sh` locally before pushing shell changes.
 
+---
+
+## Security
+
+Report a vulnerability by email to security@concordvoice.com. Do not open a public issue for it. The [security policy](https://github.com/Concord-Voice/.github/blob/main/SECURITY.md) describes the disclosure process.
+
+---
+
+## Contributing
+
+We welcome help. Read the [contributing guide](https://github.com/Concord-Voice/.github/blob/main/CONTRIBUTING.md) and the [code of conduct](https://github.com/Concord-Voice/.github/blob/main/CODE_OF_CONDUCT.md) before you open a pull request. Report bugs and request features in our [feedback repository](https://github.com/Concord-Voice/Concord-Voice/issues).
+
+---
+
 ## License
 
-MIT — see [`LICENSE`](LICENSE). Third-party imports keep their own upstream
-licenses; see [Third-party & attribution](#third-party--attribution) above.
+MIT. See [LICENSE](LICENSE). Third-party imports keep their own upstream licenses, as [Third-party & attribution](#third-party--attribution) describes.
+
+---
+
+## Contact
+
+- **Website:** [www.concordvoice.com](https://www.concordvoice.com)
+- **Security:** security@concordvoice.com
+- **Privacy:** privacy@concordvoice.com
+- **General:** contact-us@concordvoice.com
