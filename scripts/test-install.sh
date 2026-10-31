@@ -175,6 +175,11 @@ while IFS= read -r cmd; do
 done <<EOF
 $user_hookcmds
 EOF
+# A second --user run must not duplicate hooks (earlier commands are absolute, base ones relative).
+n1="$(jq '[.hooks[][].hooks[]] | length' "$fake_home/.claude/settings.json")"
+HOME="$fake_home" "$HERE/install.sh" claude --user >/dev/null
+n2="$(jq '[.hooks[][].hooks[]] | length' "$fake_home/.claude/settings.json")"
+[ "$n1" = "$n2" ] || fail "--user re-run duplicated hooks ($n1 -> $n2)"
 
 # IMPORTANT 4: --with-fleet positive path -- a fresh target should get the fleet skill/hook and
 # the session-management MCP note (the earlier test only checked fleet is ABSENT without the flag).

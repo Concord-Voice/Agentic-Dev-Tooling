@@ -59,9 +59,15 @@ grep -qF "$marker" "$tmp_antigravity/AGENTS.md" \
 
 # Every hook a converted config runs must exist in the target, or the hook just errors.
 for t in "$tmp_codex" "$tmp_copilot" "$tmp_antigravity"; do
-  for h in $(grep -rhoE '\.claude/hooks/[a-z-]+\.sh' "$t" --exclude-dir=.claude | sort -u); do
+  while IFS= read -r h; do
     [ -x "$t/$h" ] || { echo "FAIL: $t config runs $h, which was not installed"; exit 1; }
-  done
+  done < <(grep -rhoE '\.claude/hooks/[a-z-]+\.sh' "$t" --exclude-dir=.claude | sort -u)
+done
+
+# Installed skills source scripts/repo-config.sh from the project root.
+for t in "$tmp_codex" "$tmp_antigravity"; do
+  grep -rqF 'scripts/repo-config.sh' "$t/.agents/skills" || { echo "FAIL: expected a skill that sources the helper in $t"; exit 1; }
+  [ -f "$t/scripts/repo-config.sh" ] || { echo "FAIL: $t skills source scripts/repo-config.sh, which was not installed"; exit 1; }
 done
 
 echo ok
