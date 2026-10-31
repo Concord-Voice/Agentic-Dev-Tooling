@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@<sha> # v7, the public upstream: no token needed
         with: {repository: Concord-Voice/Self-Hosted, path: .upstream, fetch-depth: 0, persist-credentials: false}
       - uses: actions/checkout@<sha> # v7, this tool at a pinned commit
-        with: {repository: Concord-Voice/agentic-dev-tooling, ref: <sha>, path: .tool, persist-credentials: false}
+        with: {repository: Concord-Voice/Agentic-Dev-Tooling, ref: <sha>, path: .tool, persist-credentials: false}
       - run: |
           git switch -c "upstream-import/$(git -C .upstream rev-parse --short HEAD)"
           bash .tool/scripts/upstream-import.sh .upstream || [ $? -eq 2 ]
