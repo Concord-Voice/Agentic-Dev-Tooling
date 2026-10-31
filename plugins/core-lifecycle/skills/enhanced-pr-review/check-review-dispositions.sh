@@ -78,7 +78,7 @@ if [ -z "$PR" ]; then
 fi
 
 VALID_DISPOSITIONS="accepted rejected deferred undecided"
-# Set on the live path; may stay empty under CV_REVIEW_FIXTURE. Every use is
+# Set on the live path and may stay empty under CV_REVIEW_FIXTURE. Every use is
 # conditional, so an unset repo degrades to "no -R" rather than tripping set -u.
 OWNER=""
 REPO=""
