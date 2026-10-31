@@ -256,6 +256,12 @@ MD
     copy "$f" "$local_root/${f#"$genout"/}"
   done < <(find "$genout" -type f -print0)
 
+  # The converted hook configs still run .claude/hooks/<name>.sh, so ship those scripts too.
+  for p in core-lifecycle guardrails release-ops reviewer-packs writing starter-memory; do
+    [ -d "$HERE/plugins/$p/hooks" ] && for h in "$HERE/plugins/$p/hooks"/*.sh; do
+      copy "$h" "$local_root/.claude/hooks/$(basename "$h")"; done
+  done
+
   # Skills already went through copy() directly (never the clobbering bug
   # above) -- kept as whole-directory copies straight to $local_root, same
   # granularity install_claude uses for the same skill directories.

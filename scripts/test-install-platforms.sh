@@ -57,4 +57,11 @@ printf '%s\n' "$out" | grep -q "skip (local changes, use --force):.*AGENTS.md" \
 grep -qF "$marker" "$tmp_antigravity/AGENTS.md" \
   && { echo "FAIL: --force did not restore generated AGENTS.md content"; exit 1; }
 
+# Every hook a converted config runs must exist in the target, or the hook just errors.
+for t in "$tmp_codex" "$tmp_copilot" "$tmp_antigravity"; do
+  for h in $(grep -rhoE '\.claude/hooks/[a-z-]+\.sh' "$t" --exclude-dir=.claude | sort -u); do
+    [ -x "$t/$h" ] || { echo "FAIL: $t config runs $h, which was not installed"; exit 1; }
+  done
+done
+
 echo ok
