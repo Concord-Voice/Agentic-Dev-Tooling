@@ -16,16 +16,22 @@ jobs:
       # config/denylist.public.txt). A private, org-specific denylist can be
       # layered in via the PUBLISH_GUARD_DENYLIST secret; forks and external
       # PRs won't have it, so the guard still runs against the public
-      # baseline alone. The guard shells out to `grep -rniI --exclude-dir
-      # --exclude` plus a `grep -v -F` filter (see scripts/publish-guard.sh)
-      # -- all long-standing GNU grep options (-r/-n/-i/-I, --exclude-dir,
-      # --exclude, -v, -F), and ubuntu-latest ships GNU grep by default, so
-      # no BSD/GNU flag divergence applies here.
+      # baseline alone. The PUBLISH_GUARD_ALLOWLIST secret names exact
+      # strings (such as badge URLs) that may still appear. The guard shells
+      # out to `grep -rniI --exclude-dir --exclude`, redacts allowed literals
+      # with sed, then re-matches (see scripts/publish-guard.sh). These are
+      # long-standing GNU options, and ubuntu-latest ships GNU grep and sed,
+      # so no BSD/GNU flag divergence applies here.
       - name: publish guard
         env:
           DENY: ${{ secrets.PUBLISH_GUARD_DENYLIST }}
+          ALLOW: ${{ secrets.PUBLISH_GUARD_ALLOWLIST }}
         run: |
           set -euo pipefail
+          if [ -n "$ALLOW" ]; then
+            printf '%s\n' "$ALLOW" > /tmp/allow.txt
+            export PUBLISH_GUARD_ALLOWLIST=/tmp/allow.txt
+          fi
           if [ -n "$DENY" ]; then
             printf '%s\n' "$DENY" > /tmp/deny.txt
             PUBLISH_GUARD_DENYLIST=/tmp/deny.txt bash scripts/publish-guard.sh
