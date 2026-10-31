@@ -1,8 +1,9 @@
 #!/bin/bash
 # destructive-commands.sh — PreToolUse hook for Bash
-# Blocks destructive commands. It enforces force-push, hard reset, git clean,
-# recursive rm and `git checkout -- .` itself, so the guard holds even when a
-# repo's .claude/settings.json deny list does not list them.
+# Blocks destructive commands. It checks force-push, hard reset, git clean,
+# recursive rm and working-tree checkout/restore itself, so the guard does not
+# depend on a repo's .claude/settings.json deny list. It is a best-effort regex
+# guard, not a parser: keep the deny list too.
 #
 # Scoped bypass: the `commit-commands:clean_gone` skill needs to issue
 # `git branch -D` to clean up [gone] branches. A per-invocation env-var prefix
@@ -58,8 +59,17 @@ if [[ "$COMMAND" =~ $BYPASS_PREFIX_RE ]]; then
     # shell metacharacters are not allowed.
 fi
 
-# Work-discarding and history-rewriting git/rm operations. --force-with-lease is allowed.
-if echo "$COMMAND" | grep -qE '(git\s+push\b.*\s(--force|-f)(\s|$)|git\s+reset\s+.*--hard|git\s+clean\s+.*-[a-zA-Z]*f|git\s+checkout\s+--\s+\.(\s|$)|(^|[;&|[:space:]])rm\s+-[a-zA-Z]*[rR])'; then
+# Work-discarding and history-rewriting git/rm operations, best effort: a regex
+# over the command text, not a parser. Git patterns only match in command
+# position (start, or after ; & | or a subshell paren), so a commit message
+# that mentions one is not blocked. --force-with-lease stays allowed.
+CMD_POS='(^|[;&|(])[[:space:]]*'
+DESTRUCTIVE_RE="${CMD_POS}git\s+push\b[^;&|]*(\s(--force|--force-if-includes)(\s|$)|\s-[a-zA-Z]*f[a-zA-Z]*(\s|$)|\s\+[^[:space:]]+)"
+DESTRUCTIVE_RE+="|${CMD_POS}git\s+reset\b[^;&|]*\s--hard"
+DESTRUCTIVE_RE+="|${CMD_POS}git\s+clean\b[^;&|]*\s(-[a-zA-Z]*f|--force)"
+DESTRUCTIVE_RE+="|${CMD_POS}git\s+(checkout|restore)\b[^;&|]*\s\.{1,2}/?(\s|$)"
+DESTRUCTIVE_RE+="|(^|[;&|([:space:]])rm(\s+[^;&|]*)?\s(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)(\s|$)"
+if echo "$COMMAND" | grep -qE "$DESTRUCTIVE_RE"; then
     echo "BLOCKED: Potentially destructive command detected: $COMMAND" >&2
     exit 2
 fi
