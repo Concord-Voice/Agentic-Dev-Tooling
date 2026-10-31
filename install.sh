@@ -26,13 +26,25 @@ copy() { # copy $1 -> $2 unless exists and differs without --force
   # default on Linux) nests the source inside it (dst/dst) when dst already exists, rather than
   # merging into it -- a macOS/BSD cp trailing-slash quirk previously hid this. So dst is always
   # made absent first (skip = don't touch it; --force = remove it) before any cp runs.
+  # With LOCK set, a destination still holding exactly what the last install wrote is not a
+  # local change, so upstream updates reach it; anything edited since keeps the skip.
   local src=$1 dst=$2
   if [ -e "$dst" ]; then
-    if diff -rq "$src" "$dst" >/dev/null 2>&1; then return 0; fi   # identical: nothing to do
-    if [ "$FORCE" = 0 ]; then echo "skip (local changes, use --force): $dst"; return 0; fi
+    if diff -rq "$src" "$dst" >/dev/null 2>&1; then lock_record "$dst"; return 0; fi
+    if [ "$FORCE" = 0 ] && ! lock_untouched "$dst"; then echo "skip (local changes, use --force): $dst"; return 0; fi
     rm -rf "$dst"
   fi
-  mkdir -p "$(dirname "$dst")"; cp -R "$src" "$dst"
+  mkdir -p "$(dirname "$dst")"; cp -R "$src" "$dst"; lock_record "$dst"
+}
+LOCK=""
+tree_hash() { (cd "$1" 2>/dev/null && find . -type f | LC_ALL=C sort | while IFS= read -r f; do printf '%s ' "$f"; cksum < "$f"; done) || cksum < "$1"; }
+lock_key() { printf '%s' "${1#"$LOCK_ROOT"/}"; }
+lock_untouched() { [ -n "$LOCK" ] && [ -f "$LOCK" ] && [ "$(jq -r --arg k "$(lock_key "$1")" '.[$k] // ""' "$LOCK")" = "$(tree_hash "$1" | cksum)" ]; }
+lock_record() {
+  [ -n "$LOCK" ] || return 0
+  [ -f "$LOCK" ] || echo '{}' > "$LOCK"
+  local t; t="$(mktemp)"
+  jq --arg k "$(lock_key "$1")" --arg v "$(tree_hash "$1" | cksum)" '.[$k] = $v' "$LOCK" > "$t" && mv "$t" "$LOCK"
 }
 
 # Skip skill directories that hold only a SKILL.md.template scaffold and no real SKILL.md
@@ -48,6 +60,7 @@ is_template_only_skill() { # $1 = skill dir, trailing slash optional
 install_claude() {
   need jq; local root="${PROJECT:-$PWD}"; [ "$USER_SCOPE" = 1 ] && root="$HOME"
   local dot="$root/.claude"
+  mkdir -p "$dot"; LOCK="$dot/.agentic-dev-tooling.lock"; LOCK_ROOT="$root"
   for p in core-lifecycle guardrails release-ops reviewer-packs writing starter-memory; do
     [ -d "$HERE/plugins/$p/skills" ] && for s in "$HERE/plugins/$p/skills"/*/; do
       is_template_only_skill "$s" && continue

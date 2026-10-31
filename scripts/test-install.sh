@@ -35,6 +35,20 @@ jq -e '.hooks | length > 0' "$tmp/.claude/settings.json" >/dev/null || fail "hoo
 [ ! -d "$tmp/.claude/skills/supervise" ] || fail "fleet installed without --with-fleet"
 [ -f "$tmp/.claude/skills/verify-quality-gate/SKILL.md" ] || fail "verify-quality-gate skill not installed"
 
+# Upstream updates reach files the adopter never touched; hand-edited ones are kept.
+up="$tmp/upstream"; mkdir -p "$up"; cp -R "$HERE/install.sh" "$HERE/plugins" "$HERE/config" "$HERE/scripts" "$HERE/docs" "$up/"
+proj="$tmp/locked"; git -C "$tmp" init -q "$proj" 2>/dev/null || git init -q "$proj"
+"$up/install.sh" claude --project "$proj" >/dev/null
+[ -f "$proj/.claude/.agentic-dev-tooling.lock" ] || fail "install did not write its lock"
+echo "UPSTREAM-v2" >> "$up/plugins/core-lifecycle/skills/ci-status/SKILL.md"
+"$up/install.sh" claude --project "$proj" >/dev/null
+grep -q UPSTREAM-v2 "$proj/.claude/skills/ci-status/SKILL.md" || fail "upstream update did not reach an untouched install"
+echo "LOCAL-EDIT" >> "$proj/.claude/skills/ci-status/SKILL.md"
+echo "UPSTREAM-v3" >> "$up/plugins/core-lifecycle/skills/ci-status/SKILL.md"
+"$up/install.sh" claude --project "$proj" >/dev/null
+grep -q LOCAL-EDIT "$proj/.claude/skills/ci-status/SKILL.md" || fail "hand-edited install was overwritten"
+if grep -q UPSTREAM-v3 "$proj/.claude/skills/ci-status/SKILL.md"; then fail "hand-edited install took the upstream change"; fi
+
 # I9: the path-scoped rules docs must land at .claude/rules/<name>.md -- that is the path
 # skills and agents cite ("see .claude/rules/labels.md"), so a missing install makes every
 # one of those references dangle.
