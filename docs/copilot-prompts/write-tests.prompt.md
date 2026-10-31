@@ -38,4 +38,4 @@ Generate tests for the provided code following the project's conventions.
 - Every new source file needs a corresponding test file
 - Every new function: at least one happy-path and one error-path test
 
-Reference: `.claude/rules/tests.md`, `.github/instructions/test-files.instructions.md`
+Reference: your project's test rule and instruction files, if it has them

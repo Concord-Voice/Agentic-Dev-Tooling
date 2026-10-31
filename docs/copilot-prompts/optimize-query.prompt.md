@@ -34,4 +34,4 @@ Optimize the following PostgreSQL query for the backend.
 - Use `CREATE INDEX CONCURRENTLY` for production tables
 - Batch inserts with `unnest()` for bulk operations
 
-Reference: `.claude/rules/backend.md`, `.claude/rules/migrations.md`
+Reference: your project's backend and migration rule files, if it has them

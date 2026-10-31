@@ -8,7 +8,7 @@
 
 ## Purpose
 
-Security-focused system prompts are not optional. The difference between a default prompt and a security-hardened prompt can be the difference between 10% and ~100% secure code output. This document tracks known baselines to inform tool configuration and review practices.
+Security-focused system prompts are not optional. The difference between a default prompt and a security-hardened prompt can change the share of secure code output dramatically (see the estimates below). This document tracks known baselines to inform tool configuration and review practices.
 
 ## Industry Data
 
@@ -34,7 +34,7 @@ Secret leak data from [GitGuardian State of Secrets Sprawl 2025](https://blog.gi
 | Codex (OpenAI) | ~10% | ~50-70% | Legacy model; lower ceiling even with hardened prompts |
 | Copilot (GitHub) | ~15-25% | ~60-80% | Depends on underlying model; benefits from copilot-instructions.md |
 
-These are approximate ranges based on published research and internal observation, not formal benchmarks. Rates vary by language, vulnerability type, and prompt complexity.
+These figures are rough internal estimates, not sourced or measured benchmarks; the Veracode report above does not break results down by model. Treat them as directional only and replace them with your own measurements. Rates vary by language, vulnerability type, and prompt complexity.
 
 ## Implications for This Project
 
@@ -44,7 +44,7 @@ These are approximate ranges based on published research and internal observatio
 
 3. **The RCI workflow** (see `rci-workflow.md`) provides an additional safety layer by having the model self-review before presenting code.
 
-4. **Model selection matters.** Claude has the higher baseline (~60%) and a near-perfect hardened rate (~95-100%). That makes it the right primary tool for a security-critical application.
+4. **Model selection matters.** Measure candidate models on your own security-sensitive tasks before choosing a primary tool; the estimates above are a starting hypothesis, not evidence.
 
 ## Model Version Pinning
 
@@ -56,7 +56,7 @@ These are approximate ranges based on published research and internal observatio
 
 ## Quarterly Review
 
-Update this document during the quarterly AI security review (see `.github/ISSUE_TEMPLATE/quarterly-ai-review.md`):
+Update this document during the quarterly AI security review (a recurring issue or calendar reminder in the consuming project):
 
 - Re-assess model baselines if new research is published or models are updated
 - Track whether the RCI workflow and hardened prompts are maintaining expected secure output rates

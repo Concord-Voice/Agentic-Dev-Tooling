@@ -16,7 +16,7 @@ Explain the End-to-End Encryption (E2EE) architecture in this project.
 
 ### Key Management
 - Channel keys: epoch-based rotation with RSA-OAEP wrapping
-- DM keys: per-conversation with key-epoch enforcement (migration 000041: `dm_key_revocations`)
+- DM keys: per-conversation with key-epoch enforcement and a revocation record
 - Key material stored via Electron `safeStorage` (OS keychain) — never plaintext
 - Private keys never sent to server unencrypted, never logged
 
@@ -27,11 +27,10 @@ Explain the End-to-End Encryption (E2EE) architecture in this project.
 4. Key rotation: new epoch wraps new key with each member's RSA public key
 
 ### Implementation
-- Client-side: `e2eeService` (canonical encryption/decryption service)
+- Client-side: one canonical encryption/decryption service
 - Server-side: unconditional E2EE — there is no per-channel or per-conversation
-  opt-out. `is_encrypted` was dropped from all five tables that carried it by
-  migration 000062 (#201); the WebSocket hub enforces the channel key epoch
-  instead (`enforceChannelEpoch`)
-- DM: key-epoch validation via `dm_key_revocations` table (migration 000041)
+  opt-out, and no per-row "is encrypted" flag. The real-time hub enforces the
+  current channel key epoch instead
+- DM: key-epoch validation against the revocation record
 
-Reference: `.claude/rules/e2ee.md`, `docs/ai-workflows/prompt-templates/crypto-code.md`
+Reference: `docs/ai-workflows/prompt-templates/crypto-code.md`, plus your project's E2EE rule file if it has one

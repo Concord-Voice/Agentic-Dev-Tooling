@@ -1,6 +1,6 @@
 # Recursive Criticism and Improvement (RCI) Workflow
 
-After generating security-sensitive code, AI tools should review their own output for vulnerabilities before presenting it. This pattern significantly improves secure code generation rates — from ~10% to ~95-100% with security-focused prompting and self-review (see `model-security-baselines.md`).
+After generating security-sensitive code, AI tools should review their own output for vulnerabilities before presenting it. Combined with security-focused prompting, this pattern is expected to raise secure code generation rates substantially (see the directional estimates in `model-security-baselines.md`).
 
 ## When to Apply
 
@@ -38,7 +38,7 @@ When generating code, mentally simulate running the project's static analysis to
 - **ESLint** — no `eval`, no `dangerouslySetInnerHTML`, no `innerHTML`, no `any` in security paths
 - **golangci-lint (gosec)** — SQL injection, hardcoded credentials, weak crypto, unhandled errors
 - **SonarQube** — cognitive complexity, code smells, security hotspots, coverage gaps
-- **Custom Semgrep rules** — project-specific patterns (once configured in Phase 3, see `.semgrep/`)
+- **Custom Semgrep rules** — project-specific patterns (kept in the consuming project's Semgrep config)
 
 ## Example
 

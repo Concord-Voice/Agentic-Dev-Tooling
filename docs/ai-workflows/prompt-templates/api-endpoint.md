@@ -32,7 +32,7 @@ Requirements:
 - Generic error messages (no internal details to client)
 - Tests with happy path + auth failure + validation failure + DB error cases
 
-Follow the project's API conventions in CLAUDE.md and go-backend.instructions.md.
+Follow the project's API conventions in its CLAUDE.md and backend instructions.
 Apply the RCI self-review pattern before presenting the code.
 ```
 

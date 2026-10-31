@@ -32,7 +32,7 @@ Requirements:
 - No @electron/remote, no nodeIntegration, contextIsolation ON
 - Tests for the handler (mock IPC events)
 
-Follow Electron security constraints in CLAUDE.md and react-frontend.instructions.md.
+Follow the Electron security constraints in the project's CLAUDE.md and frontend instructions.
 Apply the RCI self-review pattern before presenting the code.
 ```
 
