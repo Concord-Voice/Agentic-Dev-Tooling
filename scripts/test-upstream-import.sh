@@ -74,6 +74,16 @@ reset
 git -C "$down" reset -q --hard HEAD~1
 cd "$up" && git reset -q --hard HEAD~1
 
+# The diff's added-line indicator is not content: a '>'-prefixed marker
+# must not match a plain line.
+cd "$down" && jq '.scrub = [">REDACTED"]' .github/upstream-sync.json > c.json && mv c.json .github/upstream-sync.json && git commit -qam gt-scrub
+cd "$up" && echo 'REDACTED' >> svc/b.txt && git commit -qam scrub5
+run; rc=$?
+check "indicator is not matched as content (got $rc)" '[[ $rc -eq 0 ]]'
+reset
+git -C "$down" reset -q --hard HEAD~1
+cd "$up" && git reset -q --hard HEAD~1
+
 # 4. Upstream edits a file downstream deleted: refused, lock unchanged.
 lock_before=$(cat "$down/.github/upstream-sync.lock")
 cd "$down" && git rm -q svc/b.txt && git commit -qm drop-b

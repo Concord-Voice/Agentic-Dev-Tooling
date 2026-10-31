@@ -79,7 +79,7 @@ updiff() { git --literal-pathspecs -C "$up" diff --no-renames "$old" "$new" "$@"
 updiff --binary > "$patch"
 if (( ${#scrubs[@]} )); then
   # A distinct marker for added lines, so `+++` headers never mask content.
-  scrub=$(updiff --output-indicator-new='>' | grep -E '^>' | grep -F "${scrubs[@]/#/-e}" || true)
+  scrub=$(updiff --output-indicator-new='>' | grep -E '^>' | cut -c2- | grep -F "${scrubs[@]/#/-e}" || true)
   [[ -z "$scrub" ]] || fail "the upstream diff adds scrub markers; fix them upstream first:
 $scrub"
 fi
