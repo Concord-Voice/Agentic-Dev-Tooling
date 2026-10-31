@@ -42,7 +42,9 @@ dc() { printf '{"tool_input":{"command":"%s"}}' "$1" | bash "$HOOKS/destructive-
 for c in "git push --force origin main" "git push -f" "git reset --hard HEAD~1" "git clean -fd" "rm -rf build" "cd x && rm -r y" "git checkout -- ." \
          "git push origin +main" "git push origin b -fu" "git restore --staged --worktree ." "rm --recursive x" \
          "rm -f -r x" "git checkout -- ./" "git checkout HEAD -- ." "git restore ." "git clean --force" "find . | xargs rm -rf" "bash -c \\\"rm -rf build\\\"" "sh -c 'git reset --hard'" \
-         "git diff --staged && git restore ." "git restore --staged . && git restore ." "git restore \\\".\\\"" "git restore '.'"; do
+         "git diff --staged && git restore ." "git restore --staged . && git restore ." "git restore \\\".\\\"" "git restore '.'" \
+         "git commit -m \\\"don't\\\" && git reset --hard && git commit -m \\\"it's\\\"" "echo \\\"\$(rm -rf x)\\\"" \
+         "git restore --staged --worktree=true ." "git restore -SW ."; do
   [ "$(dc "$c")" = 2 ] || fail "destructive: should block: $c"
 done
 for c in "git push --force-with-lease origin b" "git push -u origin b" "git reset --soft HEAD~1" "rm file.txt" "git checkout -- src/a.ts" "npm run format" \
