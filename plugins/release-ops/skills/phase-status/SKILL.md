@@ -171,8 +171,9 @@ Next action: [concrete recommendation based on the above]
 ```
 
 The `By Priority` rows above show the DEFAULT `P1`-`P5` scheme. Emit one row per
-entry in `$PRIORITY_LABELS` (Step 0), in that array's order, plus the `(none)`
-row — never a fixed five.
+bucket from Step 3, in that order: the board's `.project.fields.priority.options`
+when a board is configured, otherwise `$PRIORITY_LABELS` (Step 0). Add the `(none)`
+row for `Unprioritised` — never a fixed five.
 
 ## Recommendations
 
