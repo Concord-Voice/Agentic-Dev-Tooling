@@ -45,13 +45,16 @@ for c in "git push --force origin main" "git push -f" "git reset --hard HEAD~1" 
          "git diff --staged && git restore ." "git restore --staged . && git restore ." "git restore \\\".\\\"" "git restore '.'" \
          "git commit -m \\\"don't\\\" && git reset --hard && git commit -m \\\"it's\\\"" "echo \\\"\$(rm -rf x)\\\"" \
          "git restore --staged --worktree=true ." "git restore -SW ." \
-         "git -C /tmp/x reset --hard HEAD" "git -c advice.detachedHead=false reset --hard" "git --no-pager push -f"; do
+         "git -C /tmp/x reset --hard HEAD" "git -c advice.detachedHead=false reset --hard" "git --no-pager push -f" \
+         "env git reset --hard" "sudo git reset --hard" "time git push -f" "/usr/bin/git reset --hard" "GIT_DIR=.git git reset --hard" \
+         "{ git reset --hard; }" "if true; then git reset --hard; fi" "! git reset --hard" "ls | xargs git push -f" \
+         "git -C \\\"/tmp/a b\\\" reset --hard" "git --work-tree . reset --hard" "bash -lc \\\"rm -rf x\\\"" 'bash -c \"echo \\\"a\\\" && rm -rf x\"'; do
   [ "$(dc "$c")" = 2 ] || fail "destructive: should block: $c"
 done
 for c in "git push --force-with-lease origin b" "git push -u origin b" "git reset --soft HEAD~1" "rm file.txt" "git checkout -- src/a.ts" "npm run format" \
          "git commit -m 'fix git reset --hard docs'" "git commit -m 'document git push --force handling'" \
          "git push --force-with-lease --force-if-includes origin topic" "git restore --staged ." \
-         "git commit -m 'Prevent rm -rf from running'"; do
+         "git commit -m 'Prevent rm -rf from running'" "git -C \\\"/tmp/a b\\\" status" "time make test"; do
   [ "$(dc "$c")" = 0 ] || fail "destructive: should allow: $c"
 done
 
