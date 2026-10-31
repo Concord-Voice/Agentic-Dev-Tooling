@@ -40,6 +40,16 @@ out="$(run test-reminder.sh "$TMP/src/widget.go")"; echo "$out" | grep -q "DOCS-
 # ---- auto-format: empty/absent file path is a clean no-op ----
 [ "$(run auto-format.sh "")" = "0|" ] || fail "auto-format: empty path should no-op"
 
+# ---- auto-format: never fetch prettier through npx; only the installed binary runs ----
+mkdir -p "$TMP/fmt/bin"; printf '{}\n' > "$TMP/fmt/.prettierrc"; printf 'x\n' > "$TMP/fmt/a.md"
+printf '#!/bin/sh\ntouch "%s/npx-ran"\n' "$TMP/fmt" > "$TMP/fmt/bin/npx"; chmod +x "$TMP/fmt/bin/npx"
+PATH="$TMP/fmt/bin:$PATH" run auto-format.sh "$TMP/fmt/a.md" >/dev/null
+[ ! -e "$TMP/fmt/npx-ran" ] || fail "auto-format: ran npx with no installed prettier"
+mkdir -p "$TMP/fmt/node_modules/.bin"
+printf '#!/bin/sh\ntouch "%s/prettier-ran"\n' "$TMP/fmt" > "$TMP/fmt/node_modules/.bin/prettier"; chmod +x "$TMP/fmt/node_modules/.bin/prettier"
+run auto-format.sh "$TMP/fmt/a.md" >/dev/null
+[ -e "$TMP/fmt/prettier-ran" ] || fail "auto-format: installed prettier did not run"
+
 # ---- protect-applied-migrations: no migrations dir in the repo => nothing to
 # protect, allow (rc0, no stderr) — regression test for the fail-open fix:
 # realpath used to fail closed and block EVERY Edit when the dir was absent.

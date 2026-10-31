@@ -23,8 +23,13 @@ find_prettier_dir() { # nearest ancestor (file dir → REPO_ROOT) with prettier 
 
 case "$FILE_PATH" in
   *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.css|*.scss|*.json|*.md|*.yaml|*.yml|*.html)
-    if command -v npx >/dev/null 2>&1; then
-      d="$(find_prettier_dir)"; [ -n "$d" ] && npx --prefix "$d" prettier --write "$FILE_PATH" 2>/dev/null
+    # Only the project's installed, lockfile-pinned prettier: npx would fetch the latest
+    # release from the registry when none is installed.
+    d="$(find_prettier_dir)"
+    if [ -n "$d" ]; then
+      for p in "$d/node_modules/.bin/prettier" "$REPO_ROOT/node_modules/.bin/prettier"; do
+        [ -x "$p" ] && { "$p" --write "$FILE_PATH" 2>/dev/null; break; }
+      done
     fi ;;
 esac
 if [[ "$FILE_PATH" =~ \.go$ ]]; then
