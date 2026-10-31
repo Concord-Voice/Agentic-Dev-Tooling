@@ -62,7 +62,18 @@ gh issue list \
 call, whichever is faster this session)
 
 ### Step 3: Group by priority
-Parse the label list on each issue for the labels in `$PRIORITY_LABELS` (Step 0;
+When a board is configured (`rc_has '.project'`), priority is the board's Priority
+field, not a label (see `.claude/rules/labels.md`). Read it per issue and bucket by
+the option names, in the order `.project.fields.priority.options` declares:
+
+```bash
+gh project item-list "$(rc_get '.project.number')" --owner "$(rc_get '.project.owner' '@me')" \
+  --format json --limit 500 \
+  | jq -r '.items[] | select(.content.number != null) | "\(.content.number)\t\(.priority // "")"'
+```
+
+Issues with no Priority value go into `Unprioritised`. Without a board, fall back
+to labels: parse the label list on each issue for the labels in `$PRIORITY_LABELS` (Step 0;
 default `P1`, `P2`, `P3`, `P4`, `P5`), and bucket in that array's order — it is
 declared highest-priority-first. A repo that declares `P1`-`P99`, or a different
 naming scheme entirely, groups by whatever it declared; do NOT assume five
