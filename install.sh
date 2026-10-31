@@ -121,6 +121,8 @@ install_claude() {
   # $HOME, so they're inert there. For --user we rewrite any ".claude/hooks/..." command
   # (base- or adopter-supplied) to the absolute path they were just installed at.
   jq -s --arg abs_prefix "$dot/hooks/" --argjson userscope "$([ "$USER_SCOPE" = 1 ] && echo true || echo false)" '
+    # --user rewrote earlier commands to absolute paths, so compare in relative form.
+    def norm: if type == "string" and startswith($abs_prefix) then ".claude/hooks/" + ltrimstr($abs_prefix) else . end;
     (.[0]) as $adopter | (.[1]) as $base |
     ($base * $adopter) as $shallow |
     ( ($base.hooks // {}) as $bh | ($adopter.hooks // {}) as $ah |
@@ -130,8 +132,8 @@ install_claude() {
         value: (
           (($ah[.]) // []) as $aarr |
           (($bh[.]) // []) as $barr |
-          ($aarr | [.[] | .hooks[]?.command]) as $existing |
-          ($barr | map(select(((.hooks // []) | any(. as $h | ($existing | index($h.command)) != null)) | not))) as $toadd |
+          ($aarr | [.[] | .hooks[]?.command | norm]) as $existing |
+          ($barr | map(select(((.hooks // []) | any(. as $h | ($existing | index($h.command | norm)) != null)) | not))) as $toadd |
           ($aarr + $toadd)
         )
       }) | from_entries)
@@ -267,6 +269,8 @@ MD
   # granularity install_claude uses for the same skill directories.
   case "$PLATFORM" in
     codex|antigravity)
+      # Several skills source scripts/repo-config.sh from the project root.
+      copy "$HERE/scripts/repo-config.sh" "$local_root/scripts/repo-config.sh"
       for p in core-lifecycle guardrails release-ops reviewer-packs writing starter-memory; do
         [ -d "$HERE/plugins/$p/skills" ] && for s in "$HERE/plugins/$p/skills"/*/; do
           is_template_only_skill "$s" && continue

@@ -64,4 +64,10 @@ for t in "$tmp_codex" "$tmp_copilot" "$tmp_antigravity"; do
   done
 done
 
+# Installed skills source scripts/repo-config.sh from the project root.
+for t in "$tmp_codex" "$tmp_antigravity"; do
+  grep -rqF 'scripts/repo-config.sh' "$t/.agents/skills" || { echo "FAIL: expected a skill that sources the helper in $t"; exit 1; }
+  [ -f "$t/scripts/repo-config.sh" ] || { echo "FAIL: $t skills source scripts/repo-config.sh, which was not installed"; exit 1; }
+done
+
 echo ok
