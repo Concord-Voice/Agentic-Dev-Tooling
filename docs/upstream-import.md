@@ -1,6 +1,6 @@
 # Upstream import
 
-`scripts/upstream-import.sh` keeps a private repo current with the public repo it was split from, for example Self-Hosted into Hosted, or this repo into Internal-Dev-Tooling. It never overwrites what the private repo owns.
+`scripts/upstream-import.sh` keeps a private repo current with the public repo it was split from, for example a public product repo into its private hosting repo. It never overwrites what the private repo owns.
 
 It replays upstream's diff since the last import, limited to the paths upstream owns, with `git apply --3way`. A file the private repo edited keeps its edits, and only the lines upstream changed move. When both sides changed the same lines, the result is a conflict for a person to resolve, never a silent overwrite. The script stages the change and never pushes; the caller opens a pull request.
 
@@ -10,7 +10,7 @@ It replays upstream's diff since the last import, limited to the paths upstream 
 
 ```json
 {
-  "upstream": "Concord-Voice/Self-Hosted",
+  "upstream": "Org/Public-Repo",
   "import": ["services/", "client/admin/", "packages/"],
   "private": [".github/workflows/deploy-", "CLAUDE.md", ".claude/"]
 }
@@ -43,9 +43,9 @@ jobs:
     steps:
       - uses: actions/checkout@<sha> # v7
       - uses: actions/checkout@<sha> # v7, the public upstream: no token needed
-        with: {repository: Concord-Voice/Self-Hosted, path: .upstream, fetch-depth: 0, persist-credentials: false}
+        with: {repository: Org/Public-Repo, path: .upstream, fetch-depth: 0, persist-credentials: false}
       - uses: actions/checkout@<sha> # v7, this tool at a pinned commit
-        with: {repository: Concord-Voice/Agentic-Dev-Tooling, ref: <sha>, path: .tool, persist-credentials: false}
+        with: {repository: Org/this-tooling-repo, ref: <sha>, path: .tool, persist-credentials: false}
       - run: |
           git switch -c "upstream-import/$(git -C .upstream rev-parse --short HEAD)"
           bash .tool/scripts/upstream-import.sh .upstream || [ $? -eq 2 ]

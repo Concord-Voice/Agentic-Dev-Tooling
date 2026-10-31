@@ -22,7 +22,8 @@
 #      changed line adds a publication-scrub marker (`[internal]` or
 #      "internal development reference omitted"): scrub damage coming back.
 #   3. Writes the new lock and stages everything. The caller commits and opens
-#      the pull request; nothing here pushes.
+#      the pull request; nothing here pushes. A diff git rejects without
+#      leaving conflicts is refused, and the lock stays put.
 #
 # Prints the imported and skipped (outside `import`) paths. Exit 0 = staged
 # (or nothing to import), 1 = refused, 2 = conflicts left in the index.
@@ -68,15 +69,26 @@ fi
 # --3way needs upstream's preimage blobs locally; this adds objects, no refs.
 git fetch -q --no-tags "$up" HEAD
 patch=$(mktemp); trap 'rm -f "$patch"' EXIT
-git -C "$up" diff --binary --no-renames "$old" "$new" -- "${paths[@]}" > "$patch"
-scrub=$(grep -E '^\+([^+]|$)' "$patch" | grep -E '\[internal\]|internal development reference omitted' || true)
+# Literal pathspecs: a filename with glob characters must not widen the patch
+# past what owned() accepted.
+updiff() { git --literal-pathspecs -C "$up" diff --no-renames "$old" "$new" "$@" -- "${paths[@]}"; }
+updiff --binary > "$patch"
+# A distinct marker for added lines, so `+++` headers never mask content.
+scrub=$(updiff --output-indicator-new='>' | grep -E '^>' | grep -E '\[internal\]|internal development reference omitted' || true)
 [[ -z "$scrub" ]] || fail "the upstream diff adds [internal] scrub tokens; fix them upstream first:
 $scrub"
 
 printf 'Imported: %s\n' "${paths[@]}"
-echo "$new" > "$LOCK"; git add "$LOCK"
 if ! git apply --3way --index "$patch"; then
+  if [[ -z "$(git ls-files -u)" ]]; then
+    # Rejected outright (e.g. upstream edits a file downstream deleted): no
+    # conflict to resolve, so undo and keep the lock where it was.
+    git reset -q --hard
+    fail "upstream diff does not apply and left no conflicts to resolve; port it by hand"
+  fi
+  echo "$new" > "$LOCK"; git add "$LOCK"
   echo "::warning::upstream-import: conflicts; resolve them in the files git lists as unmerged." >&2
   exit 2
 fi
+echo "$new" > "$LOCK"; git add "$LOCK"
 echo "Staged $old..$new."

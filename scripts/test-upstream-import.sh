@@ -59,13 +59,42 @@ run; rc=$?
 check "reference-omitted marker refused (got $rc)" '[[ $rc -eq 1 ]]'
 reset
 
-# 4. Overlapping prefixes are a config error.
+cd "$up" && git reset -q --hard HEAD~1 && echo '+ [internal]/x' >> svc/b.txt && git commit -qam scrub3
+run; rc=$?
+check "marker on a line starting with + refused (got $rc)" '[[ $rc -eq 1 ]]'
+reset
+cd "$up" && git reset -q --hard HEAD~1
+
+# 4. Upstream edits a file downstream deleted: refused, lock unchanged.
+lock_before=$(cat "$down/.github/upstream-sync.lock")
+cd "$down" && git rm -q svc/b.txt && git commit -qm drop-b
+cd "$up" && echo more >> svc/b.txt && git commit -qam edit-b
+run; rc=$?
+check "rejected patch exits 1 (got $rc)" '[[ $rc -eq 1 ]]'
+check "lock unchanged after a rejected patch" '[[ $(cat "$down/.github/upstream-sync.lock") == "$lock_before" ]]'
+check "tree clean after a rejected patch" 'git -C "$down" diff --quiet HEAD'
+reset
+git -C "$down" reset -q --hard HEAD~1
+cd "$up" && git reset -q --hard HEAD~1
+
+# 5. A glob character in an imported name can't pull in a private path.
+cd "$down" && echo '{"import":["svc/a*"],"private":["svc/abc"]}' > .github/upstream-sync.json \
+  && echo private-abc > svc/abc && git add -A && git commit -qm glob
+cd "$up" && echo star > 'svc/a*' && echo up-abc > svc/abc && git add -A && git commit -qm glob
+run; rc=$?
+check "glob name imports cleanly (got $rc)" '[[ $rc -eq 0 ]]'
+check "glob name: private svc/abc untouched" 'grep -qx private-abc "$down/svc/abc" && git -C "$down" diff --cached --quiet -- svc/abc'
+reset
+git -C "$down" reset -q --hard HEAD~1
+cd "$up" && git reset -q --hard HEAD~1
+
+# 6. Overlapping prefixes are a config error.
 cd "$down" && echo '{"import":["svc/"],"private":["svc/secret"]}' > .github/upstream-sync.json && git commit -qam overlap
 run; rc=$?
 check "import/private overlap refused (got $rc)" '[[ $rc -eq 1 ]] && grep -q overlaps "$tmp/out"'
 git reset -q --hard HEAD~1
 
-# 5. An upstream that doesn't descend from the lock is refused.
+# 7. An upstream that doesn't descend from the lock is refused.
 cd "$up" && git checkout -q --orphan other && git commit -qm unrelated
 run; rc=$?
 check "non-descendant refused (got $rc)" '[[ $rc -eq 1 ]] && grep -q "does not descend" "$tmp/out"'
