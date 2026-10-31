@@ -36,6 +36,8 @@ fail() { echo "::error::upstream-import: $1" >&2; exit 1; }
 [[ $# -eq 1 && -d "$1/.git" ]] || fail "usage: $0 UPSTREAM_DIR"
 up=$1
 [[ -f "$CONFIG" && -f "$LOCK" ]] || fail "missing $CONFIG or $LOCK"
+command -v jq >/dev/null || fail "jq is required"
+jq -e . "$CONFIG" >/dev/null 2>&1 || fail "$CONFIG is not valid JSON"
 if ! git diff --quiet || ! git diff --cached --quiet; then fail "working tree is not clean"; fi
 
 mapfile -t import < <(jq -r '.import[]' "$CONFIG")

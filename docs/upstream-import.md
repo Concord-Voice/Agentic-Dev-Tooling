@@ -48,8 +48,11 @@ jobs:
         with: {repository: Org/this-tooling-repo, ref: <sha>, path: .tool, persist-credentials: false}
       - run: |
           git switch -c "upstream-import/$(git -C .upstream rev-parse --short HEAD)"
-          bash .tool/scripts/upstream-import.sh .upstream || [ $? -eq 2 ]
-          # commit and open the PR with gh; it merges only after review
+          rc=0; bash .tool/scripts/upstream-import.sh .upstream || rc=$?
+          [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ] || exit "$rc"
+          # Exit 2 leaves conflicts unmerged: resolve them on this branch, or
+          # open the PR as a draft labelled needs-resolution. Never auto-merge it.
+          # Otherwise commit and open the PR with gh; it merges only after review.
 ```
 
 Add `.upstream/` and `.tool/` to the private repo's `.gitignore`. That keeps the two checkouts out of the import commit.

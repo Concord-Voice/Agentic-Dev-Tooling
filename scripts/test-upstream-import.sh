@@ -94,7 +94,13 @@ run; rc=$?
 check "import/private overlap refused (got $rc)" '[[ $rc -eq 1 ]] && grep -q overlaps "$tmp/out"'
 git reset -q --hard HEAD~1
 
-# 7. An upstream that doesn't descend from the lock is refused.
+# 7. A config that isn't JSON is refused.
+cd "$down" && echo 'not json' > .github/upstream-sync.json && git commit -qam badjson
+run; rc=$?
+check "invalid JSON config refused (got $rc)" '[[ $rc -eq 1 ]] && grep -q "not valid JSON" "$tmp/out"'
+git reset -q --hard HEAD~1
+
+# 8. An upstream that doesn't descend from the lock is refused.
 cd "$up" && git checkout -q --orphan other && git commit -qm unrelated
 run; rc=$?
 check "non-descendant refused (got $rc)" '[[ $rc -eq 1 ]] && grep -q "does not descend" "$tmp/out"'
