@@ -37,7 +37,8 @@ copy() { # copy $1 -> $2 unless exists and differs without --force
   mkdir -p "$(dirname "$dst")"; cp -R "$src" "$dst"; lock_record "$dst"
 }
 LOCK=""
-tree_hash() { (cd "$1" 2>/dev/null && find . -type f | LC_ALL=C sort | while IFS= read -r f; do printf '%s ' "$f"; cksum < "$f"; done) || cksum < "$1"; }
+# Symlinks count by target, so an adopter's added link reads as a local change.
+tree_hash() { (cd "$1" 2>/dev/null && find . \( -type f -o -type l \) | LC_ALL=C sort | while IFS= read -r f; do printf '%s ' "$f"; if [ -L "$f" ]; then echo "-> $(readlink "$f")"; else cksum < "$f"; fi; done) || cksum < "$1"; }
 lock_key() { printf '%s' "${1#"$LOCK_ROOT"/}"; }
 lock_untouched() { [ -n "$LOCK" ] && [ -f "$LOCK" ] && [ "$(jq -r --arg k "$(lock_key "$1")" '.[$k] // ""' "$LOCK")" = "$(tree_hash "$1" | cksum)" ]; }
 lock_record() {
@@ -101,6 +102,14 @@ install_claude() {
   # (plain `*`), but each hooks.<event> array is unioned explicitly -- every adopter entry is
   # kept, and only base entries whose hook command isn't already present (by command string,
   # anywhere in that event's adopter entries) get appended.
+  # The fleet hook ships wired only for the marketplace route (hooks.json), so add it here.
+  local base="$HERE/config/base.settings.json"
+  if [ "$WITH_FLEET" = 1 ]; then
+    base="$(mktemp)"
+    jq '.hooks.SessionStart += [{matcher: "startup|resume|clear|compact",
+          hooks: [{type: "command", command: ".claude/hooks/session-handshake.sh", timeout: 10}]}]' \
+      "$HERE/config/base.settings.json" > "$base"
+  fi
   local had_existing_hooks
   had_existing_hooks="$(jq '((.hooks // {}) | [.[] | length] | add // 0) > 0' "$settings")"
 
@@ -137,8 +146,9 @@ install_claude() {
         )
       ))
     else $merged end
-  ' "$settings" "$HERE/config/base.settings.json" > "$settings.tmp" \
+  ' "$settings" "$base" > "$settings.tmp" \
     && mv "$settings.tmp" "$settings"
+  [ "$WITH_FLEET" = 1 ] && rm -f "$base"
 
   [ "$had_existing_hooks" = "true" ] && \
     echo "note: settings.json already had hook entries — merged (kept every existing entry, added any missing base hook wiring)"

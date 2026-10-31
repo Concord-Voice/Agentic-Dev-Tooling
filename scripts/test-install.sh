@@ -48,6 +48,11 @@ echo "UPSTREAM-v3" >> "$up/plugins/core-lifecycle/skills/ci-status/SKILL.md"
 "$up/install.sh" claude --project "$proj" >/dev/null
 grep -q LOCAL-EDIT "$proj/.claude/skills/ci-status/SKILL.md" || fail "hand-edited install was overwritten"
 if grep -q UPSTREAM-v3 "$proj/.claude/skills/ci-status/SKILL.md"; then fail "hand-edited install took the upstream change"; fi
+# A symlink the adopter added is a local change too, so the next update must not delete it.
+ln -s SKILL.md "$proj/.claude/skills/pr-creation/local-notes"
+echo "UPSTREAM-v2" >> "$up/plugins/core-lifecycle/skills/pr-creation/SKILL.md"
+"$up/install.sh" claude --project "$proj" >/dev/null
+[ -L "$proj/.claude/skills/pr-creation/local-notes" ] || fail "upstream update deleted an adopter-added symlink"
 
 # I9: the path-scoped rules docs must land at .claude/rules/<name>.md -- that is the path
 # skills and agents cite ("see .claude/rules/labels.md"), so a missing install makes every
