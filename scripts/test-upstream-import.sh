@@ -84,6 +84,17 @@ reset
 git -C "$down" reset -q --hard HEAD~1
 cd "$up" && git reset -q --hard HEAD~1
 
+# A git that can't produce the scrub diff fails closed instead of passing.
+mkdir -p "$tmp/oldgit"
+printf '#!/usr/bin/env bash\nfor a; do [[ $a == --output-indicator-new=* ]] && exit 129; done\nexec %q "$@"\n' "$(command -v git)" > "$tmp/oldgit/git"
+chmod +x "$tmp/oldgit/git"
+cd "$up" && echo 'plain line' >> svc/b.txt && git commit -qam scrub6
+(cd "$down" && PATH="$tmp/oldgit:$PATH" bash "$SCRIPT" "$up" >"$tmp/out" 2>&1); rc=$?
+check "scrub diff failure refused (got $rc)" '[[ $rc -eq 1 ]] && grep -q "scrub check" "$tmp/out"'
+check "nothing staged after a scrub diff failure" 'git -C "$down" diff --cached --quiet'
+reset
+cd "$up" && git reset -q --hard HEAD~1
+
 # 4. Upstream edits a file downstream deleted: refused, lock unchanged.
 lock_before=$(cat "$down/.github/upstream-sync.lock")
 cd "$down" && git rm -q svc/b.txt && git commit -qm drop-b
