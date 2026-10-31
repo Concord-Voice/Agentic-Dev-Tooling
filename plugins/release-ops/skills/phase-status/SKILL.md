@@ -69,8 +69,13 @@ the option names, in the order `.project.fields.priority.options` declares:
 ```bash
 gh project item-list "$(rc_get '.project.number')" --owner "$(rc_get '.project.owner' '@me')" \
   --format json --limit 500 \
-  | jq -r '.items[] | select(.content.number != null) | "\(.content.number)\t\(.priority // "")"'
+  | jq -r --arg repo "$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
+      '.items[] | select(.content.repository == $repo and .content.number != null)
+       | "\(.content.number)\t\(.priority // "")"'
 ```
+
+A board can hold several repositories' issues, so the filter keeps only this repo's
+items before joining on issue number.
 
 Issues with no Priority value go into `Unprioritised`. Without a board, fall back
 to labels: parse the label list on each issue for the labels in `$PRIORITY_LABELS` (Step 0;
