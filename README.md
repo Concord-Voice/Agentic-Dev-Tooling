@@ -74,7 +74,8 @@ references resolve to nothing.
 that file with the install. On a later run, a file that still matches the lock takes the
 upstream update, and a file you edited is skipped (`--force` overrides). To re-run it on a
 schedule, copy [`templates/sync-tooling.yml`](templates/sync-tooling.yml) into your repo's
-`.github/workflows/`. It opens one draft PR when something changed.
+`.github/workflows/`. It opens one draft PR when something changed, using a GitHub App token it
+mints at runtime (`SYNC_APP_CLIENT_ID` variable, `SYNC_APP_PRIVATE_KEY` secret).
 
 ## What's inside
 
