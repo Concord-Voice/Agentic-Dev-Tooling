@@ -41,7 +41,7 @@ out="$(run test-reminder.sh "$TMP/src/widget.go")"; echo "$out" | grep -q "DOCS-
 dc() { printf '{"tool_input":{"command":"%s"}}' "$1" | bash "$HOOKS/destructive-commands.sh" >/dev/null 2>&1; echo $?; }
 for c in "git push --force origin main" "git push -f" "git reset --hard HEAD~1" "git clean -fd" "rm -rf build" "cd x && rm -r y" "git checkout -- ." \
          "git push origin +main" "git push origin b -fu" "git push --force-if-includes" "rm --recursive x" \
-         "rm -f -r x" "git checkout -- ./" "git checkout HEAD -- ." "git restore ." "git clean --force"; do
+         "rm -f -r x" "git checkout -- ./" "git checkout HEAD -- ." "git restore ." "git clean --force" "find . | xargs rm -rf"; do
   [ "$(dc "$c")" = 2 ] || fail "destructive: should block: $c"
 done
 for c in "git push --force-with-lease origin b" "git push -u origin b" "git reset --soft HEAD~1" "rm file.txt" "git checkout -- src/a.ts" "npm run format" \
