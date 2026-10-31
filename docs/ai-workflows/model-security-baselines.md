@@ -36,7 +36,7 @@ Secret leak data from [GitGuardian State of Secrets Sprawl 2025](https://blog.gi
 
 These are approximate ranges based on published research and internal observation, not formal benchmarks. Rates vary by language, vulnerability type, and prompt complexity.
 
-## Implications for Concord
+## Implications for This Project
 
 1. **Security-focused system prompts** (`CLAUDE.md`, `copilot-instructions.md`) are the primary control determining whether AI output is secure. Without them, AI tools generate vulnerable code the majority of the time.
 
@@ -44,7 +44,7 @@ These are approximate ranges based on published research and internal observatio
 
 3. **The RCI workflow** (see `rci-workflow.md`) provides an additional safety layer by having the model self-review before presenting code.
 
-4. **Model selection matters.** Claude has the higher baseline (~60%) and a near-perfect hardened rate (~95-100%). That makes it the right primary tool for a security-critical application like Concord.
+4. **Model selection matters.** Claude has the higher baseline (~60%) and a near-perfect hardened rate (~95-100%). That makes it the right primary tool for a security-critical application.
 
 ## Model Version Pinning
 
@@ -65,5 +65,5 @@ Update this document during the quarterly AI security review (see `.github/ISSUE
 ## Related Documents
 
 - [RCI Workflow](rci-workflow.md)
-- [AI-Generated Code Policy](../policies/ai-generated-code-policy.md)
+- Your project's AI-generated code policy
 - CLAUDE.md — "AI Code Generation Security Constraints" section

@@ -1,6 +1,6 @@
 # Prompt Template: Authentication / Authorization Code
 
-Use this template when asking AI tools to generate auth-related code for Concord Voice.
+Use this template when asking AI tools to generate auth-related code for this project.
 
 ## Pre-filled Constraints
 
@@ -21,7 +21,7 @@ Include these constraints in your prompt or verify them in the output:
 ## Example Prompt
 
 ```
-Generate a [password reset / MFA enrollment / session management] endpoint for Concord Voice.
+Generate a [password reset / MFA enrollment / session management] endpoint for this project.
 
 Requirements:
 - Go (Gin framework) handler with dependency injection pattern

@@ -1,9 +1,9 @@
 ---
 agent: "ask"
-description: "Explain Concord Voice E2EE architecture, key management, and encryption flows"
+description: "Explain the project's E2EE architecture, key management, and encryption flows"
 ---
 
-Explain the End-to-End Encryption (E2EE) architecture in Concord Voice.
+Explain the End-to-End Encryption (E2EE) architecture in this project.
 
 ## Key Components
 

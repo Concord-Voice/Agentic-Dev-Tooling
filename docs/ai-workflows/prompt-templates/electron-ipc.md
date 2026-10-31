@@ -1,6 +1,6 @@
 # Prompt Template: Electron IPC
 
-Use this template when asking AI tools to generate Electron IPC handlers or preload bridge code for Concord Voice.
+Use this template when asking AI tools to generate Electron IPC handlers or preload bridge code for this project.
 
 ## Pre-filled Constraints
 
@@ -21,7 +21,7 @@ Include these constraints in your prompt or verify them in the output:
 ## Example Prompt
 
 ```
-Generate an IPC handler for [feature] in Concord Voice desktop client.
+Generate an IPC handler for [feature] in the desktop client.
 
 Requirements:
 - Main process handler in src/main/ with sender validation

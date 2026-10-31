@@ -62,5 +62,5 @@ parameterized queries, generic error messages."
 ## Related Documents
 
 - CLAUDE.md — "AI Code Generation Security Constraints" section
-- [AI-Generated Code Policy](../policies/ai-generated-code-policy.md)
+- Your project's AI-generated code policy
 - [Model Security Baselines](model-security-baselines.md)

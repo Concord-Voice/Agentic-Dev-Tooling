@@ -1,9 +1,9 @@
 ---
 agent: "ask"
-description: "Generate tests following Concord Voice testing conventions for Go and TypeScript"
+description: "Generate tests following the project's testing conventions for Go and TypeScript"
 ---
 
-Generate tests for the provided code following Concord Voice conventions.
+Generate tests for the provided code following the project's conventions.
 
 ## Go Test Conventions
 

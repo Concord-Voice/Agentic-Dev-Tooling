@@ -1,6 +1,6 @@
 # Prompt Template: Cryptographic Code
 
-Use this template when asking AI tools to generate or modify cryptographic code for Concord Voice.
+Use this template when asking AI tools to generate or modify cryptographic code for this project.
 
 ## Pre-filled Constraints
 
@@ -20,7 +20,7 @@ Include these constraints in your prompt or verify them in the output:
 ## Example Prompt
 
 ```
-Generate [key rotation / message encryption / key derivation] code for Concord Voice E2EE.
+Generate [key rotation / message encryption / key derivation] code for the project's E2EE.
 
 Requirements:
 - Use WebCrypto API (frontend) or Go crypto/* (backend)

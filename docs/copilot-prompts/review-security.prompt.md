@@ -5,7 +5,7 @@ description: "Security-focused code review against OWASP Top 10 and project secu
 
 Review this code for security vulnerabilities. Check against:
 
-## OWASP Top 10 — Key Categories for Concord Voice
+## OWASP Top 10 — Key Categories for This Project
 The project standard is the OWASP Top 10:2025 edition. Category names are used without
 A-numbers here, because the A-numbering differs between editions and the same number maps to
 different categories in each.
@@ -16,7 +16,7 @@ different categories in each.
 - **Broken Access Control** — privilege escalation, IDOR, missing RBAC checks
 - **Security Misconfiguration** — debug enabled, default credentials, permissive CORS
 
-## Concord Voice Security Standards
+## Project Security Standards
 - Parameterized queries only (`$1, $2` in Go, never `fmt.Sprintf`)
 - `crypto/subtle.ConstantTimeCompare` for auth comparisons
 - Argon2id for password hashing (t=3, m=64MB, p=4)
@@ -35,4 +35,4 @@ For each finding, report:
 4. **Description** of the vulnerability
 5. **Fix recommendation**
 
-Reference: `docs/policies/ai-generated-code-policy.md`, `docs/ai-workflows/rci-workflow.md`
+Reference: `docs/ai-workflows/rci-workflow.md`

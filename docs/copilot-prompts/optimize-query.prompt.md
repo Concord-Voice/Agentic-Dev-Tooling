@@ -3,7 +3,7 @@ agent: "ask"
 description: "Optimize PostgreSQL queries for performance while maintaining security constraints"
 ---
 
-Optimize the following PostgreSQL query for the Concord Voice control-plane.
+Optimize the following PostgreSQL query for the backend.
 
 ## Optimization Checklist
 

@@ -1,6 +1,6 @@
 # Prompt Template: API Endpoint
 
-Use this template when asking AI tools to generate REST API endpoints for Concord Voice.
+Use this template when asking AI tools to generate REST API endpoints for this project.
 
 ## Pre-filled Constraints
 
@@ -21,7 +21,7 @@ Include these constraints in your prompt or verify them in the output:
 ## Example Prompt
 
 ```
-Generate a [resource CRUD / action] endpoint for Concord Voice control-plane.
+Generate a [resource CRUD / action] endpoint for the backend.
 
 Requirements:
 - Go (Gin framework) handler with dependency injection
