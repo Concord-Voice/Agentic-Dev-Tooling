@@ -25,12 +25,13 @@ case "$FILE_PATH" in
   *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.css|*.scss|*.json|*.md|*.yaml|*.yml|*.html)
     # Only the project's installed, lockfile-pinned prettier: npx would fetch the latest
     # release from the registry when none is installed.
+    # Walk up from the config dir to REPO_ROOT so a hoisted workspace install is found.
     d="$(find_prettier_dir)"
-    if [ -n "$d" ]; then
-      for p in "$d/node_modules/.bin/prettier" "$REPO_ROOT/node_modules/.bin/prettier"; do
-        [ -x "$p" ] && { "$p" --write "$FILE_PATH" 2>/dev/null; break; }
-      done
-    fi ;;
+    while [ -n "$d" ]; do
+      [ -x "$d/node_modules/.bin/prettier" ] && { "$d/node_modules/.bin/prettier" --write "$FILE_PATH" 2>/dev/null; break; }
+      [ -n "$REPO_ROOT" ] && [ "$d" != "$REPO_ROOT" ] && [ "$d" != "/" ] || break
+      d="$(dirname "$d")"
+    done ;;
 esac
 if [[ "$FILE_PATH" =~ \.go$ ]]; then
   command -v goimports >/dev/null 2>&1 && goimports -w "$FILE_PATH" 2>/dev/null

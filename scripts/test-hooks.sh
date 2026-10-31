@@ -49,6 +49,11 @@ mkdir -p "$TMP/fmt/node_modules/.bin"
 printf '#!/bin/sh\ntouch "%s/prettier-ran"\n' "$TMP/fmt" > "$TMP/fmt/node_modules/.bin/prettier"; chmod +x "$TMP/fmt/node_modules/.bin/prettier"
 run auto-format.sh "$TMP/fmt/a.md" >/dev/null
 [ -e "$TMP/fmt/prettier-ran" ] || fail "auto-format: installed prettier did not run"
+# A hoisted install in an ancestor between the config dir and REPO_ROOT is found.
+mkdir -p "$TMP/ws/pkg" "$TMP/ws/node_modules/.bin"; printf '{}\n' > "$TMP/ws/pkg/.prettierrc"; printf 'x\n' > "$TMP/ws/pkg/a.md"
+printf '#!/bin/sh\ntouch "%s/hoisted-ran"\n' "$TMP/ws" > "$TMP/ws/node_modules/.bin/prettier"; chmod +x "$TMP/ws/node_modules/.bin/prettier"
+run auto-format.sh "$TMP/ws/pkg/a.md" >/dev/null
+[ -e "$TMP/ws/hoisted-ran" ] || fail "auto-format: hoisted prettier in an intermediate dir did not run"
 
 # ---- protect-applied-migrations: no migrations dir in the repo => nothing to
 # protect, allow (rc0, no stderr) — regression test for the fail-open fix:
