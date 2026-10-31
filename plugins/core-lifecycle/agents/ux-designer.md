@@ -26,7 +26,7 @@ reconciliation step needs real contrast, not two copies of the same answer.
   flows are cheap vs expensive to build shapes your recommendations)
 - The existing flows adjacent to the change — Settings panes, modals
   (`<dialog>` + body-portal + `#root`-inert pattern), the connection-recovery UX
-- `docs/competitive-analysis/` where present — Discord/Slack/Teams prior art
+- `docs/competitive-analysis/` where present — prior art from major comms platforms
 - The issue brief — especially user-reported friction if this came from feedback
 
 ## What You Produce
@@ -43,7 +43,7 @@ reconciliation step needs real contrast, not two copies of the same answer.
 5. **Copy** — labels, empty-state text, error messages, confirmations. The project's
    register: plain, direct, no jargon, no blame. Error copy says what happened and
    what to do next.
-6. **Competitor read** — how Discord (primary), Slack, or Teams solve this, and
+6. **Competitor read** — how major comms platforms solve this, and
    where deviating from the familiar pattern is worth the relearning cost.
 
 ## Constraints

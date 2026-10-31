@@ -764,7 +764,7 @@ That artifact serves the repo's **required-review rule**. When the repo declares
 
 ### 6.0 — The honesty gate (preconditions)
 
-The approval artifact may be emitted ONLY if ALL of the following hold. If ANY fails, emit the **NOT-READY** summary (§6.4) naming the blocker(s) and STOP. There is no pressure — time, exhaustion, sunk-cost, "I already read it myself", a Slack thumbs-up — that lowers this bar. A consolidated approval is a factual claim about the PR's state; emitting one while a blocker is live is a false statement in a durable, auditable record.
+The approval artifact may be emitted ONLY if ALL of the following hold. If ANY fails, emit the **NOT-READY** summary (§6.4) naming the blocker(s) and STOP. There is no pressure — time, exhaustion, sunk-cost, "I already read it myself", a chat thumbs-up — that lowers this bar. A consolidated approval is a factual claim about the PR's state; emitting one while a blocker is live is a false statement in a durable, auditable record.
 
 1. **No open `BLOCK`-severity rows** in the Phase 3 table (security-reviewer BLOCK, release-signal BLOCKING per §2.6 when `.release_signal` is configured, any subagent blocking-merge finding).
 2. **No blocking bot's most-recent verdict is `⚠ Changes Suggested` / `❌ Blocked` / `CHANGES_REQUESTED`** — for every bot marked `"blocking": true` in `.bots[]`, its latest verdict must be `✅ Approved` / passing, OR the finding was fixed AND the bot re-reviewed the fix commit (re-fetch Phase 1 Step 4; do not trust a stale verdict).
