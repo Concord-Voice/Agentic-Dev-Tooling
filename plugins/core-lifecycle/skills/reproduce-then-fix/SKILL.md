@@ -41,8 +41,8 @@ A bounded, test-first debugging workflow for issue `$0` — a numeric GitHub iss
 `/dev-lifecycle` routes bugs here before its own branch step, so this skill selects the branch itself. Never commit onto the default branch.
 
 ```bash
-BRANCH=$(git branch --list "feature/$0*" --format='%(refname:short)' | head -1)
-[ -z "$BRANCH" ] && BRANCH=$(git branch -r --list "origin/feature/$0*" --format='%(refname:short)' | head -1)
+BRANCH=$(git branch --list "feature/$0-*" --format='%(refname:short)' | head -1)
+[ -z "$BRANCH" ] && BRANCH=$(git branch -r --list "origin/feature/$0-*" --format='%(refname:short)' | head -1)
 if [ -n "$BRANCH" ]; then
   git checkout "${BRANCH#origin/}" 2>/dev/null || git checkout --track "$BRANCH"
 else
