@@ -64,6 +64,22 @@ tmp6=$(mktemp -d)
 t "sanctioned literal in a file NAME does not fire" 0 bash scripts/publish-guard.sh "$tmp6"
 rm -rf "$tmp6"
 
+# ---- Private allowlist ($PUBLISH_GUARD_ALLOWLIST): an exact literal is redacted
+# before the re-match, like SANCTIONED_LITERALS. The same denied word anywhere
+# else still fails, and regex characters in an entry match only themselves.
+tmp7=$(mktemp -d)
+printf 'acmecorp\n' > "$tmp7/deny.txt"
+printf 'badge.project=acmecorp_tools\n' > "$tmp7/allow.txt"
+mkdir "$tmp7/tree"
+echo "![b](https://x/badge.project=acmecorp_tools&m=1)" > "$tmp7/tree/README.md"
+t "allowlisted literal passes" 0 env PUBLISH_GUARD_DENYLIST="$tmp7/deny.txt" PUBLISH_GUARD_ALLOWLIST="$tmp7/allow.txt" bash scripts/publish-guard.sh "$tmp7/tree"
+t "same literal fails without the allowlist" 1 env PUBLISH_GUARD_DENYLIST="$tmp7/deny.txt" bash scripts/publish-guard.sh "$tmp7/tree"
+echo "made by acmecorp" >> "$tmp7/tree/README.md"
+t "denied word outside the literal still fails, same file" 1 env PUBLISH_GUARD_DENYLIST="$tmp7/deny.txt" PUBLISH_GUARD_ALLOWLIST="$tmp7/allow.txt" bash scripts/publish-guard.sh "$tmp7/tree"
+echo "![b](https://x/badgeXproject=acmecorp_tools)" > "$tmp7/tree/README.md"
+t "allowlist entry is a fixed string, not a regex" 1 env PUBLISH_GUARD_DENYLIST="$tmp7/deny.txt" PUBLISH_GUARD_ALLOWLIST="$tmp7/allow.txt" bash scripts/publish-guard.sh "$tmp7/tree"
+rm -rf "$tmp7"
+
 # ---- I2: the real repo's own repo-config.example.json (sanctioned
 # placeholders only) keeps passing the full-tree scan. This also covers the
 # guard scanning ITSELF and THIS FILE (neither is excluded any more): the

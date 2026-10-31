@@ -2,6 +2,7 @@
 # Publish guard: fail if any deny-listed pattern appears in the tree.
 # Baseline: config/denylist.public.txt. Private additions: file named by
 # $PUBLISH_GUARD_DENYLIST (kept OUTSIDE this repo; CI injects via secret).
+# Private exceptions: file named by $PUBLISH_GUARD_ALLOWLIST (same handling).
 set -euo pipefail
 ROOT="${1:-$(git rev-parse --show-toplevel)}"
 BASE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -31,6 +32,17 @@ TMPHITS=$(mktemp); trap 'rm -f "$TMPHITS"' EXIT
 SANCTIONED_LITERALS=('PVTSSF_EXAMPLE00000000' 'PVT_EXAMPLE000000000')
 redact=''
 for lit in "${SANCTIONED_LITERALS[@]}"; do redact+="s|${lit}||g;"; done
+# Private sanctioned literals: file named by $PUBLISH_GUARD_ALLOWLIST (kept OUTSIDE
+# this repo; CI injects via secret), one exact string per line. Same content-granular
+# redaction as above, so an allowed literal never blinds a file or a line. Entries are
+# escaped, so they match as fixed strings, never as regexes.
+if [ -n "${PUBLISH_GUARD_ALLOWLIST:-}" ] && [ -f "$PUBLISH_GUARD_ALLOWLIST" ]; then
+  while IFS= read -r lit; do
+    [ -z "$lit" ] && continue
+    lit=$(printf '%s' "$lit" | sed 's/[][\\.*^$|]/\\&/g')
+    redact+="s|${lit}||g;"
+  done < "$PUBLISH_GUARD_ALLOWLIST"
+fi
 
 # Path list for the NAME scan, gathered once (relative to $ROOT, so the ambient
 # path of a scratch checkout can never itself trip a pattern).

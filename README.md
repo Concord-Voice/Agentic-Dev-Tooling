@@ -187,7 +187,8 @@ most durable when they target `install.sh`, the templates under
 `plugins/reviewer-packs/templates/` and `*.template` files, or genuinely
 repo-local content like this README. Every publish is scrubbed through
 `scripts/publish-guard.sh` against a deny-list of org-internal identifiers
-before it ships, so open an issue rather than a PR if you spot something that
+before it ships (a private allow-list names the few exact strings, such as
+badge URLs, that may still appear), so open an issue rather than a PR if you spot something that
 looks like it leaked.
 
 Contributors: run `git config core.hooksPath .githooks` once after cloning to

@@ -24,8 +24,13 @@ jobs:
       - name: publish guard
         env:
           DENY: ${{ secrets.PUBLISH_GUARD_DENYLIST }}
+          ALLOW: ${{ secrets.PUBLISH_GUARD_ALLOWLIST }}
         run: |
           set -euo pipefail
+          if [ -n "$ALLOW" ]; then
+            printf '%s\n' "$ALLOW" > /tmp/allow.txt
+            export PUBLISH_GUARD_ALLOWLIST=/tmp/allow.txt
+          fi
           if [ -n "$DENY" ]; then
             printf '%s\n' "$DENY" > /tmp/deny.txt
             PUBLISH_GUARD_DENYLIST=/tmp/deny.txt bash scripts/publish-guard.sh
