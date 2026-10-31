@@ -37,6 +37,15 @@ out="$(run test-reminder.sh "$TMP/db/migrations/001_x.sql")"; echo "$out" | grep
 out="$(run test-reminder.sh "$TMP/src/widget.go")"; echo "$out" | grep -q "DOCS-REMINDER" || fail "reminder: docs reminder didn't fire"; echo "$out" | grep -q "_test.go" || fail "reminder: coverage nag missing"
 [ "$(run test-reminder.sh "$TMP/README.md")" = "0|" ] || fail "reminder: skip_ext md should be silent"
 
+# ---- destructive-commands: enforced in the hook, not only by a settings deny list ----
+dc() { printf '{"tool_input":{"command":"%s"}}' "$1" | bash "$HOOKS/destructive-commands.sh" >/dev/null 2>&1; echo $?; }
+for c in "git push --force origin main" "git push -f" "git reset --hard HEAD~1" "git clean -fd" "rm -rf build" "cd x && rm -r y" "git checkout -- ."; do
+  [ "$(dc "$c")" = 2 ] || fail "destructive: should block: $c"
+done
+for c in "git push --force-with-lease origin b" "git push -u origin b" "git reset --soft HEAD~1" "rm file.txt" "git checkout -- src/a.ts" "npm run format"; do
+  [ "$(dc "$c")" = 0 ] || fail "destructive: should allow: $c"
+done
+
 # ---- auto-format: empty/absent file path is a clean no-op ----
 [ "$(run auto-format.sh "")" = "0|" ] || fail "auto-format: empty path should no-op"
 
