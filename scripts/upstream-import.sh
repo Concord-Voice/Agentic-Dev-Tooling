@@ -8,7 +8,8 @@
 # The downstream declares, in .github/upstream-sync.json:
 #   {"upstream": "Org/Public-Repo",
 #    "import":  ["services/", "client/admin/", "LICENSE"],   # path prefixes upstream owns
-#    "private": [".github/workflows/deploy-", "CLAUDE.md"]}  # prefixes never touched
+#    "private": [".github/workflows/deploy-", "CLAUDE.md"],   # prefixes never touched
+#    "scrub":   ["[internal]"]}   # optional: fixed strings an added line must not hold
 # and records the last imported upstream commit in .github/upstream-sync.lock.
 #
 # What it does:
@@ -18,9 +19,9 @@
 #      Both sides changing the same lines is a conflict for a person, never a
 #      silent overwrite.
 #   2. Refuses, before applying anything, when: an `import` prefix overlaps a
-#      `private` one; the new upstream commit doesn't descend from the lock; a
-#      changed line adds a publication-scrub marker (`[internal]` or
-#      "internal development reference omitted"): scrub damage coming back.
+#      `private` one; the new upstream commit doesn't descend from the lock; an
+#      added line holds one of the `scrub` strings, i.e. damage from the public
+#      repo's scrub coming back.
 #   3. Writes the new lock and stages everything. The caller commits and opens
 #      the pull request; nothing here pushes. A diff git rejects without
 #      leaving conflicts is refused, and the lock stays put.
@@ -42,6 +43,7 @@ if ! git diff --quiet || ! git diff --cached --quiet; then fail "working tree is
 
 mapfile -t import < <(jq -r '.import[]' "$CONFIG")
 mapfile -t private < <(jq -r '.private[]? // empty' "$CONFIG")
+mapfile -t scrubs < <(jq -r '.scrub[]? // empty' "$CONFIG")
 (( ${#import[@]} )) || fail "$CONFIG lists no import prefixes"
 for i in "${import[@]}"; do
   for p in "${private[@]}"; do
@@ -75,10 +77,12 @@ patch=$(mktemp); trap 'rm -f "$patch"' EXIT
 # past what owned() accepted.
 updiff() { git --literal-pathspecs -C "$up" diff --no-renames "$old" "$new" "$@" -- "${paths[@]}"; }
 updiff --binary > "$patch"
-# A distinct marker for added lines, so `+++` headers never mask content.
-scrub=$(updiff --output-indicator-new='>' | grep -E '^>' | grep -E '\[internal\]|internal development reference omitted' || true)
-[[ -z "$scrub" ]] || fail "the upstream diff adds [internal] scrub tokens; fix them upstream first:
+if (( ${#scrubs[@]} )); then
+  # A distinct marker for added lines, so `+++` headers never mask content.
+  scrub=$(updiff --output-indicator-new='>' | grep -E '^>' | cut -c2- | grep -F "${scrubs[@]/#/-e}" || true)
+  [[ -z "$scrub" ]] || fail "the upstream diff adds scrub markers; fix them upstream first:
 $scrub"
+fi
 
 printf 'Imported: %s\n' "${paths[@]}"
 if ! git apply --3way --index "$patch"; then

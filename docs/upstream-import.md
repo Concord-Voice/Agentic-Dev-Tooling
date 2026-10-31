@@ -12,7 +12,8 @@ It replays upstream's diff since the last import, limited to the paths upstream 
 {
   "upstream": "Org/Public-Repo",
   "import": ["services/", "client/admin/", "packages/"],
-  "private": [".github/workflows/deploy-", "CLAUDE.md", ".claude/"]
+  "private": [".github/workflows/deploy-", "CLAUDE.md", ".claude/"],
+  "scrub": ["[internal]", "internal development reference omitted"]
 }
 ```
 
@@ -24,7 +25,7 @@ The script stops with exit 1, before staging anything, when:
 
 - an `import` prefix overlaps a `private` one;
 - the upstream commit does not descend from the lock;
-- the diff adds a scrub marker (`[internal]`, or "internal development reference omitted"). That's damage from the public-repo scrub; fix it upstream first.
+- an added line holds one of the optional `scrub` strings (matched as fixed text). List the markers the public repo's scrub leaves behind, so scrub damage never flows back; fix it upstream first. A downstream whose upstream is never scrubbed leaves `scrub` out.
 
 Exit 2 means it hit conflicts. The lock is staged and the conflicted files are left unmerged. Upstream changes outside `import` are listed as skipped and not applied.
 
