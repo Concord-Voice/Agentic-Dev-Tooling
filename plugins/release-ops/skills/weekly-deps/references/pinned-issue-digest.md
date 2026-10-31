@@ -2,7 +2,7 @@
 
 Read this file when Step P6 of `weekly-deps` autonomous mode (per `references/autonomous-mode.md`) needs to write or update the routine's output channel — the single GitHub issue that holds the routine's weekly digest. This file defines the issue's title, comment format, version-marker scheme, and how the prep and triage runs coordinate on the same comment.
 
-## Why a pinned issue (and not Slack or a repo file)
+## Why a pinned issue (and not a chat channel or a repo file)
 
 The issue lives in the same place as the PRs the routine is triaging — one click from a digest to a PR, no platform switching. It survives chat-channel retention. It doesn't require a commit (and therefore a CI run, a PR, an approval) like a repo-tracked markdown file would. And it's accessible to anyone with repo read access, so future contributors can see how the routine has been triaging without an additional permissions setup.
 

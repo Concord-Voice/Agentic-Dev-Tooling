@@ -12,7 +12,7 @@ It checks three sources:
 
 It does NOT:
 
-- Scan social media, Reddit, HN, or Discord for vibe checks. Those are noisy and don't programmatically reduce to a yes/no signal.
+- Scan social media, Reddit, HN, or chat servers for vibe checks. Those are noisy and don't programmatically reduce to a yes/no signal.
 - Run `npm audit` or `go list -m -u` against the local lockfile. The PR's CI already does that and the result lives in `statusCheckRollup`.
 - Attempt to read package source-code diffs for malicious patterns. That's a `/review-pr` / subagent responsibility, not a routine check.
 

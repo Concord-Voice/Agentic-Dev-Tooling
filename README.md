@@ -68,6 +68,17 @@ or copy `scripts/repo-config.sh` and `docs/rules/*.md` into your repo by hand â€
 otherwise the config-driven steps degrade to their defaults and rules-file
 references resolve to nothing.
 
+### Keeping a repo current
+
+`install.sh claude` records what it wrote in `.claude/.agentic-dev-tooling.lock`. Commit
+that file with the install. On a later run, a file that still matches the lock takes the
+upstream update, and a file you edited is skipped (`--force` overrides). A repo installed
+before the lock existed has no record, so every file that differs is skipped: run
+`install.sh claude --force` once on a clean tree, review the diff, and commit the lock. To re-run it on a
+schedule, copy [`templates/sync-tooling.yml`](templates/sync-tooling.yml) into your repo's
+`.github/workflows/`. It opens one draft PR when something changed, using a GitHub App token it
+mints at runtime (`SYNC_APP_CLIENT_ID` variable, `SYNC_APP_PRIVATE_KEY` secret).
+
 ## What's inside
 
 Seven themed plugins, installable individually via the Claude Code
