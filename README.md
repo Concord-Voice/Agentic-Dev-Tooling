@@ -13,6 +13,7 @@
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![security](https://img.shields.io/badge/security-policy-green)](https://github.com/Concord-Voice/.github/blob/main/SECURITY.md)
 [![platforms](https://img.shields.io/badge/platforms-Claude%20Code%20%7C%20Codex%20%7C%20Copilot%20%7C%20Antigravity-blue)](./CAPABILITIES.md)
+
 [![SonarQube Cloud](https://sonarcloud.io/images/project_badges/sonarcloud-dark.svg)](https://sonarcloud.io/summary/new_code?id=Concord-Voice_Agentic-Dev-Tooling)
 
 A portable library of AI development tools: skills, agents, hooks, and guardrails.
