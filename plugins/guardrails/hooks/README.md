@@ -51,7 +51,7 @@ The hook string-matches the prefix in the command text (NOT the inherited env va
 
 ### `protect-sensitive.sh` — marker file
 
-**Mechanism.** Write a list of authorized file paths to `.claude/state/hook-bypass/<sanitized-branch>.txt`. The hook reads the file and allows edits to listed paths.
+**Mechanism.** Write a list of authorized file paths to `.claude/state/hook-bypass/<sanitized-branch>.txt`. The hook reads the file and allows edits to listed paths. Write the marker yourself, in your own terminal: when `protected_patterns` lists `.claude/state/hook-bypass/` (as the example config does), the agent cannot create or change it, which is the point.
 
 **Use case.** When a spec or plan deliberately edits a security-sensitive file (e.g., a key-rotation feature that touches `/e2ee/`), the brainstorming and writing-plans skills prompt the developer to authorize the bypass once for the branch.
 
