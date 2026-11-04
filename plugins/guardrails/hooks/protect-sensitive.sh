@@ -129,6 +129,7 @@ list_descendants() {
   case "$d" in
     "$root"/*) d="${d#"$root"/}" ;;
     /*) [ -d "$d" ] && find "$d" -maxdepth 6 2>/dev/null; return 0 ;;
+    *) ;;
   esac
   git -C "$root" ls-files -- "$d" 2>/dev/null
   # ...and then the walk as well, NOT as a fallback. A nonempty index result is not
@@ -165,6 +166,7 @@ list_descendants() {
         set +f
         for g in $d; do [ -e "$g" ] && find "$g" -maxdepth 6 2>/dev/null; done )
       return 0 ;;
+    *) ;;
   esac
   [ -d "${root}/${d}" ] || return 0
   ( cd "$root" 2>/dev/null && find "$d" -maxdepth 6 2>/dev/null )
@@ -195,7 +197,7 @@ expand_embedded() {
     esac
     case "$name" in
       "" ) break ;;
-      [A-Za-z_]*) case "$name" in *[!A-Za-z0-9_]*) break ;; esac ;;
+      [A-Za-z_]*) case "$name" in *[!A-Za-z0-9_]*) break ;; *) ;; esac ;;
       *) break ;;
     esac
     val=$(printf '%s\n' "$VARS" | awk -F= -v n="$name" 'index($0, n "=") == 1 { sub(/^[^=]*=/, ""); v = $0 } END { print v }')
@@ -263,7 +265,7 @@ var_values() {
       # arbitrary string as a name, so anything that is not one is not an expansion
       # this hook can reason about — it is passed through as an opaque token.
       case "$vn" in
-        [A-Za-z_]*) case "$vn" in *[!A-Za-z0-9_]*) vn="" ;; esac ;;
+        [A-Za-z_]*) case "$vn" in *[!A-Za-z0-9_]*) vn="" ;; *) ;; esac ;;
         *) vn="" ;;
       esac
       [ -n "$vn" ] || { printf '%s\n' "$t"; return 0; } ;;
@@ -475,7 +477,7 @@ resolve_and_check() {
         case "$pcand" in
           "${REPO_ROOT%/}"/*) pcand="${pcand#"${REPO_ROOT%/}"/}" ;;
           *) if [ -n "$REPO_REAL" ]; then
-               case "$pcand" in "${REPO_REAL%/}"/*) pcand="${pcand#"${REPO_REAL%/}"/}" ;; esac
+               case "$pcand" in "${REPO_REAL%/}"/*) pcand="${pcand#"${REPO_REAL%/}"/}" ;; *) ;; esac
              fi ;;
         esac
         if [ "$pcand" != "$eff" ]; then
@@ -990,6 +992,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
     case "$raw" in
       *[!A-Za-z0-9_]if[[:space:]]*|if[[:space:]]*|*[!A-Za-z0-9_]case[[:space:]]*|case[[:space:]]*)
         BRANCH=$((BRANCH + 1)) ;;
+      *) ;;
     esac
     forvars=$(printf '%s' "$raw" \
       | grep -oE '^[[:space:]]*for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in[[:space:]]+[^;&|]*' \
@@ -1033,6 +1036,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
     case "$raw" in
       *[!A-Za-z0-9_]fi[[:space:]]*|fi[[:space:]]*|*[!A-Za-z0-9_]esac[[:space:]]*|esac[[:space:]]*)
         [ "$BRANCH" -gt 0 ] && BRANCH=$((BRANCH - 1)) ;;
+      *) ;;
     esac
     # A leading executable PATH hides the verb: every extractor here is anchored on a
     # bare command name, so `/bin/rm <protected>` and `/usr/bin/tee <protected>` were
@@ -1209,6 +1213,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
                         | sed "s|^${cpsabs%/}/||" | grep -v "^${cpsabs}\$" \
                         | while IFS= read -r rel; do printf '%s/%s\n' "$cppfx" "$rel"; done
                     done ;;
+              *) ;;
             esac
           done
       # `ln SRC LINK` creates a HARD link by default — an alias to the same inode, so
@@ -1458,6 +1463,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
                          for (j = 3; j <= m; j++) if (w[j] !~ /^-/) print w[j]
                      }
                    }' | grep -vE '^-|^$' ;;
+        *) ;;
       esac
       # Deleting a control removes it exactly as effectively as overwriting it.
       printf '%s' "$seg" | grep -oE '^[[:space:]]*(git[[:space:]]+)?(rm|unlink)\b[^;&|]*' | tr ' ' '\n' | grep -vE '^-|^git$|^rm$|^unlink$|^$'
@@ -1527,6 +1533,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
       case "$list" in
         T) items="$TARGETS" ;;
         G) items="$GITTARGETS" ;;
+        *) ;;
       esac
       while IFS= read -r bframe; do
       case "$bframe" in :*) cwd0="${bframe#:}" ;; *) continue ;; esac
@@ -1540,6 +1547,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
              /*) base="$GITBASE" ;;
              *)  base=$(norm_path "${cwd0:+${cwd0%/}/}$GITBASE") ;;
            esac ;;
+        *) ;;
       esac
       while IFS= read -r t; do
         [ -z "$t" ] && continue
@@ -1551,7 +1559,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
         # behind `&&`/`||`, where the tokenizer cannot know whether the branch ran.
         while IFS= read -r tv; do
           [ -z "$tv" ] && continue
-          case "$tv" in \$*) continue ;; esac   # unresolved expansion: nothing to check
+          case "$tv" in \$*) continue ;; *) ;; esac   # unresolved expansion: nothing to check
           # A symlink DEREFERENCES, so a write through the alias reaches the protected
           # file: `ln -s <protected> a; echo x > a`.
           while IFS= read -r av; do
@@ -1617,13 +1625,13 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
         # variable reference until they are gone, so var_values returned it verbatim.
         draw="${draw%\"}"; draw="${draw#\"}"; draw="${draw%\'}"; draw="${draw#\'}"
         [ -z "$draw" ] && continue
-        case "$draw" in -*) continue ;; esac
+        case "$draw" in -*) continue ;; *) ;; esac
         # The ordinary target pass expands variables; this one walked the literal
         # `$d`, found no such directory and enumerated nothing, so `d=services;
         # rm -rf "$d"` never saw services/auth/login.go.
         while IFS= read -r d; do
         [ -z "$d" ] && continue
-        case "$d" in \$*) continue ;; esac
+        case "$d" in \$*) continue ;; *) ;; esac
         while IFS= read -r bframe; do
         case "$bframe" in :*) cwd0="${bframe#:}" ;; *) continue ;; esac
         case "$d" in
@@ -1688,6 +1696,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
     case "$raw" in *'('*)
       CWD_STACK=$(printf '%s\n:%s:%s' "$CWD_STACK" \
         "$(printf '%s\n' "$CWD_ALT" | grep -c '^:' || true)" "$CWD") ;;
+      *) ;;
     esac
     # The interpreter check runs after the walk, because it needs the heredoc bodies
     # the tokenizer drops. Record the directory active at each interpreter segment so
@@ -1768,6 +1777,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
           CWD_ALT=$(printf '%s\n' "$CWD_ALT" | grep '^:' | awk -v n="$nalt" 'NR <= n')
           CWD_STACK=$(printf '%s\n' "$CWD_STACK" | grep '^:' | sed '$d')
         fi ;;
+      *) ;;
     esac
   done <<< "$SCAN"
 
@@ -1854,7 +1864,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
     # path is caught.
     while IFS= read -r wp; do
       [ -z "$wp" ] && continue
-      case "$wp" in /*|\$*|-*) continue ;; esac
+      case "$wp" in /*|\$*|-*) continue ;; *) ;; esac
       while IFS= read -r ib; do
         [ -z "$ib" ] && continue
         for v in "${ib%/}/$wp" "${ib%/}/${wp%/}/"; do
