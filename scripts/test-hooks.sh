@@ -48,14 +48,15 @@ for c in "git push --force origin main" "git push -f" "git reset --hard HEAD~1" 
          "git -C /tmp/x reset --hard HEAD" "git -c advice.detachedHead=false reset --hard" "git --no-pager push -f" \
          "env git reset --hard" "sudo git reset --hard" "time git push -f" "/usr/bin/git reset --hard" "GIT_DIR=.git git reset --hard" \
          "{ git reset --hard; }" "if true; then git reset --hard; fi" "! git reset --hard" "ls | xargs git push -f" \
-         "git -C \\\"/tmp/a b\\\" reset --hard" "git --work-tree . reset --hard" "bash -lc \\\"rm -rf x\\\"" 'bash -c \"echo \\\"a\\\" && rm -rf x\"' \
+         "git -C \\\"/tmp/a b\\\" reset --hard" "git --work-tree . reset --hard" "bash -lc \\\"rm -rf x\\\"" "find . -name x -exec rm -rf {} +" "/bin/rm -rf x" 'bash -c \"echo \\\"a\\\" && rm -rf x\"' \
          "git -c user.name=\\\"A B\\\" push --force" "git -c alias.x='a b' reset --hard"; do
   [ "$(dc "$c")" = 2 ] || fail "destructive: should block: $c"
 done
 for c in "git push --force-with-lease origin b" "git push -u origin b" "git reset --soft HEAD~1" "rm file.txt" "git checkout -- src/a.ts" "npm run format" \
          "git commit -m 'fix git reset --hard docs'" "git commit -m 'document git push --force handling'" \
          "git push --force-with-lease --force-if-includes origin topic" "git restore --staged ." \
-         "git commit -m 'Prevent rm -rf from running'" "git -C \\\"/tmp/a b\\\" status" "time make test" "git -c user.name=\\\"A B\\\" status"; do
+         "git commit -m 'Prevent rm -rf from running'" "git -C \\\"/tmp/a b\\\" status" "time make test" "git -c user.name=\\\"A B\\\" status" \
+         "git rm -r --cached node_modules" "git commit -m 'Document bash -c \\\"rm -rf build\\\"'"; do
   [ "$(dc "$c")" = 0 ] || fail "destructive: should allow: $c"
 done
 
@@ -139,5 +140,33 @@ case "$mrc" in
   35) fail "marker: ALLOWED bypass log must name the marker file (feature__test.txt), not just the branch" ;;
   *) fail "marker: unexpected failure ($mrc)" ;;
 esac
+
+# ---- protect-sensitive: Bash writes are guarded too (follow-up 27) ----
+cmdrun() { # cmdrun <hook> <command> ; echoes rc
+  local rc=0
+  jq -cn --arg c "$2" '{tool_name:"Bash",tool_input:{command:$c}}' | CLAUDE_PROJECT_DIR="$TMP" bash "$HOOKS/$1" >/dev/null 2>&1 || rc=$?
+  echo "$rc"
+}
+cat > "$TMP/.claude/repo-config.json" <<'JSON'
+{ "hooks": { "protected_patterns": ["/auth/"] } }
+JSON
+[ "$(cmdrun protect-sensitive.sh "sed -i s/a/b/ services/auth/login.go")" = "2" ] || fail "protect: Bash sed -i on a protected file must BLOCK"
+[ "$(cmdrun protect-sensitive.sh "echo x > services/auth/login.go")" = "2" ] || fail "protect: Bash redirect onto a protected file must BLOCK"
+[ "$(cmdrun protect-sensitive.sh "cat services/auth/login.go")" = "0" ] || fail "protect: Bash read of a protected file should allow"
+
+# ---- protect-env-files: only .env.example is exempt; Bash is covered (follow-ups 10, 29) ----
+for f in .env .env.e2e .env.eu-production .env.local app/prod.env; do
+  [ "$(run protect-env-files.sh "$TMP/$f")" != "0|" ] || fail "env: $f must BLOCK"
+done
+[ "$(run protect-env-files.sh "$TMP/.env.example")" = "0|" ] || fail "env: .env.example should allow"
+[ "$(cmdrun protect-env-files.sh "cat desktop/.env")" = "2" ] || fail "env: Bash cat of .env must BLOCK"
+[ "$(cmdrun protect-env-files.sh "cat .env.example")" = "0" ] || fail "env: Bash cat of .env.example should allow"
+[ "$(cmdrun protect-env-files.sh "git status")" = "0" ] || fail "env: unrelated Bash should allow"
+
+# ---- protect-applied-migrations: Write may create, never overwrite (follow-up 8) ----
+wrun() { local rc=0; jq -cn --arg p "$1" '{tool_name:"Write",tool_input:{file_path:$p,content:"x"}}' | CLAUDE_PROJECT_DIR="$TMP" bash "$HOOKS/protect-applied-migrations.sh" >/dev/null 2>&1 || rc=$?; echo "$rc"; }
+mkdir -p "$TMP/migrations"; : > "$TMP/migrations/000001_init.up.sql"
+[ "$(wrun "$TMP/migrations/000001_init.up.sql")" = "2" ] || fail "migrations: Write over an existing migration must BLOCK"
+[ "$(wrun "$TMP/migrations/000002_next.up.sql")" = "0" ] || fail "migrations: Write of a new migration should allow"
 
 echo "ALL PASS"

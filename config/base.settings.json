@@ -2,7 +2,11 @@
   "permissions": {
     "deny": [
       "Read(./.env)",
-      "Read(./.env.*)",
+      "Read(./**/.env)",
+      "Read(./.env.local)",
+      "Read(./.env.*.local)",
+      "Read(./.env.production)",
+      "Read(./.env.staging)",
       "Read(~/.ssh/**)",
       "Read(~/.aws/**)",
       "Read(~/.config/gcloud/**)",
@@ -12,9 +16,9 @@
   "hooks": {
     "PreToolUse": [
       { "matcher": "Bash", "hooks": [ { "type": "command", "command": ".claude/hooks/destructive-commands.sh" } ] },
-      { "matcher": "Read|Edit|Write", "hooks": [ { "type": "command", "command": ".claude/hooks/protect-env-files.sh" } ] },
-      { "matcher": "Edit|Write", "hooks": [ { "type": "command", "command": ".claude/hooks/protect-sensitive.sh" } ] },
-      { "matcher": "Edit", "hooks": [ { "type": "command", "command": ".claude/hooks/protect-applied-migrations.sh" } ] }
+      { "matcher": "Read|Edit|Write|Bash", "hooks": [ { "type": "command", "command": ".claude/hooks/protect-env-files.sh" } ] },
+      { "matcher": "Edit|Write|Bash", "hooks": [ { "type": "command", "command": ".claude/hooks/protect-sensitive.sh" } ] },
+      { "matcher": "Edit|Write", "hooks": [ { "type": "command", "command": ".claude/hooks/protect-applied-migrations.sh" } ] }
     ],
     "PostToolUse": [
       { "matcher": "Edit|Write", "hooks": [ { "type": "command", "command": ".claude/hooks/auto-format.sh" } ] },

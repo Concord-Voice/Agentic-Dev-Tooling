@@ -77,7 +77,9 @@ SCAN=$(printf '%s' "$COMMAND" | perl -0777 -pe 's/"((?:[^"\\]|\\.)*)"|\x27([^\x2
     exit 2
 }
 # Quote-aware, so an escaped quote inside the script (bash -c "echo \"a\" && rm -rf x") does not end it.
-INNER=$(printf '%s' "$COMMAND" | perl -0777 -ne 'while (/(?:\b(?:sh|bash|zsh)\s+-[a-zA-Z]*c|\beval)\s+(?:"((?:[^"\\]|\\.)*)"|\x27([^\x27]*)\x27)/g) { my $t = defined $1 ? $1 : $2; $t =~ s/\\(.)/$1/g if defined $1; print "$t\n" }') || {
+# Only a shell in command position runs its script, so `git commit -m 'Document bash -c "rm -rf x"'`
+# (prose naming a shell) is not scanned as code.
+INNER=$(printf '%s' "$COMMAND" | perl -0777 -ne 'while (/(?:^|[;&|({!\x60\n])\s*(?:(?:[A-Za-z_]\w*=\S*|sudo|env|exec|command|nohup|time|xargs|-[\w-]+)\s+)*(?:(?:\S*\/)?(?:sh|bash|zsh)\s+-[a-zA-Z]*c|eval)\s+(?:"((?:[^"\\]|\\.)*)"|\x27([^\x27]*)\x27)/g) { my $t = defined $1 ? $1 : $2; $t =~ s/\\(.)/$1/g if defined $1; print "$t\n" }') || {
     echo "BLOCKED: perl failed — destructive-commands hook cannot evaluate command" >&2
     exit 2
 }
@@ -95,7 +97,10 @@ DESTRUCTIVE_RE+="|${CMD_POS}${GIT}\s+reset\b[^;&|]*\s--hard"
 DESTRUCTIVE_RE+="|${CMD_POS}${GIT}\s+clean\b[^;&|]*\s(-[a-zA-Z]*f|--force)"
 DESTRUCTIVE_RE+="|${CMD_POS}${GIT}\s+checkout\b[^;&|]*\s\.{1,2}/?(\s|$)"
 RESTORE_RE="${CMD_POS}${GIT}\s+restore\b[^;&|]*\s\.{1,2}/?(\s|$)"
-DESTRUCTIVE_RE+="|(^|[;&|([:space:]])rm(\s+[^;&|]*)?\s(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)(\s|$)"
+# rm counts in command position (so `git rm -r --cached` and prose that names rm do not)
+# or as the program find -exec/-execdir runs.
+RM_RE="([^[:space:];&|]*/)?rm(\s+[^;&|]*)?\s(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)(\s|$)"
+DESTRUCTIVE_RE+="|${CMD_POS}${RM_RE}|\s-exec(dir)?\s+${RM_RE}"
 restore_hits_worktree() { # --staged alone only touches the index; judged per command segment
     local seg
     while IFS= read -r seg; do

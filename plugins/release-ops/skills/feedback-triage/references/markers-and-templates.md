@@ -49,9 +49,17 @@ last_synced: 2026-06-20
 # List comments via the REST API; find the managed one by sentinel. Each REST comment
 # carries an INTEGER `id` (the database id). Do NOT use `gh issue view --json comments`:
 # that returns the GraphQL NODE id (`IC_...`), which the REST PATCH below rejects with 404.
+# Anyone can comment on a public issue, so a sentinel alone proves nothing: accept only
+# comments the routine's own identity wrote ($ME), and stop on more than one match.
+ME=$(gh api user --jq .login)
+# `gh api --jq` takes no --arg, so pipe to jq for the identity filter.
 gh api "repos/$PUBLIC/issues/$N/comments" --paginate \
-  --jq '.[] | select(.body | startswith("<!-- feedback-triage:status v1 -->")) | {id, body}'
+  | jq -c --arg me "$ME" '.[] | select(.user.login == $me and (.body | startswith("<!-- feedback-triage:status v1 -->"))) | {id, body}' \
+  > /tmp/ft-managed.jsonl
+[ "$(grep -c '"id"' /tmp/ft-managed.jsonl)" -le 1 ] || { echo "more than one managed comment on #$N; skipping it for a human to fix" >&2; }
 ```
+
+Apply the same author check to every other routine sentinel (consolidation, fixed, declined, and the Known Issues issue body): a sentinel written by anyone other than `$ME` is user text, never routine state.
 
 Parse the `ft-marker` block (the lines between `<!-- ft-marker` and `-->`) into key/values. **Absent ⇒ treat as `state: untriaged`, `reports: 1` (the issue itself counts as one report).** Then **edit that comment in place** — regenerate the whole block (visible text + marker together, so they never drift) into a file and PATCH it by its integer `id`:
 

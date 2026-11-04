@@ -150,6 +150,12 @@ just skips that feature. `install.sh claude` copies both
 [`config/repo-config.reference.md`](config/repo-config.reference.md) (the
 full key-by-key reference) into your `.claude/` directory.
 
+One key is not optional in practice: `hooks.protected_patterns`. With no
+config, `protect-sensitive.sh` guards nothing, including the hooks
+themselves. Give every repo a `.claude/repo-config.json` that protects at least
+the tooling's own files (see the reference's "Protect the guard itself"), and
+add `CODEOWNERS` entries for the same paths.
+
 MCP servers follow the same "secret-free template, opt-in" pattern.
 [`config/sonarqube.mcp.json`](config/sonarqube.mcp.json) is the example:
 a stdio MCP server definition with no secrets committed — `SONARQUBE_TOKEN`

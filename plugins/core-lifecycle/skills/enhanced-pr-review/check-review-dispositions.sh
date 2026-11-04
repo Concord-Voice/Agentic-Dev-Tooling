@@ -230,8 +230,8 @@ if [ -n "$ROSTER_RAW" ]; then
            | (($e.match // "") | tostring) as $m
            | if ($n != "") and (($n | test("[\r\n]")) or (($n | gsub("\\s";"") | length) < 3))
              then "name=\"\($n)\" (must be >=3 non-space chars, no newlines)"
-             elif ($m != "") and (($m | gsub("\\s";"") | length) < 2)
-             then "match=\"\($m)\" (must be >=2 non-space chars)"
+             elif ($m != "") and (($m | gsub("\\s";"") | length) < 4)
+             then "match=\"\($m)\" (must be >=4 non-space chars; it is a substring test on logins)"
              else empty end)' 2>/dev/null)
     if [ -n "$ROSTER_BAD" ]; then
         echo "STOP: reviewer roster at ${ROSTER_SOURCE} has unusable entries:" >&2
@@ -496,8 +496,10 @@ fi
 # disposition must be: Assertion 1 fences `__typename != "Bot"` so an agent
 # cannot mint its own decision, and a bot-authored reconciliation post would
 # reopen that hole one level up. Codesmith is installed on this repo and posts.
-RECON_COUNT=$(echo "$RAW" | jq '[.data.repository.pullRequest.comments.nodes[]?
+# A rostered machine USER account is excluded too, exactly as in Assertion 1.
+RECON_COUNT=$(echo "$RAW" | jq --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'[.data.repository.pullRequest.comments.nodes[]?
     | select(.author.__typename != "Bot")
+    | select(rostered(.author.login) | not)
     | select((.authorAssociation // "NONE") | IN("OWNER","MEMBER"))
     | select(.body | test("<!--\\s*cv-review-reconciliation\\s*-->"))] | length' 2>/dev/null || echo "JQERR")
 if [ "$RECON_COUNT" = "JQERR" ]; then
@@ -519,8 +521,9 @@ elif [ "$RECON_COUNT" -gt 1 ]; then
     echo "          Phase 3.5 edits its post in place (gh api PATCH); it never re-posts."
     fail=1
 else
-    RECON_BODY=$(echo "$RAW" | jq -r '.data.repository.pullRequest.comments.nodes[]?
+    RECON_BODY=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'.data.repository.pullRequest.comments.nodes[]?
         | select(.author.__typename != "Bot")
+        | select(rostered(.author.login) | not)
         | select((.authorAssociation // "NONE") | IN("OWNER","MEMBER"))
         | select(.body | test("<!--\\s*cv-review-reconciliation\\s*-->")) | .body')
     while IFS= read -r want; do

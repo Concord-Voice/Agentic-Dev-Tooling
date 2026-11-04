@@ -1,6 +1,7 @@
 #!/bin/bash
-# protect-env-files.sh — PreToolUse hook for Read|Edit|Write
+# protect-env-files.sh — PreToolUse hook for Read|Edit|Write|Bash
 # Blocks access to .env files and credential files that may contain secrets.
+# Only .env.example is exempt: every other .env, .env.* or *.env file is treated as live.
 
 if ! command -v jq >/dev/null 2>&1; then
     echo "BLOCKED: jq is required for protect-env-files.sh but is not installed." >&2
@@ -9,15 +10,30 @@ fi
 
 INPUT=$(cat)
 
-if ! FILE_PATH=$(printf '%s' "$INPUT" | jq -er '.tool_input.file_path // .tool_input.path // empty' 2>/dev/null); then
+# Malformed JSON fails closed; a missing field does not (a Bash call has no file_path).
+if ! FILE_PATH=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .tool_input.path // empty' 2>/dev/null); then
     echo "BLOCKED: Failed to parse hook input in protect-env-files.sh. Failing closed." >&2
     exit 2
+fi
+
+COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
+
+# Bash: block any word that names a live env file (cat .env, source app/.env.prod, ...).
+# A denylist over words, so it can over-block prose that names one; that fails closed.
+if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
+    if printf '%s' "$COMMAND" | tr -s " \t\n;&|()<>=\"'\`" '\n' \
+        | grep -E '(^|/)(\.env(\.[^/]*)?|[^/]+\.env)$' | grep -vqE '(^|/)\.env\.example$'; then
+        echo "BLOCKED: Bash command touches a .env file — likely contains secrets. Use .env.example as a reference instead." >&2
+        exit 2
+    fi
+    exit 0
 fi
 
 [ -z "$FILE_PATH" ] && exit 0
 
 # Block .env files (but allow .env.example)
-if [[ "$FILE_PATH" =~ \.env$ ]] || [[ "$FILE_PATH" =~ \.env\.[^e] ]] || [[ "$FILE_PATH" =~ \.env\.local ]]; then
+BASE="${FILE_PATH##*/}"
+if [[ "$BASE" =~ ^\.env(\..*)?$ || "$BASE" =~ .\.env$ ]] && [ "$BASE" != ".env.example" ]; then
     echo "BLOCKED: Cannot access $FILE_PATH — likely contains secrets. Use .env.example as a reference instead." >&2
     exit 2
 fi
