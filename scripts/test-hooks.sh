@@ -143,30 +143,30 @@ esac
 
 # ---- protect-sensitive: Bash writes are guarded too (follow-up 27) ----
 cmdrun() { # cmdrun <hook> <command> ; echoes rc
-  local rc=0
-  jq -cn --arg c "$2" '{tool_name:"Bash",tool_input:{command:$c}}' | CLAUDE_PROJECT_DIR="$TMP" bash "$HOOKS/$1" >/dev/null 2>&1 || rc=$?
+  local hook="$1" cmd="$2" rc=0
+  jq -cn --arg c "$cmd" '{tool_name:"Bash",tool_input:{command:$c}}' | CLAUDE_PROJECT_DIR="$TMP" bash "$HOOKS/$hook" >/dev/null 2>&1 || rc=$?
   echo "$rc"
 }
 cat > "$TMP/.claude/repo-config.json" <<'JSON'
 { "hooks": { "protected_patterns": ["/auth/"] } }
 JSON
-[ "$(cmdrun protect-sensitive.sh "sed -i s/a/b/ services/auth/login.go")" = "2" ] || fail "protect: Bash sed -i on a protected file must BLOCK"
-[ "$(cmdrun protect-sensitive.sh "echo x > services/auth/login.go")" = "2" ] || fail "protect: Bash redirect onto a protected file must BLOCK"
-[ "$(cmdrun protect-sensitive.sh "cat services/auth/login.go")" = "0" ] || fail "protect: Bash read of a protected file should allow"
+[[ "$(cmdrun protect-sensitive.sh "sed -i s/a/b/ services/auth/login.go")" = "2" ]] || fail "protect: Bash sed -i on a protected file must BLOCK"
+[[ "$(cmdrun protect-sensitive.sh "echo x > services/auth/login.go")" = "2" ]] || fail "protect: Bash redirect onto a protected file must BLOCK"
+[[ "$(cmdrun protect-sensitive.sh "cat services/auth/login.go")" = "0" ]] || fail "protect: Bash read of a protected file should allow"
 
 # ---- protect-env-files: only .env.example is exempt; Bash is covered (follow-ups 10, 29) ----
 for f in .env .env.e2e .env.eu-production .env.local app/prod.env; do
-  [ "$(run protect-env-files.sh "$TMP/$f")" != "0|" ] || fail "env: $f must BLOCK"
+  [[ "$(run protect-env-files.sh "$TMP/$f")" != "0|" ]] || fail "env: $f must BLOCK"
 done
-[ "$(run protect-env-files.sh "$TMP/.env.example")" = "0|" ] || fail "env: .env.example should allow"
-[ "$(cmdrun protect-env-files.sh "cat desktop/.env")" = "2" ] || fail "env: Bash cat of .env must BLOCK"
-[ "$(cmdrun protect-env-files.sh "cat .env.example")" = "0" ] || fail "env: Bash cat of .env.example should allow"
-[ "$(cmdrun protect-env-files.sh "git status")" = "0" ] || fail "env: unrelated Bash should allow"
+[[ "$(run protect-env-files.sh "$TMP/.env.example")" = "0|" ]] || fail "env: .env.example should allow"
+[[ "$(cmdrun protect-env-files.sh "cat desktop/.env")" = "2" ]] || fail "env: Bash cat of .env must BLOCK"
+[[ "$(cmdrun protect-env-files.sh "cat .env.example")" = "0" ]] || fail "env: Bash cat of .env.example should allow"
+[[ "$(cmdrun protect-env-files.sh "git status")" = "0" ]] || fail "env: unrelated Bash should allow"
 
 # ---- protect-applied-migrations: Write may create, never overwrite (follow-up 8) ----
-wrun() { local rc=0; jq -cn --arg p "$1" '{tool_name:"Write",tool_input:{file_path:$p,content:"x"}}' | CLAUDE_PROJECT_DIR="$TMP" bash "$HOOKS/protect-applied-migrations.sh" >/dev/null 2>&1 || rc=$?; echo "$rc"; }
+wrun() { local path="$1" rc=0; jq -cn --arg p "$path" '{tool_name:"Write",tool_input:{file_path:$p,content:"x"}}' | CLAUDE_PROJECT_DIR="$TMP" bash "$HOOKS/protect-applied-migrations.sh" >/dev/null 2>&1 || rc=$?; echo "$rc"; }
 mkdir -p "$TMP/migrations"; : > "$TMP/migrations/000001_init.up.sql"
-[ "$(wrun "$TMP/migrations/000001_init.up.sql")" = "2" ] || fail "migrations: Write over an existing migration must BLOCK"
-[ "$(wrun "$TMP/migrations/000002_next.up.sql")" = "0" ] || fail "migrations: Write of a new migration should allow"
+[[ "$(wrun "$TMP/migrations/000001_init.up.sql")" = "2" ]] || fail "migrations: Write over an existing migration must BLOCK"
+[[ "$(wrun "$TMP/migrations/000002_next.up.sql")" = "0" ]] || fail "migrations: Write of a new migration should allow"
 
 echo "ALL PASS"

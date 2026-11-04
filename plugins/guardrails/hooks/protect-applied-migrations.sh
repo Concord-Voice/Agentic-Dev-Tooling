@@ -105,7 +105,7 @@ while IFS= read -r FILE_PATH; do
     fi
 
     # A Write that creates a brand-new file is how new migrations are added.
-    if [ "$TOOL_NAME" = "Write" ] && [ ! -e "$CANONICAL_PATH" ] && [ ! -L "$CANONICAL_PATH" ]; then
+    if [[ "$TOOL_NAME" = "Write" ]] && [[ ! -e "$CANONICAL_PATH" ]] && [[ ! -L "$CANONICAL_PATH" ]]; then
         continue
     fi
     if [[ "$(dirname "$CANONICAL_PATH")" == "$MIGRATIONS_DIR" && "$(basename "$CANONICAL_PATH")" =~ ^[0-9]{6}_.*\.(up|down)\.sql$ ]]; then

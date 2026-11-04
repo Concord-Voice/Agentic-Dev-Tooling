@@ -20,7 +20,7 @@ COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/nul
 
 # Bash: block any word that names a live env file (cat .env, source app/.env.prod, ...).
 # A denylist over words, so it can over-block prose that names one; that fails closed.
-if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
+if [[ -z "$FILE_PATH" ]] && [[ -n "$COMMAND" ]]; then
     if printf '%s' "$COMMAND" | tr -s " \t\n;&|()<>=\"'\`" '\n' \
         | grep -E '(^|/)(\.env(\.[^/]*)?|[^/]+\.env)$' | grep -vqE '(^|/)\.env\.example$'; then
         echo "BLOCKED: Bash command touches a .env file — likely contains secrets. Use .env.example as a reference instead." >&2
@@ -33,7 +33,7 @@ fi
 
 # Block .env files (but allow .env.example)
 BASE="${FILE_PATH##*/}"
-if [[ "$BASE" =~ ^\.env(\..*)?$ || "$BASE" =~ .\.env$ ]] && [ "$BASE" != ".env.example" ]; then
+if [[ "$BASE" =~ ^\.env(\..*)?$ || "$BASE" =~ .\.env$ ]] && [[ "$BASE" != ".env.example" ]]; then
     echo "BLOCKED: Cannot access $FILE_PATH — likely contains secrets. Use .env.example as a reference instead." >&2
     exit 2
 fi
