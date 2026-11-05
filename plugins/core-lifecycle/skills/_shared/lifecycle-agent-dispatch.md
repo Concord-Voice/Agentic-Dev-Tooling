@@ -205,9 +205,18 @@ first match.
 | 6 | A design question the plan does not answer | `@architect` (Mode 4 — gap resolution) |
 | 7 | An unknown that blocks implementation | `@researcher` |
 
+**Repo rows sit between rows 2 and 3.** Read the repo's own rows with
+`rc_get '.agents.producer_rows' '[]'`: an array of `{"match": [<globs>], "agent": "<name>"}`.
+After rows 1 and 2 (test authoring and migrations keep their owners), check the repo
+rows top to bottom and dispatch the first whose globs match the task's paths; only when
+none matches do rows 3 onward apply. A row whose agent has no
+`.claude/agents/<name>.md` is skipped and named in the dispatch line, never silently
+dropped. This is how a repo routes a surface to its own producer (for example CI and
+infrastructure to a dedicated DevOps agent) without editing this shared file.
+
 **A path no row names is a gap, not a free choice.** If the repo has a surface no
-producer fits (e.g. a native C++ addon), add a row for it above the broader rows
-it would otherwise fall into — the reader stops at the first match, so a later
+producer fits (e.g. a native C++ addon), add a `.agents.producer_rows` entry for it
+(or a row here, upstream) above the broader rows it would otherwise fall into — the reader stops at the first match, so a later
 widened glob would silently capture it — rather than leaving the task to be routed
 by escalation criterion instead of table match.
 
