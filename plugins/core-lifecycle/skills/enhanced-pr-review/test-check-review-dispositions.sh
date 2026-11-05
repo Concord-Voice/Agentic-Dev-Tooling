@@ -413,6 +413,16 @@ badroster_msg "STOP: a nested login array is refused" 2 \
     'login element types [array]' \
     '{"bots":[{"match":"gitar","name":"Gitar","login":[["gitar-bot[bot]"]]}]}'
 
+# Found in review: each of these unrostered a reviewer and exited 0.
+badroster_msg "STOP: a non-array .bots is refused, not read as empty" 2 \
+    'not an array' '{"bots":{"match":"gitar","name":"Gitar","login":"gitar-bot[bot]"}}'
+badroster_msg "STOP: a match with a space can never match a login" 2 \
+    'can never match' '{"bots":[{"match":"CI Reviewer","name":"CI Reviewer"}]}'
+badroster_msg "STOP: a match with an underscore can never match a login" 2 \
+    'can never match' '{"bots":[{"match":"ci_reviewer","name":"CI Reviewer"}]}'
+badroster_msg "STOP: a non-string name is refused" 2 \
+    'must be a string' '{"bots":[{"match":"gitar","name":7,"login":"gitar-bot[bot]"}]}'
+
 # The other direction: absent and explicit-null logins are LEGAL (an entry may
 # match on `.match` alone), so the new arm must not widen into them.
 badroster "ok: an absent login is not a malformed one" 1 \
@@ -815,6 +825,13 @@ run_pages "pagination: pages over 128 KiB are still read" 0 \
     "[$(rpage false "$(botsay 'copilot-pull-request-reviewer' "$BIG_BODY")")]" \
     "[{\"data\":{\"node\":{\"comments\":{\"pageInfo\":{\"hasNextPage\":false},\"nodes\":[$(botsay 'coderabbitai[bot]' "$BIG_BODY"),$(human '<!-- cv-disposition: accepted evidence: e5c34d0 -->')]}}}}]"
 
+# Found in review: each of these exited 0 over a surface that was never read.
+run_pages "FAIL-CLOSED: an empty nested comment fetch is a STOP" 2 \
+    "[$(tpage false "$NESTED_T")]" \
+    "[$(cpage false "$BOT_TOP,$RECON")]" \
+    "[$(rpage false "")]" \
+    "[]"
+
 # Fail-closed still holds per connection. An error envelope on a LATER page is
 # the dangerous one: page 1 parses and only page 2 carries the null.
 #
@@ -857,6 +874,16 @@ run_pages_out "FAIL-CLOSED: ...and the per-page probe is what caught it" \
 run_pages_out "FAIL-CLOSED: a failed reviews fetch names that fetch" \
     "could not read reviews" \
     "[$(tpage false "$CLEAN_T")]" "[$(cpage false "$BOT_TOP,$RECON")]" "MISSING-FIXTURE-SENTINEL"
+
+# Found in review: both exited 0 over a surface that was never read.
+run_pages_out "FAIL-CLOSED: every connection returning [] is a STOP" \
+    "returned no pullRequest" "[]" "[]" "[]"
+# gh stops quietly when the last page says hasNextPage:true but has no cursor.
+run_pages_out "FAIL-CLOSED: a last page still reporting more is truncated" \
+    "review surface is truncated" \
+    "[$(tpage true "$CLEAN_T")]" \
+    "[$(cpage false "$BOT_TOP,$RECON")]" \
+    "[$(rpage false "")]"
 
 # ---------------------------------------------------------------------------
 # REGRESSION: a roster entry may carry SEVERAL logins.

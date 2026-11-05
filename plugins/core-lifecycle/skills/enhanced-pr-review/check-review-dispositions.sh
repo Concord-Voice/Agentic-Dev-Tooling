@@ -202,19 +202,19 @@ query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
     done
 
     # Reassemble the exact shape the assertions (and every fixture) expect. The
-    # pageInfo flags are set false because the pages above ARE the whole
-    # connection; the truncation guard further down still runs, and now means
-    # "assembly did not finish" rather than "the PR is too big".
+    # Each pageInfo flag is the LAST page's own flag. gh stops without an error
+    # when a page says hasNextPage:true but gives no usable cursor, so the
+    # truncation guard further down must still see that flag.
     # The pages go in on stdin, not as --argjson: one argv string is capped at
     # 128 KiB on Linux, and a page of 100 long bot reviews passes that.
     if ! RAW=$(printf '%s\n%s\n%s\n' "$THREAD_PAGES" "$COMMENT_PAGES" "$REVIEW_PAGES" \
             | jq -s '.[0] as $t | .[1] as $c | .[2] as $r |
         {data:{repository:{pullRequest:{
-          reviewThreads:{pageInfo:{hasNextPage:false},
+          reviewThreads:{pageInfo:{hasNextPage:($t | last | .data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false)},
                          nodes:[$t[].data.repository.pullRequest.reviewThreads.nodes[]]},
-          comments:     {pageInfo:{hasNextPage:false},
+          comments:     {pageInfo:{hasNextPage:($c | last | .data.repository.pullRequest.comments.pageInfo.hasNextPage // false)},
                          nodes:[$c[].data.repository.pullRequest.comments.nodes[]]},
-          reviews:      {pageInfo:{hasNextPage:false},
+          reviews:      {pageInfo:{hasNextPage:($r | last | .data.repository.pullRequest.reviews.pageInfo.hasNextPage // false)},
                          nodes:[$r[].data.repository.pullRequest.reviews.nodes[]]}
         }}}}' 2>&1); then
         echo "STOP: could not assemble the paginated review surface for #${PR}: ${RAW}" >&2
@@ -240,9 +240,12 @@ query($id:ID!,$endCursor:String){
   }
 }'
     # A here-string, not a heredoc: Semgrep's bash parser rejects a heredoc inside an if block.
-    TRUNC_IDS=$(printf '%s' "$RAW" | jq -r '
+    if ! TRUNC_IDS=$(printf '%s' "$RAW" | jq -r '
         .data.repository.pullRequest.reviewThreads.nodes[]
-        | select(.comments.pageInfo.hasNextPage == true) | .id')
+        | select(.comments.pageInfo.hasNextPage == true) | .id' 2>&1); then
+        echo "STOP: could not list truncated threads for #${PR}: ${TRUNC_IDS}" >&2
+        exit 2
+    fi
     while IFS= read -r tid; do
         [[ -n "$tid" ]] || continue
         if ! TC_PAGES=$(gh api graphql --paginate --slurp \
@@ -250,11 +253,18 @@ query($id:ID!,$endCursor:String){
             echo "STOP: could not read the comments of thread ${tid} for #${PR}: ${TC_PAGES}" >&2
             exit 2
         fi
+        if ! printf '%s' "$TC_PAGES" \
+                | jq -e 'type == "array" and length > 0
+                          and (map(.data.node.comments) | all(. != null))' >/dev/null 2>&1; then
+            echo "STOP: thread ${tid} comment query returned no comments for #${PR}." >&2
+            printf '%s' "$TC_PAGES" | head -5 >&2
+            exit 2
+        fi
         if ! RAW=$(printf '%s\n%s\n' "$RAW" "$TC_PAGES" | jq -s \
                 --arg id "$tid" '.[1] as $tc | .[0] |
             .data.repository.pullRequest.reviewThreads.nodes |= map(
               if .id == $id
-              then .comments = {pageInfo:{hasNextPage:false},
+              then .comments = {pageInfo:{hasNextPage:($tc | last | .data.node.comments.pageInfo.hasNextPage // false)},
                                 nodes:[$tc[].data.node.comments.nodes[]]}
               else . end)' 2>&1); then
             echo "STOP: could not splice the comments of thread ${tid} for #${PR}: ${RAW}" >&2
@@ -274,8 +284,8 @@ fi
 # Truncation is UNKNOWN, never clean. `first:100` on any connection that has more
 # pages means part of the review surface was never read — and a gate whose whole
 # contract is "never report clean over an unread surface" must not exit 0 there.
-# Exit 2 rather than paginate: UNKNOWN is cheap, already in the contract, and a
-# PR with >100 threads wants a human anyway.
+# The live path paginates, so this fires only when a last page still reports more
+# (gh gave up on the cursor) or on a fixture that was never paginated.
 TRUNCATED=$(echo "$RAW" | jq -r '
   [ (.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage      // false | if . then "reviewThreads"  else empty end),
     (.data.repository.pullRequest.comments.pageInfo.hasNextPage           // false | if . then "comments"       else empty end),
@@ -341,7 +351,7 @@ if [ -n "$ROSTER_RAW" ]; then
     # A malformed roster is a config error, not a reason to quietly fall back to
     # login-only: silent degradation blocks correctly-written posts while telling
     # the operator the accepted spelling is the raw login, with no hint why.
-    if ! ROSTER_JSON=$(printf '%s' "$ROSTER_RAW" | jq -c 'if (.bots|type) == "array" then .bots else [] end' 2>&1); then
+    if ! ROSTER_JSON=$(printf '%s' "$ROSTER_RAW" | jq -c '(.bots|type) as $ty | if $ty == "array" then .bots elif $ty == "null" then [] else error(".bots is \($ty), not an array") end' 2>&1); then
         echo "STOP: could not parse the reviewer roster at ${ROSTER_SOURCE}: ${ROSTER_JSON}" >&2
         echo "      Reviewer coverage cannot be evaluated. UNKNOWN, not clean." >&2
         exit 2
@@ -364,10 +374,14 @@ if [ -n "$ROSTER_RAW" ]; then
         | ((($e.name // "") | tostring) as $n
            | (($e.match // "") | tostring) as $m
            | (if ($e.login | type) == "array" then $e.login else [$e.login] end) as $lgs
-           | if ($n != "") and (($n | test("[\r\n]")) or (($n | gsub("\\s";"") | length) < 3))
+           | if ($e.name != null) and (($e.name | type) != "string")
+             then "name is \($e.name | type) (must be a string)"
+             elif ($n != "") and (($n | test("[\r\n]")) or (($n | gsub("\\s";"") | length) < 3))
              then "name=\"\($n)\" (must be >=3 non-space chars, no newlines)"
              elif ($m != "") and (($m | gsub("\\s";"") | length) < 4)
              then "match=\"\($m)\" (must be >=4 non-space chars; it is a substring test on logins)"
+             elif ($m != "") and (($m | ascii_downcase | test("\\A[a-z0-9-]+(\\[bot\\])?\\z")) | not)
+             then "match=\"\($m)\" can never match (a GitHub login is [a-z0-9-] after downcasing)"
              elif ($e.login != null) and (($lgs | map(select(type != "string")) | length) > 0)
              then "name=\"\($n)\" login element types [\($lgs | map(type) | join(", "))] (must be a string or an array of strings)"
              elif ($e.login != null) and (($lgs | length) == 0)
@@ -391,13 +405,16 @@ if [ -n "$ROSTER_RAW" ]; then
     # Length alone does not stop a generic substring ("-bot", "review"): a `match`
     # that hits two different logins on this PR would let one reviewer's name cover
     # another's findings, so it stops here too.
-    ROSTER_AMBIG=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" '
+    if ! ROSTER_AMBIG=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" '
         ([.. | objects | .author? | objects | .login // empty] | map(ascii_downcase) | unique) as $logins
         | $roster[] | ((.match // "") | tostring | ascii_downcase) as $m
         | select($m != "")
         | ([$logins[] | select(contains($m))]) as $hit
         | select(($hit | length) > 1)
-        | "match=\"\($m)\" hits \($hit | join(", "))"' 2>/dev/null)
+        | "match=\"\($m)\" hits \($hit | join(", "))"' 2>&1); then
+        echo "STOP: could not check the roster for ambiguous matches: ${ROSTER_AMBIG}" >&2
+        exit 2
+    fi
     if [[ -n "$ROSTER_AMBIG" ]]; then
         echo "STOP: reviewer roster at ${ROSTER_SOURCE} has a match that names more than one account on this PR:" >&2
         printf '%s\n' "$ROSTER_AMBIG" | sed 's/^/      /' >&2
@@ -709,11 +726,14 @@ elif [ "$RECON_COUNT" -gt 1 ]; then
     echo "          Phase 3.5 edits its post in place (gh api PATCH); it never re-posts."
     fail=1
 else
-    RECON_BODY=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'.data.repository.pullRequest.comments.nodes[]?
+    if ! RECON_BODY=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'.data.repository.pullRequest.comments.nodes[]?
         | select(.author.__typename != "Bot")
         | select(rostered(.author.login) | not)
         | select((.authorAssociation // "NONE") | IN("OWNER","MEMBER"))
-        | select(.body | test("<!--\\s*cv-review-reconciliation\\s*-->")) | .body')
+        | select(.body | test("<!--\\s*cv-review-reconciliation\\s*-->")) | .body' 2>&1); then
+        echo "STOP: could not read the reconciliation post for #${PR}: ${RECON_BODY}" >&2
+        exit 2
+    fi
     while IFS= read -r want; do
         [ -z "$want" ] && continue
         # -F: fixed string, never a pattern. --: a value starting with a hyphen
