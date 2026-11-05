@@ -1475,15 +1475,20 @@ script is set, run its dry-run whenever this branch's diff touches one of those 
 unset `count_globs` → every PR), regardless of whether any `.md` file changed.
 
 The script is code the reviewer runs, so a PR must not be able to choose or rewrite it. Read the
-key from the merge base with the default branch, not the checkout, and run it only when it is a
+keys (`counts_script` and `count_globs`) from the merge base with the default branch, not the checkout, and run it only when it is a
 tracked repo-relative file this branch leaves unchanged:
 
 ```bash
 ROOT="$(git rev-parse --show-toplevel)"
 MB="$(git -C "$ROOT" merge-base HEAD "origin/${DEFAULT_BRANCH}")"
-COUNTS_SCRIPT="$(git -C "$ROOT" show "$MB:.claude/repo-config.json" 2>/dev/null | jq -r '.docs.counts_script // empty')"
+MB_CFG="$(git -C "$ROOT" show "$MB:.claude/repo-config.json" 2>/dev/null)"
+COUNTS_SCRIPT="$(jq -r '.docs.counts_script // empty' <<<"$MB_CFG" 2>/dev/null)"
+mapfile -t COUNT_GLOBS < <(jq -r '.docs.count_globs // [] | .[]' <<<"$MB_CFG" 2>/dev/null)
 if [ -z "$COUNTS_SCRIPT" ]; then
   echo "count-drift probe: skipped (no .docs.counts_script)"
+elif [ "${#COUNT_GLOBS[@]}" -gt 0 ] \
+     && [ -z "$(git -C "$ROOT" diff --name-only "$MB" -- "${COUNT_GLOBS[@]/#/:(glob)}")" ]; then
+  echo "count-drift probe: skipped (no change under .docs.count_globs)"
 elif [[ $COUNTS_SCRIPT == /* || $COUNTS_SCRIPT == *..* ]] \
      || ! git -C "$ROOT" cat-file -e "$MB:$COUNTS_SCRIPT" 2>/dev/null \
      || ! git -C "$ROOT" diff --quiet "$MB" -- ":/$COUNTS_SCRIPT"; then   # working tree vs merge base
