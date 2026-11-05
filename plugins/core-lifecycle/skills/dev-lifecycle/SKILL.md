@@ -1747,17 +1747,17 @@ LOGINS=$(jq -c '.bots[] | select(.name == "<entry.name>") | [.login] | flatten |
 gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments | jq -s 'add // []' \
   | jq --argjson logins "$LOGINS" --arg marker "<entry.marker>" --arg p "$ACK" '
       def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
-      [ .[] | select(($logins | map(norm) | index(.user.login | norm)) != null)
+      [ .[] | select((.user.login | norm) as $u | ($logins | map(norm) | index($u)) != null)
             | select($marker == "" or ((.body // "") | contains($marker)))
             | select($p == "" or ((.body // "") | test($p; "i") | not)) ]'
 
 # Formal PR review and/or inline review comments from this bot (same exact, normalised login)
 gh api --paginate repos/<owner>/<repo>/pulls/<PR>/reviews | jq -s 'add // []' \
   | jq --argjson logins "$LOGINS" 'def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
-      [.[] | select(($logins | map(norm) | index(.user.login | norm)) != null)] | length'
+      [.[] | select((.user.login | norm) as $u | ($logins | map(norm) | index($u)) != null)] | length'
 gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments | jq -s 'add // []' \
   | jq --argjson logins "$LOGINS" 'def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
-      [.[] | select(($logins | map(norm) | index(.user.login | norm)) != null)] | length'
+      [.[] | select((.user.login | norm) as $u | ($logins | map(norm) | index($u)) != null)] | length'
 ```
 
 A bot's review has **ARRIVED** when ANY of:
