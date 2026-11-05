@@ -63,23 +63,43 @@ call, whichever is faster this session)
 
 ### Step 3: Group by priority
 When a board is configured (`rc_has '.project'`), priority is the board's Priority
-field, not a label (see `.claude/rules/labels.md`). Read it per issue and bucket by
-the option names, in the order `.project.fields.priority.options` declares:
+field, not a label (see `.claude/rules/labels.md`). Parsing the label list for a
+priority on such a repo finds nothing and silently buckets every issue as
+`Unprioritised`, so read the board. Address it by node id (`rc_get '.project.id'`):
+that works whether the board is user- or org-owned, whereas `--owner @me` cannot
+reach an org-owned board. Reading the field needs the `project` token scope; on
+`INSUFFICIENT_SCOPES`, surface `gh auth refresh -s project` rather than falling
+back to labels. Bucket by the option names, in the order
+`.project.fields.priority.options` declares:
 
 ```bash
-PN="$(rc_get '.project.number')"; PO="$(rc_get '.project.owner' '@me')"
-# --limit caps the total fetched, so ask for the whole board.
-TOTAL="$(gh project view "$PN" --owner "$PO" --format json --jq '.items.totalCount')"
-gh project item-list "$PN" --owner "$PO" --format json --limit "$TOTAL" \
-  | jq -r --arg repo "$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
-      '.items[] | select(.content.repository == $repo and .content.number != null)
-       | "\(.content.number)\t\(.priority // "")"'
+PROJECT_ID="$(rc_get '.project.id')"
+REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+
+gh api graphql --paginate \
+  -f query='query($p:ID!,$endCursor:String){ node(id:$p){ ... on ProjectV2 {
+    items(first:100, after:$endCursor){
+      pageInfo{ hasNextPage endCursor }
+      nodes{
+        priority: fieldValueByName(name:"Priority"){ ... on ProjectV2ItemFieldSingleSelectValue { name } }
+        content{ ... on Issue { number repository { nameWithOwner } } } } } } } }' \
+  -f p="$PROJECT_ID" \
+  --jq ".data.node.items.nodes[]
+        | select(.content.number != null
+                 and .content.repository.nameWithOwner == \"$REPO\")
+        | [.content.number, (.priority.name // \"\")] | @tsv"
 ```
 
 A board can hold several repositories' issues, so the filter keeps only this repo's
 items before joining on issue number.
 
-Issues with no Priority value go into `Unprioritised`. Without a board, fall back
+Join that number → priority map onto the Step 2 issue list. `Unprioritised` means a
+missing **board item** or a board item with no Priority set — not a missing label.
+Report the board-absent count separately: Projects v2 auto-add can silently skip
+items, so an issue that is not on the board is a tracking gap rather than a
+deprioritised one.
+
+Without a board, fall back
 to labels: parse the label list on each issue for the labels in `$PRIORITY_LABELS` (Step 0;
 default `P1`, `P2`, `P3`, `P4`, `P5`), and bucket in that array's order — it is
 declared highest-priority-first. A repo that declares `P1`-`P99`, or a different
@@ -156,7 +176,7 @@ Phase Status — $0
     P3 (medium)   :  N  ...
     P4 (low)      :  N  ...
     P5 (nice)     :  N  ...
-    (none)        :  N  ...
+    (none)        :  N  ...   (of which K not on the board)
 
   By Milestone
     v1.0.0        : N   (NN% of stream)

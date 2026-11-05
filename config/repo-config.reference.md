@@ -29,6 +29,8 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 | `bots[].blocking` | bool | `false` → finding is advisory | merge-gate honesty check |
 | `bots[].offline` | bool | `false` | wait-for-bots (skip offline bots) |
 | `bots[].when` | string | `always` \| `active` \| `shippable`; absent → `always` | wait-for-bots gating |
+| `bots[].login` (array form) | string[] | — | a bot that posts under more than one login; matched exactly, never as a substring |
+| `bots[].ack_pattern` / `.decline_pattern` / `.head_verdict_pattern` | string (regex) | unset → no special handling | dev-lifecycle Step 7.5.2, enhanced-pr-review: tell a real verdict apart from an acknowledgement, a refusal, or an in-place-edited verdict |
 | `review_agents.base` | string[] | `["security-reviewer","code-reviewer","docs-reviewer"]` | review-pr / enhanced-pr-review |
 | `review_agents.patterns[]` | `{glob\|label\|content, agent}` | `[]` | specialist dispatch; each entry declares exactly ONE condition — `glob` (changed-file match; no `\|` alternation; `dir/**` any depth, `dir/*` one level), `label` (exact PR label), or `content` (literal substring in the full diff — catches semantic changes made from off-glob files). Repeat the agent for multiple conditions (dispatchers de-dupe by agent, so it runs once). |
 | `release_signal` | object\|null | null → Phase 2.6 / release-classification skipped | enhanced-pr-review, dev-lifecycle |
@@ -50,6 +52,7 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 | `weekly_deps.signal3_repo_map` | map | `{}` | weekly-deps community signal |
 | `weekly_deps.tier_d_sources` | object[] | `[]` → Tier D yields nothing | weekly-deps |
 | `weekly_deps.local_test_cmds` | map(dir→cmd[]) | auto-default from ecosystem | weekly-deps |
+| `weekly_deps.ci_workflow` | string | `""` → no required-workflow check; any PR with zero checks is `missing` | weekly-deps Phase 3.1 |
 | `weekly_deps.deep_review_skill` | string | `/enhanced-pr-review` (fallback: `/review-pr` manual) | weekly-deps |
 | `weekly_deps.cron.{prep,triage,tz_label}` | string | `0 13 * * 3` / `0 15 * * 3` / `ET` | weekly-deps autonomous mode |
 | `weekly_deps.digest_issue_title` | string | `Weekly Dependency Triage — Routine Output` | weekly-deps |
