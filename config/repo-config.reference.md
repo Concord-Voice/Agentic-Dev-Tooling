@@ -23,7 +23,7 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 | `migrations.dir` | string | `migrations/` | migration-reviewer, create-migration, protect-applied-migrations.sh |
 | `paths.electron_dir` | string | `.` (repo root) | ipc-channel-audit, pr-review-agent-dispatch |
 | `agents.escalation` | string | unset → no escalation agent; an E1-E4 hit is surfaced to the developer | dev-lifecycle, reproduce-then-fix, weekly-deps (`lifecycle-agent-dispatch.md` § Escalation) |
-| `red_team.critical_agent` | string | unset → no T3 tier | review-pr / enhanced-pr-review (`pr-review-agent-dispatch.md` § risk tiers) |
+| `red_team.critical_agent` | string | unset → no T3 tier; read from the merge base | enhanced-pr-review (`pr-review-agent-dispatch.md` § risk tiers) |
 | `red_team.critical_paths[]` | string[] | `[]` | globs whose change forces T3; ignored unless `critical_agent` is set |
 | `red_team.focus_surfaces[]` | string[] | `[]` → red-team uses the Focus Surfaces section written inline in its agent file | red-team |
 | `bots` | object[] | `[]` → only generic `Bot: {login}` naming | enhanced-pr-review, dev-lifecycle, weekly-deps |

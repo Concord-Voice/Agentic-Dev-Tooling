@@ -220,7 +220,7 @@ Maximum **5 hypothesis-test iterations**. Track the count explicitly.
 Route by the surface the hypothesis implicates, per the repo's Phase-3 dispatch table — `@backend-developer` or `@frontend-developer` — then check the **E1-E4 escalation criteria** before dispatching. In a debugging loop two of them fire often:
 
 - **E2** — the bug lives on an auth / crypto / key-handling / RBAC / IPC-sender surface. Escalate on the first iteration, not the third.
-- **E4** — **iteration 3 with no green.** Two failed hypotheses on the same task is a producer bounce; hand the accumulated hypothesis table to the repo's escalation agent (or to the developer, when none is defined) rather than spending iterations 4 and 5 the same way.
+- **E4** — **iteration 3 with no green.** Two failed hypotheses on the same task is a producer bounce; hand the accumulated hypothesis table to the repo's escalation agent (`.agents.escalation`, see `_shared/lifecycle-agent-dispatch.md` § Escalation; or to the developer, when none is defined) rather than spending iterations 4 and 5 the same way.
 
 For a one-line fix in a file already open, execute inline — the delegation-overhead gate (D0) applies here exactly as it does in Phase 3.
 
