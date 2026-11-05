@@ -9,8 +9,7 @@ allowed-tools:
   - Read
   - Grep
   - Glob
-  - mcp__sonarqube__quality_gate_status
-  - mcp__sonarqube__quality_gate
+  - mcp__sonarqube__get_project_quality_gate_status
 ---
 
 # Verify Quality Gate
@@ -118,7 +117,9 @@ this session. If either is missing, print `not configured` for this row and do
 not treat it as a failure.
 
 For `sonarqube`:
-1. Call `mcp__sonarqube__quality_gate_status` for the current branch.
+1. Call `mcp__sonarqube__get_project_quality_gate_status`, passing `branch`
+   explicitly (the server's branch-vs-pullRequest contract: use `branch` for a
+   long- or short-lived branch, `pullRequest` for a PR analysis key, never both).
 2. If the gate is `ERROR`, enumerate the failing conditions with metric key,
    threshold, and actual value.
 3. If the gate is `WARN` or `OK`, report the conditions closest to their

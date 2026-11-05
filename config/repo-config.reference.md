@@ -29,6 +29,8 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 | `bots[].blocking` | bool | `false` → finding is advisory | merge-gate honesty check |
 | `bots[].offline` | bool | `false` | wait-for-bots (skip offline bots) |
 | `bots[].when` | string | `always` \| `active` \| `shippable`; absent → `always` | wait-for-bots gating |
+| `bots[].login` (array form) | string[] | — | a bot that posts under more than one login; matched exactly, never as a substring |
+| `bots[].ack_pattern` / `.decline_pattern` / `.head_verdict_pattern` | string (regex) | unset → no special handling | dev-lifecycle Step 7.5.2, enhanced-pr-review: tell a real verdict apart from an acknowledgement, a refusal, or an in-place-edited verdict |
 | `review_agents.base` | string[] | `["security-reviewer","code-reviewer","docs-reviewer"]` | review-pr / enhanced-pr-review |
 | `review_agents.patterns[]` | `{glob\|label\|content, agent}` | `[]` | specialist dispatch; each entry declares exactly ONE condition — `glob` (changed-file match; no `\|` alternation; `dir/**` any depth, `dir/*` one level), `label` (exact PR label), or `content` (literal substring in the full diff — catches semantic changes made from off-glob files). Repeat the agent for multiple conditions (dispatchers de-dupe by agent, so it runs once). |
 | `release_signal` | object\|null | null → Phase 2.6 / release-classification skipped | enhanced-pr-review, dev-lifecycle |

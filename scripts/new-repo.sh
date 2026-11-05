@@ -29,7 +29,7 @@ SHARED_MASTER="$MASTER" "$SYNC" "$REPO"
 REPO_CONFIG="$REPO/.claude/repo-config.json"
 if [ ! -e "$REPO_CONFIG" ]; then
   echo "{}" > "$REPO_CONFIG"
-  echo "created $REPO_CONFIG — see knowledge/repo-config.reference.md to populate it"
+  echo "created $REPO_CONFIG — see config/repo-config.reference.md to populate it"
 else
   echo "repo-config.json already exists — left untouched"
 fi

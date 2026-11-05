@@ -58,4 +58,44 @@ bundled="$HERE/../../../../docs/rules/labels.md"; [ -f "$bundled" ] || bundled="
 ( unset PROJECT_ID STATUS_FIELD_ID
   RC_FILE=/nonexistent bash -c 'source "'"$HERE"'/lib.sh"; move_to_status 1 X 2>/dev/null' && fail "move_to_status should fail loud with no PROJECT_ID" || true )
 
+# pick_inheritance_source: first Closes wins, else first Refs, else empty.
+[ "$(pick_inheritance_source "10" "20")" = "10" ] || fail "pick_inheritance_source should prefer Closes"
+[ "$(pick_inheritance_source "" "$(printf '77\n88')")" = "77" ] || fail "pick_inheritance_source should fall back to the first Refs"
+[ -z "$(pick_inheritance_source "" "")" ] || fail "pick_inheritance_source should be empty with no source"
+staged=$'Stage 1 of 4.\n\nRefs #2001'
+[ "$(pick_inheritance_source "$(parse_pr_closes "$staged")" "$(parse_pr_refs "$staged")")" = "2001" ] || fail "staged Refs-only PR should inherit from its Refs issue"
+
+# risk: hotfix is a release control: never inherited, always surfaced with one exact command.
+got="$(filter_inherited_labels '["type: bug","risk: hotfix","type: epic","routine: weekly"]' | paste -sd, -)"
+[ "$got" = "type: bug" ] || fail "filter_inherited_labels kept a filtered label: got '$got'"
+[ "$(dropped_release_controls '["type: bug","risk: hotfix"]')" = "risk: hotfix" ] || fail "dropped_release_controls should surface risk: hotfix"
+warn="$(warn_dropped_release_controls '["risk: hotfix"]' 42 99 2>&1)"
+[ "$(printf '%s\n' "$warn" | grep -c "gh pr edit 99 --add-label 'risk: hotfix'")" = "1" ] || fail "warn_dropped_release_controls should print one exact command"
+printf '%s\n' "$warn" | grep -qE "add-label '(risk:|hotfix)'" && fail "warn_dropped_release_controls word-split the label" || true
+[ -z "$(warn_dropped_release_controls '["type: bug"]' 42 99 2>&1)" ] || fail "warn_dropped_release_controls should be silent with no release control"
+
+# The no-milestone WARN lists open titles rather than hardcoding one.
+validate_pr_invariants --has-label --no-milestone --has-assignee --has-closes 2>&1 \
+  | grep -q "milestones?state=open" || fail "no-milestone WARN should point at the open-milestones listing"
+
+# Cloud routing: ID helpers emit sentinels; mutating helpers dispatch board-op with the decoded argv.
+( export PROJECT_ID=PVT_test STATUS_FIELD_ID=F_status PRIORITY_FIELD_ID=F_prio CLAUDE_CODE_REMOTE=true
+  tmpc="$(mktemp -d)"
+  printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >> "$BOARD_OP_RECORD"' > "$tmpc/stub.sh"
+  chmod +x "$tmpc/stub.sh"
+  export BOARD_OP_RECORD="$tmpc/record" BOARD_OP_BIN="$tmpc/stub.sh"
+  [ "$(find_project_item_id 1234)" = "CLOUD_NOCREATE:1234" ] || fail "find_project_item_id cloud sentinel"
+  [ "$(ensure_pr_on_project 42)" = "CLOUD:42" ] || fail "ensure_pr_on_project cloud sentinel"
+  [ "$(get_issue_priority_option_id 777)" = "CLOUD_INHERIT:777" ] || fail "get_issue_priority_option_id cloud sentinel"
+  find_project_item_id 'x;y' >/dev/null 2>&1 && fail "cloud sentinel must reject a non-numeric issue"
+  move_to_status "CLOUD:42" "opt_review" || fail "move_to_status cloud dispatch"
+  set_priority "CLOUD_NOCREATE:1234" "CLOUD_INHERIT:777" || fail "set_priority cloud inherit dispatch"
+  set_priority "CLOUD:42" "opt_p1" || fail "set_priority cloud dispatch"
+  expected=$'42 --status opt_review\n1234 --no-create --inherit-priority-from 777\n42 --priority opt_p1'
+  [ "$(cat "$BOARD_OP_RECORD")" = "$expected" ] || fail "board-op argv wrong: $(cat "$BOARD_OP_RECORD")"
+  BOARD_OP_BIN="$tmpc/missing.sh" move_to_status "CLOUD:42" "opt_review" 2>/dev/null && fail "missing board-op must fail non-zero"
+  # With no board configured, the read-only lookups stay empty even in the cloud.
+  [ -z "$(PROJECT_ID='' find_project_item_id 1234)" ] || fail "no board: find_project_item_id should be empty in the cloud"
+  rm -rf "$tmpc" )
+
 echo "ALL PASS"
