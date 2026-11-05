@@ -38,16 +38,18 @@ list, never code execution.
 
 ### Base agents (always dispatched)
 
-Read the base agent list from config. The mandatory floor defaults to `security-reviewer`, `code-reviewer`, and `docs-reviewer`. A repo can replace that floor with `.review_agents.mandatory`, but the trust guard below reads it from the merge base only, so a PR cannot change its own floor; this block shows the floor the checkout declares, and the guard's `DISPATCH_AGENTS` is authoritative. `.review_agents.base` only adds to the floor:
+Read the base agent list from config. The mandatory floor defaults to `security-reviewer`, `code-reviewer`, and `docs-reviewer`. A repo can replace that floor with `.review_agents.mandatory`, but the trust guard below reads it from the merge base only, so a PR cannot change its own floor; this block always prints the default floor, and the guard's `DISPATCH_AGENTS` is authoritative. `.review_agents.base` only adds to the floor:
 
 ```bash
 CFG="${RC_FILE:-$(git rev-parse --show-toplevel)/.claude/repo-config.json}"
 # The mandatory floor. From the checkout, `.review_agents.base` may only ADD reviewers;
 # replacing the floor (`.review_agents.mandatory`) is honoured only from the merge base.
 MANDATORY_BASE='security-reviewer code-reviewer docs-reviewer'
-if command -v jq >/dev/null 2>&1 && [ -f "$CFG" ]; then
-  _floor="$(jq -r '.review_agents.mandatory // [] | .[]' "$CFG" 2>/dev/null | tr '\n' ' ')"
-  [ -z "${_floor// /}" ] || MANDATORY_BASE="$_floor"
+# `.review_agents.mandatory` is NOT read here: the checkout is PR-controlled. The trust
+# guard below replaces the floor from the merge base; dispatch only its DISPATCH_AGENTS.
+if command -v jq >/dev/null 2>&1 && [ -f "$CFG" ] \
+  && jq -e '.review_agents | type == "object" and has("mandatory")' "$CFG" >/dev/null 2>&1; then
+  echo "note: the checkout sets .review_agents.mandatory; it is honoured only from the merge base (see DISPATCH_AGENTS)" >&2
 fi
 CONFIGURED=
 if command -v jq >/dev/null 2>&1 && [ -f "$CFG" ]; then
