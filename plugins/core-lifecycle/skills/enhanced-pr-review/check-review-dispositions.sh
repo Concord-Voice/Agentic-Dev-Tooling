@@ -249,7 +249,7 @@ if [ -n "$ROSTER_RAW" ]; then
         | ([$logins[] | select(contains($m))]) as $hit
         | select(($hit | length) > 1)
         | "match=\"\($m)\" hits \($hit | join(", "))"' 2>/dev/null)
-    if [ -n "$ROSTER_AMBIG" ]; then
+    if [[ -n "$ROSTER_AMBIG" ]]; then
         echo "STOP: reviewer roster at ${ROSTER_SOURCE} has a match that names more than one account on this PR:" >&2
         printf '%s\n' "$ROSTER_AMBIG" | sed 's/^/      /' >&2
         echo "      Narrow it to one login (or use \"login\")." >&2

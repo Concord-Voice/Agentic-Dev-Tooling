@@ -128,7 +128,7 @@ REPO_REAL=""
 RC_FILE="${REPO_ROOT:+$REPO_ROOT/}.claude/repo-config.json"; [ -f "$RC_FILE" ] || RC_FILE=".claude/repo-config.json"
 # No patterns means nothing is protected, so skip the walk instead of paying for it
 # on every Bash call. A marker can only widen what is allowed, so it does not matter here.
-[ -n "$(jq -r '.hooks.protected_patterns[]? // empty' "$RC_FILE" 2>/dev/null)" ] || exit 0
+[[ -n "$(jq -r '.hooks.protected_patterns[]? // empty' "$RC_FILE" 2>/dev/null)" ]] || exit 0
 
 # list_descendants <repo-relative-dir> — what a recursive delete of it would take.
 #
