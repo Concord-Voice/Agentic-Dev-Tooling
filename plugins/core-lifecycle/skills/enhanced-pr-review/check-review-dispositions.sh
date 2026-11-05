@@ -108,14 +108,26 @@ else
     fi
     OWNER="${OWNER_REPO%%/*}"
     REPO="${OWNER_REPO##*/}"
-    if ! RAW=$(gh api graphql \
-            -F owner="$OWNER" -F repo="$REPO" -F pr="$PR" \
-            -f query='
-query($owner:String!,$repo:String!,$pr:Int!){
+
+    # PAGINATED, one connection per query. `gh api graphql --paginate` follows
+    # exactly ONE cursor — the first `pageInfo` it finds — so three connections in
+    # one query would paginate one and re-request the other two on every page,
+    # duplicating their nodes. Three queries, each with its own `$endCursor`.
+    #
+    # This replaced an unpaginated `first:100` that exited 2 on any truncation.
+    # That was the right call for THREADS and is still how a fixture behaves, but
+    # it was wrong for `reviews`: every inline reply to a bot creates a review, so
+    # an ordinary reconciliation cycle crosses 100 on a normal-sized PR. Observed
+    # on a real PR — 59 threads, 101 reviews — where the gate STOPped with UNKNOWN
+    # while the surface was in fact complete and clean. A gate that fails closed
+    # on its own page size teaches people to override it, and an overridden gate
+    # stops catching the thing it exists for.
+    Q_THREADS='
+query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$pr){
-      reviewThreads(first:100){
-        pageInfo{hasNextPage}
+      reviewThreads(first:100, after:$endCursor){
+        pageInfo{hasNextPage endCursor}
         nodes{
           id isResolved
           resolvedBy{login}
@@ -123,15 +135,131 @@ query($owner:String!,$repo:String!,$pr:Int!){
           comments(first:100){pageInfo{hasNextPage} nodes{author{__typename login} authorAssociation body}}
         }
       }
-      comments(first:100){pageInfo{hasNextPage} nodes{author{__typename login} authorAssociation body}}
-      reviews(first:100){pageInfo{hasNextPage} nodes{author{__typename login} body}}
     }
   }
-}' 2>&1); then
-        echo "STOP: could not read review surface for PR #${PR}: ${RAW}" >&2
+}'
+    Q_COMMENTS='
+query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){
+    pullRequest(number:$pr){
+      comments(first:100, after:$endCursor){
+        pageInfo{hasNextPage endCursor}
+        nodes{author{__typename login} authorAssociation body}
+      }
+    }
+  }
+}'
+    Q_REVIEWS='
+query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){
+    pullRequest(number:$pr){
+      reviews(first:100, after:$endCursor){
+        pageInfo{hasNextPage endCursor}
+        nodes{author{__typename login} body}
+      }
+    }
+  }
+}'
+    # Emits the `--slurp` ARRAY of pages and propagates gh's exit status. It must
+    # NOT exit on failure itself: every caller invokes it inside `$( )`, where an
+    # `exit 2` would kill only the subshell and leave the script running with an
+    # empty variable — a fail-OPEN in the one place this gate cannot afford one.
+    cv_fetch_pages() { # cv_fetch_pages <query>
+        gh api graphql --paginate --slurp \
+            -F owner="$OWNER" -F repo="$REPO" -F pr="$PR" -f query="$1" 2>&1
+    }
+
+    if ! THREAD_PAGES=$(cv_fetch_pages "$Q_THREADS"); then
+        echo "STOP: could not read review threads for PR #${PR}: ${THREAD_PAGES}" >&2
         echo "      Treating this as UNKNOWN, not as clean. Re-run before merging." >&2
         exit 2
     fi
+    if ! COMMENT_PAGES=$(cv_fetch_pages "$Q_COMMENTS"); then
+        echo "STOP: could not read conversation comments for PR #${PR}: ${COMMENT_PAGES}" >&2
+        echo "      Treating this as UNKNOWN, not as clean. Re-run before merging." >&2
+        exit 2
+    fi
+    if ! REVIEW_PAGES=$(cv_fetch_pages "$Q_REVIEWS"); then
+        echo "STOP: could not read reviews for PR #${PR}: ${REVIEW_PAGES}" >&2
+        echo "      Treating this as UNKNOWN, not as clean. Re-run before merging." >&2
+        exit 2
+    fi
+
+    # Check EVERY page for an API-error envelope before assembling. A GraphQL
+    # error body is valid JSON with a null pullRequest; assembling it yields a
+    # well-formed document with zero rows, and every assertion below then passes
+    # vacuously. The post-assembly probe cannot see this — by then the nulls have
+    # been flattened away.
+    for pages_var in "$THREAD_PAGES" "$COMMENT_PAGES" "$REVIEW_PAGES"; do
+        if ! printf '%s' "$pages_var" \
+                | jq -e 'type == "array" and length > 0
+                          and (map(.data.repository.pullRequest) | all(. != null))' >/dev/null 2>&1; then
+            echo "STOP: review-surface query returned no pullRequest for #${PR}." >&2
+            printf '%s' "$pages_var" | head -5 >&2
+            exit 2
+        fi
+    done
+
+    # Reassemble the exact shape the assertions (and every fixture) expect. The
+    # pageInfo flags are set false because the pages above ARE the whole
+    # connection; the truncation guard further down still runs, and now means
+    # "assembly did not finish" rather than "the PR is too big".
+    if ! RAW=$(jq -n \
+            --argjson t "$THREAD_PAGES" \
+            --argjson c "$COMMENT_PAGES" \
+            --argjson r "$REVIEW_PAGES" '
+        {data:{repository:{pullRequest:{
+          reviewThreads:{pageInfo:{hasNextPage:false},
+                         nodes:[$t[].data.repository.pullRequest.reviewThreads.nodes[]]},
+          comments:     {pageInfo:{hasNextPage:false},
+                         nodes:[$c[].data.repository.pullRequest.comments.nodes[]]},
+          reviews:      {pageInfo:{hasNextPage:false},
+                         nodes:[$r[].data.repository.pullRequest.reviews.nodes[]]}
+        }}}}' 2>&1); then
+        echo "STOP: could not assemble the paginated review surface for #${PR}: ${RAW}" >&2
+        exit 2
+    fi
+
+    # NESTED connection: a thread with >100 comments is not covered by the loops
+    # above, because --paginate follows only the outermost cursor. Rare, but the
+    # gate's whole claim is "never clean over an unread surface", so leaving one
+    # truncation path would keep a STOP-on-non-finding alive for the case nobody
+    # would think to check. `</dev/null` keeps gh off the loop's stdin: a
+    # subcommand that read it would swallow the remaining ids and silently
+    # truncate the very repair this is doing.
+    Q_THREAD_COMMENTS='
+query($id:ID!,$endCursor:String){
+  node(id:$id){
+    ... on PullRequestReviewThread {
+      comments(first:100, after:$endCursor){
+        pageInfo{hasNextPage endCursor}
+        nodes{author{__typename login} authorAssociation body}
+      }
+    }
+  }
+}'
+    # A here-string, not a heredoc: Semgrep's bash parser rejects a heredoc inside an if block.
+    TRUNC_IDS=$(printf '%s' "$RAW" | jq -r '
+        .data.repository.pullRequest.reviewThreads.nodes[]
+        | select(.comments.pageInfo.hasNextPage == true) | .id')
+    while IFS= read -r tid; do
+        [[ -n "$tid" ]] || continue
+        if ! TC_PAGES=$(gh api graphql --paginate --slurp \
+                -F id="$tid" -f query="$Q_THREAD_COMMENTS" </dev/null 2>&1); then
+            echo "STOP: could not read the comments of thread ${tid} for #${PR}: ${TC_PAGES}" >&2
+            exit 2
+        fi
+        if ! RAW=$(printf '%s' "$RAW" | jq \
+                --arg id "$tid" --argjson tc "$TC_PAGES" '
+            .data.repository.pullRequest.reviewThreads.nodes |= map(
+              if .id == $id
+              then .comments = {pageInfo:{hasNextPage:false},
+                                nodes:[$tc[].data.node.comments.nodes[]]}
+              else . end)' 2>&1); then
+            echo "STOP: could not splice the comments of thread ${tid} for #${PR}: ${RAW}" >&2
+            exit 2
+        fi
+    done <<< "$TRUNC_IDS"
 fi
 
 # An API error body is valid JSON with an `errors` key and a null pullRequest.
@@ -224,19 +352,39 @@ if [ -n "$ROSTER_RAW" ]; then
     # it into several aliases of which the shortest fragment wins. `.match` is
     # equally load-bearing because it selects WHICH name becomes an accepted
     # alias — one over-broad entry donates its alias to the whole fleet.
-    ROSTER_BAD=$(printf '%s' "$ROSTER_JSON" | jq -r '
+    # `.login` is a string or an array of strings. Every declared alias must be
+    # usable: after `ascii_downcase | sub("\\[bot\\]$";"")` it must still be a
+    # possible GitHub login ([a-z0-9-], non-empty), or it matches nothing and
+    # silently unrosters its reviewer (a false PASS). An entry with no `.login`
+    # needs a usable string `.match`. The validator fails CLOSED: if jq itself
+    # errors, that is a STOP, never a clean roster.
+    if ! ROSTER_BAD=$(printf '%s' "$ROSTER_JSON" | jq -r '
         .[] | . as $e
         | ((($e.name // "") | tostring) as $n
            | (($e.match // "") | tostring) as $m
+           | (if ($e.login | type) == "array" then $e.login else [$e.login] end) as $lgs
            | if ($n != "") and (($n | test("[\r\n]")) or (($n | gsub("\\s";"") | length) < 3))
              then "name=\"\($n)\" (must be >=3 non-space chars, no newlines)"
              elif ($m != "") and (($m | gsub("\\s";"") | length) < 4)
              then "match=\"\($m)\" (must be >=4 non-space chars; it is a substring test on logins)"
-             else empty end)' 2>/dev/null)
+             elif ($e.login != null) and (($lgs | map(select(type != "string")) | length) > 0)
+             then "name=\"\($n)\" login element types [\($lgs | map(type) | join(", "))] (must be a string or an array of strings)"
+             elif ($e.login != null) and (($lgs | length) == 0)
+             then "name=\"\($n)\" declares no login alias at all (an empty list matches nothing)"
+             elif ($e.login == null) and ((($e.match // "") | if type == "string" then gsub("\\s";"") else "" end | length) < 4)
+             then "name=\"\($n)\" has no usable selector: no .login, and .match is \($e.match | type) (a match-only entry needs a string .match of >=4 non-space chars)"
+             elif ($e.login != null) and (($lgs | map(ascii_downcase | sub("\\[bot\\]$";"")) | map(select(test("\\A[a-z0-9][a-z0-9-]*\\z") | not)) | length) > 0)
+             then "name=\"\($n)\" alias(es) [\($lgs | map(ascii_downcase | sub("\\[bot\\]$";"")) | map(select(test("\\A[a-z0-9][a-z0-9-]*\\z") | not)) | join(", "))] can never match (a GitHub login is [a-z0-9-] after downcasing)"
+             else empty end)' 2>&1); then
+        echo "STOP: could not validate the reviewer roster at ${ROSTER_SOURCE}: ${ROSTER_BAD}" >&2
+        echo "      Reviewer coverage cannot be evaluated. UNKNOWN, not clean." >&2
+        exit 2
+    fi
     if [ -n "$ROSTER_BAD" ]; then
         echo "STOP: reviewer roster at ${ROSTER_SOURCE} has unusable entries:" >&2
         printf '%s\n' "$ROSTER_BAD" | sed 's/^/      /' >&2
-        echo "      An over-broad alias satisfies coverage for reviewers it does not name." >&2
+        echo "      An over-broad alias satisfies coverage for reviewers it does not name;" >&2
+        echo "      a malformed login silently unrosters the reviewer that owns it." >&2
         exit 2
     fi
     # Length alone does not stop a generic substring ("-bot", "review"): a `match`
@@ -265,12 +413,24 @@ fi
 # resolved threads stay in scope and its own comments never count as a disposition.
 # Shared by Assertions 1 and 3 so the two cannot drift. A null login (a deleted
 # account) or an empty roster login never matches, so a ghost author is not a reviewer.
-JQ_ROSTERED='def rostered($login):
-      (($login // "") | ascii_downcase) as $l
-    | $l != "" and (($roster | map(. as $e | select(
-          ((($e.login // "") | ascii_downcase | sub("\\[bot\\]$";"")) as $el | $el != "" and $el == $l)
-          or ((($e.match // "") != "") and ($l | contains($e.match | ascii_downcase)))))
-       | length) > 0);'
+JQ_ROSTERED='
+    # `.login` is ONE login or SEVERAL (one reviewer can post under two logins).
+    # `ascii_downcase` on an array aborts the whole jq program, so normalise to a
+    # list first; non-string members are dropped here as a backstop (the roster
+    # validator above already refused them).
+    def loginset($e):
+        ($e.login // "")
+      | (if type == "array" then . else [.] end)
+      | map(select(type == "string") | ascii_downcase | sub("\\[bot\\]$";"") | select(. != ""));
+    def loginmatches($e; $l): any(loginset($e)[]; . == $l);
+    def matchstr($e): ($e.match // "") | if type == "string" then . else "" end;
+    def markerstr($e): ($e.marker // "") | if type == "string" then . else "" end;
+    def rostered($login):
+        (($login // "") | ascii_downcase) as $l
+      | $l != "" and (($roster | map(. as $e | select(
+            loginmatches($e; $l)
+            or ((matchstr($e) != "") and ($l | contains(matchstr($e) | ascii_downcase)))))
+         | length) > 0);'
 THREAD_ROWS=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'
   def reviewer: .author.__typename == "Bot" or rostered(.author.login);
   .data.repository.pullRequest.reviewThreads.nodes[]
@@ -320,7 +480,7 @@ THREAD_ROWS=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"
       (($t.comments.nodes[0].author.login // "unknown") | if . == "" then "unknown" else . end),
       (($t.resolvedBy.login // "NONE") | if . == "" then "NONE" else . end) ]
   | @tsv' 2>&1) || THREAD_ROWS="JQERR"
-if [ "$THREAD_ROWS" = "JQERR" ] || printf '%s' "$THREAD_ROWS" | grep -q '^jq: error'; then
+if [[ "$THREAD_ROWS" = "JQERR" ]] || printf '%s' "$THREAD_ROWS" | grep '^jq: error' >/dev/null; then
     echo "STOP: could not parse review threads for #${PR}: ${THREAD_ROWS}" >&2
     exit 2
 fi
@@ -412,7 +572,7 @@ if [ -n "$THREAD_ROWS" ]; then
                 fi
                 if [ "$disp" = "accepted" ]; then
                     # 'accepted' means a fix landed; evidence is the commit that landed it.
-                    if ! echo "$evidence" | grep -qE '^[0-9a-f]{7,40}$'; then
+                    if ! echo "$evidence" | grep -E '^[0-9a-f]{7,40}$' >/dev/null; then
                         echo "BLOCKING: accepted disposition needs 'evidence: <commit-sha>', got '${evidence}' — ${loc}"
                         fail=1
                     elif [ "${CV_SKIP_EXISTENCE_CHECKS:-0}" != "1" ] \
@@ -468,6 +628,17 @@ REQUIRED=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'
     # contains(), `.` is the string being tested — so a bare `.marker`/`.match`
     # indexes a string and jq aborts the whole program. This exact mistake was
     # made twice while writing this file; the binding is not stylistic.
+    #
+    # `.login` IS EITHER A STRING OR AN ARRAY OF THEM, so every read normalises
+    # before `ascii_downcase`. One reviewer legitimately owns several logins —
+    # Copilot posts inline comments as `Copilot` and review summaries as
+    # `copilot-pull-request-reviewer[bot]` — and the roster was widened to
+    # carry both. `ascii_downcase` on an array raises `explode input must be a
+    # string`, which aborts the WHOLE jq program, so the failure was not a bad
+    # match on one entry: the script caught it as JQERR and exited 2 (UNKNOWN)
+    # for EVERY pull request in the repo, on every surface, from the moment that
+    # roster change merged. Exit 2 is not exit 1, so nothing read it as a
+    # refusal — the gate simply stopped answering.
     # A roster-registered login is a reviewer whatever its GraphQL type. A CI
     # reviewer implemented as a machine USER account is `__typename == "User"`,
     # so the type fence alone treated it as a person: its threads fell out of
@@ -477,13 +648,13 @@ REQUIRED=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'
     def persona($login; $body):
         (($login // "") | ascii_downcase) as $l
       | ($roster | map(. as $e | select(
-            ((($e.login // "") | ascii_downcase | sub("\\[bot\\]$";"")) == $l)
-            and (($e.marker // "") != "") and ($body | contains($e.marker))))) as $bymarker
+            loginmatches($e; $l)
+            and (markerstr($e) != "") and ($body | contains(markerstr($e)))))) as $bymarker
       | ($roster | map(. as $e | select(
-            ((($e.login // "") | ascii_downcase | sub("\\[bot\\]$";"")) == $l)
-            and (($e.marker // "") == "")))) as $bylogin
+            loginmatches($e; $l)
+            and (markerstr($e) == "")))) as $bylogin
       | ($roster | map(. as $e | select(
-            (($e.match // "") != "") and ($l | contains($e.match | ascii_downcase))))) as $bymatch
+            (matchstr($e) != "") and ($l | contains(matchstr($e) | ascii_downcase))))) as $bymatch
       # Emit ALL matched personas, not just the first. One comment body can
       # carry two markers (a CI job that reports twice), and `first` silently
       # dropped the second persona so the post never had to name it — a gap in
@@ -497,8 +668,8 @@ REQUIRED=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'
       (.data.repository.pullRequest.reviewThreads.nodes[]?.comments.nodes[]?
         | select(.author.__typename=="Bot" or rostered(.author.login))
         | persona(.author.login; (.body // "")))
-    ] | map(select(. != null and . != "")) | unique | .[]' 2>&1) || REQUIRED="JQERR"
-if [ "$REQUIRED" = "JQERR" ] || printf '%s' "$REQUIRED" | grep -q '^jq: error'; then
+    ] | map(select(. != null and . != "")) | unique | .[]' 2>&1) || { echo "STOP: reviewer enumeration failed: ${REQUIRED}" >&2; REQUIRED="JQERR"; }
+if [[ "$REQUIRED" = "JQERR" ]] || printf '%s' "$REQUIRED" | grep '^jq: error' >/dev/null; then
     echo "STOP: could not enumerate reviewers for #${PR}: ${REQUIRED}" >&2
     exit 2
 fi
@@ -546,7 +717,7 @@ else
         [ -z "$want" ] && continue
         # -F: fixed string, never a pattern. --: a value starting with a hyphen
         # can never be read as a grep option. Both verified by review.
-        if ! printf '%s' "$RECON_BODY" | grep -qiF -- "$want"; then
+        if ! printf '%s' "$RECON_BODY" | grep -iF -- "$want" >/dev/null; then
             echo "BLOCKING: reconciliation post does not account for reviewer '${want}'." >&2
             echo "          Every reviewer that posted — including summary-only ones, and" >&2
             echo "          each persona of a shared CI login — needs a row naming it." >&2
