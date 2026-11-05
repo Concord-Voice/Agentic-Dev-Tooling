@@ -1471,14 +1471,30 @@ on *code* changes, while the `docs-reviewer` agent that normally catches this on
 touches **doc** surfaces — so a code-only PR can silently desync the counts. A repo names its
 count-refresh script in `.claude/repo-config.json` `.docs.counts_script` (dry-run with no
 arguments, `--apply` to write) and the paths that feed it in `.docs.count_globs[]`. When the
-script is set, run its dry-run whenever this branch's diff touches one of those globs,
-regardless of whether any `.md` file changed:
+script is set, run its dry-run whenever this branch's diff touches one of those globs (empty or
+unset `count_globs` → every PR), regardless of whether any `.md` file changed.
+
+The script is code the reviewer runs, so a PR must not be able to choose or rewrite it. Read the
+key from the merge base with the default branch, not the checkout, and run it only when it is a
+tracked repo-relative file this branch leaves unchanged:
 
 ```bash
-COUNTS_SCRIPT="$(rc_get '.docs.counts_script' '')"   # unset → this probe is skipped
-[ -n "$COUNTS_SCRIPT" ] && "$COUNTS_SCRIPT"           # dry-run; a non-empty diff is the finding
+ROOT="$(git rev-parse --show-toplevel)"
+MB="$(git -C "$ROOT" merge-base HEAD "origin/${DEFAULT_BRANCH}")"
+COUNTS_SCRIPT="$(git -C "$ROOT" show "$MB:.claude/repo-config.json" 2>/dev/null | jq -r '.docs.counts_script // empty')"
+if [ -z "$COUNTS_SCRIPT" ]; then
+  echo "count-drift probe: skipped (no .docs.counts_script)"
+elif [[ $COUNTS_SCRIPT == /* || $COUNTS_SCRIPT == *..* ]] \
+     || ! git -C "$ROOT" cat-file -e "$MB:$COUNTS_SCRIPT" 2>/dev/null \
+     || ! git -C "$ROOT" diff --quiet "$MB" -- ":/$COUNTS_SCRIPT"; then   # working tree vs merge base
+  echo "WARN: count-drift probe skipped: $COUNTS_SCRIPT is not a tracked file unchanged by this branch" >&2
+else
+  (cd "$ROOT" && "./$COUNTS_SCRIPT")   # dry-run; a non-empty diff is the finding
+fi
 ```
- If the dry-run diff is
+
+A skip with a WARN means the probe did not run: say so in the PR, never report it as clean. If
+the dry-run diff is
 **non-empty**, the count is stale and the refresh is **non-deferrable — it lands in THIS PR**,
 never a follow-up (a numeric/metadata count is in scope exactly like behavior-describing prose).
 
