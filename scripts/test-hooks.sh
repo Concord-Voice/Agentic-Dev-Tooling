@@ -167,12 +167,12 @@ done
 [[ "$(cmdrun protect-env-files.sh "cat desktop/.env")" = "2" ]] || fail "env: Bash cat of .env must BLOCK"
 [[ "$(cmdrun protect-env-files.sh "cat .env.example")" = "0" ]] || fail "env: Bash cat of .env.example should allow"
 [[ "$(cmdrun protect-env-files.sh "git status")" = "0" ]] || fail "env: unrelated Bash should allow"
-for c in "cat .env*" "cat .en?" "cat .en''v" "cat {.env,x}" "cat .ENV"; do
+for c in "cat .env*" "cat .en?" "cat .en''v" "cat {.env,x}" "cat .ENV" 'cat ".env"*' "cat '.en'?"; do
   [[ "$(cmdrun protect-env-files.sh "$c")" = "2" ]] || fail "env: Bash $c must BLOCK"
 done
 [[ "$(cmdrun protect-env-files.sh "cat .*")" = "2" ]] || fail "env: Bash cat .* must BLOCK"
 for c in 'grep -rn "process.env" src' "rg import.meta.env" "ls config.env" \
-         "jq -r '.[] | .name' f.json" "sed 's/.*foo//' x" "gh api x --jq '.[0].id'"; do
+         "jq -r '.[] | .name' f.json" "sed 's/.*foo//' x" "gh api x --jq '.[0].id'" "echo '.env*'"; do
   [[ "$(cmdrun protect-env-files.sh "$c")" = "0" ]] || fail "env: Bash $c should allow"
 done
 
