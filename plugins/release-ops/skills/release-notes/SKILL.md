@@ -5,6 +5,8 @@ argument-hint: "[version] [--since=<tag>] [--dry-run]"
 allowed-tools:
   - Bash(git log *)
   - Bash(git tag *)
+  - Bash(git rev-parse *)
+  - Bash(source *)
   - Bash(git show *)
   - Bash(gh release *)
   - Bash(gh issue view *)
@@ -53,9 +55,13 @@ the two distinguishable.
   (default `v`), so a repo with other tags (for example per-component
   prefixes) only sees its own release line:
   ```bash
-  source scripts/repo-config.sh
+  source "$(git rev-parse --show-toplevel)/scripts/repo-config.sh" || exit 1
   TAG_PREFIX="$(rc_get '.release.tag_prefix' 'v')"
-  git tag -l "${TAG_PREFIX}*" --sort=-v:refname | head -2
+  TAGS="$(git tag -l "${TAG_PREFIX}*" --sort=-v:refname)"
+  # A repo with bare tags (1.2.3) and no .release.tag_prefix would otherwise
+  # find nothing and treat this as a first release.
+  [ -n "$TAGS" ] || { echo "WARN: no ${TAG_PREFIX}* tags; using all tags" >&2; TAGS="$(git tag -l --sort=-v:refname)"; }
+  printf '%s\n' "$TAGS" | head -2
   ```
 - If no previous tag exists (first release), collect all commits since the repository's initial commit.
 - Print the range: `<previous>..HEAD` (or `<previous>..<target-tag>`).

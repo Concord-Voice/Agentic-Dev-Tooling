@@ -9,6 +9,8 @@ allowed-tools:
   - Bash(gh label *)
   - Bash(gh repo *)
   - Bash(git log *)
+  - Bash(git rev-parse *)
+  - Bash(source *)
   - Bash(date *)
   - Bash(jq *)
   - Read
@@ -61,13 +63,18 @@ Resolve mode from `$ARGUMENTS` (default `auto`). **Always read [`references/auto
 ## Phase 0 — Resolve context + safety envelope (read-only)
 
 ```bash
-source scripts/repo-config.sh
+source "$(git rev-parse --show-toplevel)/scripts/repo-config.sh" || { echo "FATAL: scripts/repo-config.sh not found" >&2; exit 1; }
 # Repo pair and sentinel prefix come from .claude/repo-config.json (.feedback_triage.*);
 # a flag still wins. A scheduled run passes no flags, so a repo that runs this routine
 # MUST set .feedback_triage.public and .tracker: the placeholders below stop the run.
 PUBLIC=${public:-$(rc_get '.feedback_triage.public' 'example-org/example-repo')}           # source-available feedback repo (FEEDBACK_REPO)
 TRACKER=${tracker:-$(rc_get '.feedback_triage.tracker' 'example-org/example-repo-private')}  # private tracker
-case "$PUBLIC $TRACKER" in *example-org/*) echo "FATAL: set .feedback_triage.public and .tracker in .claude/repo-config.json" >&2; exit 1 ;; esac
+# Fail closed: an empty, placeholder, malformed or identical pair would send private
+# tracker detail to the public repo (gh -R "" falls back to the current checkout).
+nwo='^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'
+if [[ ! $PUBLIC =~ $nwo || ! $TRACKER =~ $nwo || $PUBLIC == example-org/* || $TRACKER == example-org/* || $PUBLIC == "$TRACKER" ]]; then
+  echo "FATAL: set .feedback_triage.public and .tracker (owner/repo, different repos) in .claude/repo-config.json" >&2; exit 1
+fi
 # Sentinel prefix for every routine marker. Keep the prefix a repo already has on
 # its public issues: a renamed prefix orphans the existing status comments and the
 # pinned Known Issues issue, and the next run would duplicate them.

@@ -18,15 +18,17 @@ Release checklist for version **$0**.
 ## 0. Resolve this repo's layout
 
 Read the layout from `.claude/repo-config.json` (`.release.*`) once. Every command
-below uses these values. A repo that has not set them gets placeholders that make
-the commands fail loudly, rather than check the wrong path or match no tag.
+below uses these values. A repo that has not set them gets generic defaults
+(`frontend`, `backend`, `v`, `release.yml`). Check the printed values match this
+repo before running anything below: a default can name a real but wrong path.
 
 ```bash
-source scripts/repo-config.sh
+source "$(git rev-parse --show-toplevel)/scripts/repo-config.sh" || exit 1
 FRONTEND_DIR="$(rc_get '.release.frontend_dir' 'frontend')"     # e.g. apps/desktop
 BACKEND_DIR="$(rc_get '.release.backend_dir' 'backend')"         # e.g. services/api
 TAG_PREFIX="$(rc_get '.release.tag_prefix' 'v')"                 # e.g. v, or app-v
 RELEASE_WORKFLOW="$(rc_get '.release.workflow' 'release.yml')"   # the workflow that builds the release
+echo "frontend=$FRONTEND_DIR backend=$BACKEND_DIR tag_prefix=$TAG_PREFIX workflow=$RELEASE_WORKFLOW"
 git tag -l "${TAG_PREFIX}*" | head -3   # must list real tags; empty means TAG_PREFIX is wrong
 ```
 
