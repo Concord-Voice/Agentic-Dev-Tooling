@@ -372,6 +372,13 @@ printf '%s' "$ambig_json" > "$TMP/ambig-f.json"
 CV_REVIEW_FIXTURE="$TMP/ambig-f.json" CV_REPO_CONFIG="$TMP/ambig.json" CV_SKIP_EXISTENCE_CHECKS=1 "$SCRIPT" 999 >/dev/null 2>&1; got=$?
 if [[ "$got" -eq 2 ]]; then printf '  ok   %-52s (exit %d)\n' "STOP: a match that hits two logins on the PR" "$got"; pass=$((pass+1))
 else printf '  FAIL %-52s (want 2, got %d)\n' "STOP: a match that hits two logins on the PR" "$got"; fail=$((fail+1)); fi
+# One reviewer posting as two of its own listed logins is not a clash.
+own_json=$(doc "" "$(botsay copilot-pull-request-reviewer 'verdict'),$(botsay Copilot 'note'),$(human '<!-- cv-review-reconciliation -->\n| Copilot |')")
+printf '%s' '{"bots":[{"match":"copilot","name":"Copilot","login":["copilot-pull-request-reviewer[bot]","Copilot"]}]}' > "$TMP/own.json"
+printf '%s' "$own_json" > "$TMP/own-f.json"
+err=$(CV_REVIEW_FIXTURE="$TMP/own-f.json" CV_REPO_CONFIG="$TMP/own.json" CV_SKIP_EXISTENCE_CHECKS=1 "$SCRIPT" 999 2>&1 >/dev/null); rc=$?
+if [[ "$rc" -eq 0 && "$err" != *"more than one account"* ]]; then printf '  ok   %-52s\n' "no STOP: a match hitting only the entry's own logins"; pass=$((pass+1))
+else printf '  FAIL %-52s (exit %d)\n' "no STOP: a match hitting only the entry's own logins" "$rc"; printf '%s\n' "$err" | sed 's/^/         | /'; fail=$((fail+1)); fi
 
 badroster "STOP: malformed roster is loud, not silent login-only" 2 \
     '{"bots":[{"match":'

@@ -55,7 +55,7 @@ Matching is **over-inclusive by design**: a needless reviewer run just returns A
 | **Risk-tiered** — mandatory at tier T2 or T3, optional at T0 or T1 (see § Codex-conditional reviewers). Mandatory whenever Codex's SECURITY review has not covered the head. The primary risk signals are label `risk: security` / `risk: privacy`, files `**/auth/**`, `**/crypto/**`, `**/permissions/**`, `src/main/ipc*`, `src/preload/*`, and content **[E1]** or **[R1]** | `@red-team` | Priority 1 |
 | Files `**/*.go` · content **[S1]** | `@pr-review-toolkit:silent-failure-hunter` (plugin agent) | Priority 2 |
 | Files `**/*_test.go`, `**/*.test.ts`, `**/*.test.tsx`, `**/tests/**` | `@pr-review-toolkit:pr-test-analyzer` (plugin agent) | Priority 3 |
-| Always | `@security-reviewer` | Priority 1 |
+| Always — unless the repo's `.review_agents.mandatory`, read from the merge base, names a different always-on security reviewer (see § Repo-defined security floor) | `@security-reviewer` | Priority 1 |
 | Label `type: feature` (over-building concentrates in feature work; a review-tooling yield audit measured no unique high-severity findings across a long run of unconditional dispatches) | `@scope-reviewer` | Priority 4 |
 | **Codex-conditional** — mandatory unless Codex's CODE review has already covered the current head, optional when it has (see § Codex-conditional reviewers). Covered means a Completed **Code Review** row for the head commit in its summary comment (the SHA there is a 7–40 character prefix), or inline Codex findings on the head. Codex covers generic correctness there. A Completed **Security Review** row does not count, and neither does a 👍 reaction or a usage-limit notice: a past PR had its security review complete and Codex react 👍 while its code review was blocked by the usage limit. Dispatch it as the fallback whenever the Codex code review is blocked, absent, or behind the head — and always when the repo has no Codex reviewer | `@code-reviewer` | Priority 2 |
 
@@ -69,8 +69,9 @@ Matching is **over-inclusive by design**: a needless reviewer run just returns A
 **Trigger changes after a yield audit.** The `@code-reviewer` and `@scope-reviewer` rows above
 changed after a review-tooling audit measured each agent's yield per run. They cover
 `/enhanced-pr-review` only. `/review-pr` keeps its own mandatory base
-(`rc_get '.review_agents.base'`, default `security-reviewer code-reviewer docs-reviewer`) because
-a developer invoking it by hand has asked for that review.
+(default `security-reviewer code-reviewer docs-reviewer`, replaced by `.review_agents.mandatory`
+from the merge base when set; `.review_agents.base` only adds to it) because a developer
+invoking it by hand has asked for that review.
 
 > The Electron globs above (`src/preload/*`, `src/main/ipc*`) assume the Electron
 > app lives at the repo root (`.`) — the directory named by
@@ -109,6 +110,25 @@ for a worked template.
 **Three of these are plugin or advisory agents, and their standing differs.** `@pr-review-toolkit:silent-failure-hunter` is the enforcement for the error-discard rule your backend rules file should carry (`errcheck` honors explicit `_` blank-discards, so the linter cannot catch it) — its findings are **blocking**, exactly like a first-party reviewer's — a standing that two production incidents from swallowed errors earned it. `@pr-review-toolkit:pr-test-analyzer` reviews test *quality* (do the tests actually exercise the change?), a gap between `@test-writer` (authors them) and `@code-reviewer` (generic); its findings are normal-severity. It declares `model: inherit`, so it runs on the orchestrator's model and can be expensive per run; a repo-owned test-quality reviewer with a lower pin that reads only the diff and its covering tests is a reasonable replacement. `@scope-reviewer` is **advisory only** — a reasoned refusal is a valid resolution and is recorded, not re-argued; it must never block a merge.
 
 **`@red-team` is adversarial, not additive coverage.** It constructs executable proof-of-concept exploits rather than checking a list, and is dispatched with `isolation: worktree`. **That isolation redirects its working directory; it does not sandbox it** — the agent's own definition (`red-team.md`) says so: an absolute path in a `Write` or a `Bash` command still reaches the rest of the filesystem. Treat a PoC artifact appearing in the shared tree as expected-but-wrong, and check for one before you commit: a past red-team PoC was swept into a commit and had to be removed. Its artifacts are **evidence**, never merged without human review. It NEVER replaces `@security-reviewer`, whose value is consistent baseline coverage. A `@red-team` finding without a passing PoC is a hypothesis and must be reported as one. It also runs pre-PR at Phase 4 per [`lifecycle-agent-dispatch.md`](lifecycle-agent-dispatch.md).
+
+## Repo-defined security floor
+
+A repo that replaced `@security-reviewer` with another always-on reviewer (for example one
+that retired the checklist reviewer in favour of `@red-team`) lists its floor in
+`.review_agents.mandatory`. It is never read from the checkout. It is read from the merge base
+of the head with the repo's **default branch**, which review-pr's trust guard resolves. When the
+PR targets the default branch, that is the PR's own merge base. When it targets another branch, it
+is not, because the author picks the base and an unreviewed branch or a stacked PR could carry a
+weaker floor. When the key is set, its agents replace the default floor
+(`security-reviewer code-reviewer docs-reviewer`), and the `@security-reviewer` references in the
+rest of this table mean that floor. A PR that changes the key is judged by the old value. When
+the merge base has no config file, or the file has no such key, use the default floor. Stop and
+report it, rather than falling back silently, when any of these hold:
+
+- the file is not a regular file;
+- the file cannot be read or is not a JSON object;
+- `review_agents` is not an object;
+- the key is not a non-empty array of names matching `^[a-z0-9][a-z0-9-]*$`.
 
 ## Codex-conditional reviewers
 
@@ -173,8 +193,10 @@ sensitive code in `.claude/repo-config.json`: `.red_team.critical_agent` (a bare
 `@`, resolving to `.claude/agents/<name>.md`) and `.red_team.critical_paths[]` (globs, matched
 exactly as review-pr matches `.review_agents.patterns[].glob`: a bash pattern match against each
 changed path from the repo root, where `*` also matches `/`). Read both keys from the **merge
-base**, never the head: a PR must not be able to lower its own tier by editing them. Resolve
-`MERGE_BASE_SHA` the way review-pr's agent-definition guard does, then read
+base**, never the head: a PR must not be able to lower its own tier by editing them. Use the merge base of the head with the repo's **default branch**, not with the
+PR's own base: the author picks the base, so an unreviewed branch or a stacked PR could carry a
+weaker value. Resolve it with `git merge-base "origin/$DEFAULT_REF" "$HEAD_SHA"` (review-pr's
+floor guard does the same through the API), then read
 `git show "$MERGE_BASE_SHA:.claude/repo-config.json" | jq '.red_team'`. If the merge base or that
 file cannot be read, treat the PR as T3 (fail closed). A PR that changes either key, or the critical
 agent's own file, is T3. When the PR modifies `.claude/agents/<critical_agent>.md`, never dispatch
