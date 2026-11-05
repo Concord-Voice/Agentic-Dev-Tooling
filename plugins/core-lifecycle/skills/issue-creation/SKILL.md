@@ -202,7 +202,7 @@ For each issue to be created (parent + any children), generate the body using th
 
 ### Step 1 — Gather documentation references
 
-If a documentation-lookup MCP (e.g. Context7) is available, use it to fetch current docs for any external library/framework mentioned in the topic — resolve the library id, then query the relevant feature. If no such MCP is available, fall back to the library's official docs URL. This is best-effort: skip it for changes with no external-dependency surface.
+**Context7 docs discipline.** When a documentation-lookup MCP (e.g. Context7) is available, fetching current docs is MANDATORY for every third-party dependency this issue will engage, per [`_shared/context7-docs-discipline.md`](../_shared/context7-docs-discipline.md). The trigger is the API surface the issue touches (inferred from its `area:` labels and predicted file surfaces), not only the libraries named in the topic: resolve the library id, then query the relevant feature, and capture each library id and doc URL in `## References`. If no such MCP is available, fall back to the library's official docs URL. Skip this only for changes with no external-dependency surface.
 
 Glob `.claude/rules/*.md` and match the discovered rule files against the topic's keywords/surfaces to identify applicable domain rules. Read each matching rule and treat it as a hard constraint — in particular, any rule whose subject matter is directly touched by the change (e.g. a crypto/key rule when key material is involved, a migrations rule when SQL schema changes) is MANDATORY to cite. Do not assume specific rule filenames; use whatever `*.md` files the repo actually ships under `.claude/rules/`.
 

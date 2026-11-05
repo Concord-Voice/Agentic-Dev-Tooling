@@ -1468,9 +1468,17 @@ verification is worse than one that admits it.
 **MANDATORY when the repo ships one — count-drift probe.** Some repos keep metric counts (e.g. a
 "Key Counts" block in `CLAUDE.md`: migrations, routes, stores, test files, packages) that go stale
 on *code* changes, while the `docs-reviewer` agent that normally catches this only runs when a PR
-touches **doc** surfaces — so a code-only PR can silently desync the counts. When the repo
-provides a count-refresh script, run its dry-run whenever this branch's diff touches a
-**count-bearing surface**, regardless of whether any `.md` file changed. If the dry-run diff is
+touches **doc** surfaces — so a code-only PR can silently desync the counts. A repo names its
+count-refresh script in `.claude/repo-config.json` `.docs.counts_script` (dry-run with no
+arguments, `--apply` to write) and the paths that feed it in `.docs.count_globs[]`. When the
+script is set, run its dry-run whenever this branch's diff touches one of those globs,
+regardless of whether any `.md` file changed:
+
+```bash
+COUNTS_SCRIPT="$(rc_get '.docs.counts_script' '')"   # unset → this probe is skipped
+[ -n "$COUNTS_SCRIPT" ] && "$COUNTS_SCRIPT"           # dry-run; a non-empty diff is the finding
+```
+ If the dry-run diff is
 **non-empty**, the count is stale and the refresh is **non-deferrable — it lands in THIS PR**,
 never a follow-up (a numeric/metadata count is in scope exactly like behavior-describing prose).
 

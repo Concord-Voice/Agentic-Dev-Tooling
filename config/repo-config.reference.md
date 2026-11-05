@@ -10,6 +10,8 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 |---|---|---|---|
 | `default_branch` | string | `gh repo view --json defaultBranchRef` → else `main` | dev-lifecycle, release-notes |
 | `docs.spec_dir` / `docs.plan_dir` | string | `docs/superpowers/specs/` / `…/plans/` | dev-lifecycle |
+| `docs.counts_script` | string | unset → count-drift probe skipped | dev-lifecycle Phase 4, enhanced-pr-review §2.5.0: script that dry-runs (no args) or applies (`--apply`) a metric-count refresh |
+| `docs.count_globs[]` | string[] | `[]` → run the probe on every PR when `counts_script` is set | dev-lifecycle Phase 4: paths whose change can make a count stale |
 | `project` | object\|null | null → all project-board ops skipped | issue-creation, pr-creation, dev-lifecycle |
 | `project.id` | string | — | board mutations (`PVT_…` node id) |
 | `project.number` / `project.owner` | int / string | `gh` user when absent | `gh project item-add` |
