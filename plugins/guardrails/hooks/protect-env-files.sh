@@ -19,13 +19,17 @@ fi
 COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
 
 # Bash: block any word that names a live env file (cat .env, source app/.env.prod, ...),
-# or a glob that could expand to one (.env*, .en?). Quotes are deleted before the split,
-# so .en''v still reads as .env, and braces split words, so {.env,x} does too. Case is
-# ignored. A word like process.env or config.env is left alone here: prose and code
-# name those far more often than a shell reads one.
+# or an unquoted glob that could expand to one (.env*, .en?, .*). Names are read with
+# quotes deleted, so .en''v still reads as .env; globs are read with quoted spans
+# removed, since a quoted glob ('.[]' in jq, '.*' in sed) never expands. Braces split
+# words, so {.env,x} is caught, and case is ignored. A word like process.env or
+# config.env is left alone: code and prose name those far more often than a shell reads one.
 if [[ -z "$FILE_PATH" ]] && [[ -n "$COMMAND" ]]; then
-    if printf '%s' "$COMMAND" | tr -d "\"'" | tr -s " \t\n;&|()<>=\`{}," '\n' \
-        | grep -iE '(^|/)\.env(\.[^/]*)?$|(^|/)\.e?n?v?[*?[]' | grep -viqE '(^|/)\.env\.example$'; then
+    SPLIT=" \t\n;&|()<>=\`{},"
+    if printf '%s' "$COMMAND" | tr -d "\"'" | tr -s "$SPLIT" '\n' \
+        | grep -iE '(^|/)\.env(\.[^/]*)?$' | grep -viqE '(^|/)\.env\.example$' \
+       || printf '%s' "$COMMAND" | sed -E "s/'[^']*'//g; s/\"([^\"\\\\]|\\\\.)*\"//g" | tr -s "$SPLIT" '\n' \
+        | grep -iqE '(^|/)\.(e(nv?)?)?[*?[]'; then
         echo "BLOCKED: Bash command touches a .env file — likely contains secrets. Use .env.example as a reference instead." >&2
         exit 2
     fi

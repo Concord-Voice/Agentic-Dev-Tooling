@@ -56,10 +56,12 @@ last_synced: 2026-06-20
 # because a filter on "" matches nothing and every run would recreate its state.
 ME="${FT_ME:-$(gh api user --jq .login 2>/dev/null)}"
 [ -n "$ME" ] || { echo "cannot tell which login this routine runs as; set FT_ME" >&2; exit 1; }
-ME="${ME#app/}"; ME="${ME%\[bot\]}"   # gh shows a bot as app/<name>, REST as <name>[bot]
+# gh shows a bot as app/<name> and REST as <name>[bot]; both sides use the [bot] form and
+# are compared exactly, so the user `my-app` never passes as the App `my-app[bot]`.
+case "$ME" in app/*) ME="${ME#app/}[bot]" ;; esac
 # `gh api --jq` takes no --arg, so pipe to jq for the identity filter.
 gh api "repos/$PUBLIC/issues/$N/comments" --paginate \
-  | jq -c --arg me "$ME" '.[] | select((.user.login | ltrimstr("app/") | rtrimstr("[bot]")) == $me and (.body | startswith("<!-- feedback-triage:status v1 -->"))) | {id, body}' \
+  | jq -c --arg me "$ME" '.[] | select((.user.login | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end) == $me and (.body | startswith("<!-- feedback-triage:status v1 -->"))) | {id, body}' \
   > /tmp/ft-managed.jsonl
 # More than one is ambiguous: leave this issue for a human and move to the next one.
 [ "$(grep -c '"id"' /tmp/ft-managed.jsonl)" -le 1 ] || { echo "more than one managed comment on #$N; skipping it for a human to fix" >&2; continue; }

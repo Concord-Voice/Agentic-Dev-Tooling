@@ -170,7 +170,9 @@ done
 for c in "cat .env*" "cat .en?" "cat .en''v" "cat {.env,x}" "cat .ENV"; do
   [[ "$(cmdrun protect-env-files.sh "$c")" = "2" ]] || fail "env: Bash $c must BLOCK"
 done
-for c in 'grep -rn "process.env" src' "rg import.meta.env" "ls config.env"; do
+[[ "$(cmdrun protect-env-files.sh "cat .*")" = "2" ]] || fail "env: Bash cat .* must BLOCK"
+for c in 'grep -rn "process.env" src' "rg import.meta.env" "ls config.env" \
+         "jq -r '.[] | .name' f.json" "sed 's/.*foo//' x" "gh api x --jq '.[0].id'"; do
   [[ "$(cmdrun protect-env-files.sh "$c")" = "0" ]] || fail "env: Bash $c should allow"
 done
 
