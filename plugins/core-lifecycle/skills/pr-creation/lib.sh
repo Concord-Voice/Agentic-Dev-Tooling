@@ -147,18 +147,18 @@ _strip_code_blocks() {
 # The sentinel is what keeps every call site in SKILL.md unchanged: a phase still
 # "gets an item id" and still "sets a field on it"; only the plumbing under those
 # two steps differs by environment.
-_board_is_cloud() { [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; }
+_board_is_cloud() { [[ "${CLAUDE_CODE_REMOTE:-}" = "true" ]]; }
 
 # BOARD_OP_BIN exists so the routing is testable without a real board or a real
 # workflow dispatch — test-lib.sh points it at a stub that
 # records its arguments. Unset in normal use.
 _board_op() {
     local root bin="${BOARD_OP_BIN:-}"
-    if [ -z "$bin" ]; then
+    if [[ -z "$bin" ]]; then
         root=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
         bin="${root}/scripts/board-op.sh"
     fi
-    if [ ! -x "$bin" ]; then
+    if [[ ! -x "$bin" ]]; then
         echo "  ERROR: board-op.sh missing or not executable: $bin" >&2
         return 1
     fi
@@ -166,7 +166,7 @@ _board_op() {
 }
 
 # Decodes a CLOUD:<n> / CLOUD_NOCREATE:<n> sentinel into the board-op.sh argv it
-# stands for, assigning to the caller's BOARD_ARGV array. Returns non-zero for a
+# stands for, assigning to the caller's board_argv array. Returns non-zero for a
 # real node ID, which is how the callers below tell the two apart.
 #
 # There is deliberately NO name<->option-ID map here. The board-sync workflow takes
@@ -177,8 +177,8 @@ _board_op() {
 # (here x3 mirrors, plus board-op.sh) with nothing keeping them in sync.
 _board_sentinel_argv() {
     case "$1" in
-        CLOUD_NOCREATE:*) BOARD_ARGV=("${1#CLOUD_NOCREATE:}" --no-create) ;;
-        CLOUD:*)          BOARD_ARGV=("${1#CLOUD:}") ;;
+        CLOUD_NOCREATE:*) board_argv=("${1#CLOUD_NOCREATE:}" --no-create) ;;
+        CLOUD:*)          board_argv=("${1#CLOUD:}") ;;
         *) return 1 ;;
     esac
 }
@@ -269,9 +269,9 @@ move_to_status() {
     # node ID, because Projects v2 is unreachable from here. Dispatch instead of
     # mutating — see "Cloud session routing" above. The raw option ID is passed
     # through; the board-sync workflow allowlists it and board-op.sh owns the mapping.
-    local -a BOARD_ARGV=()
+    local -a board_argv=()
     if _board_sentinel_argv "$item_id"; then
-        _board_op "${BOARD_ARGV[@]}" --status "$option_id"
+        _board_op "${board_argv[@]}" --status "$option_id"
         return $?
     fi
 
@@ -517,7 +517,7 @@ warn_dropped_release_controls() {
     local labels_json="$1" issue_n="$2" pr_number="$3" dropped
     # `while IFS= read -r`, never `for ... in $(...)` — label names contain spaces.
     dropped_release_controls "$labels_json" | while IFS= read -r dropped; do
-        [ -n "$dropped" ] || continue
+        [[ -n "$dropped" ]] || continue
         echo "WARN: #${issue_n} carries '${dropped}' — NOT inherited." >&2
         echo "      In repos that use it as a release control, on this PR it" >&2
         echo "      would cut a release on merge and bypass the scheduled gate." >&2
@@ -557,7 +557,8 @@ parse_pr_refs() {
 # out of the release-tracking view (observed on a staged four-PR change).
 # `Closes` still wins when both are present.
 pick_inheritance_source() {
-    printf '%s\n%s\n' "$1" "$2" | grep -m1 -E '^[0-9]+$' || true
+    local closes="$1" refs="$2"
+    printf '%s\n%s\n' "$closes" "$refs" | grep -m1 -E '^[0-9]+$' || true
 }
 
 # ensure_pr_on_project PR_NUMBER
@@ -729,13 +730,13 @@ set_priority() {
     # CLOUD_INHERIT:<issue> when get_issue_priority_option_id could not read the
     # source issue's Priority (that read is a Projects v2 query, blocked too).
     # In that case the runner resolves the inheritance itself.
-    local -a BOARD_ARGV=()
+    local -a board_argv=()
     if _board_sentinel_argv "$item_id"; then
-        if [ "${option_id#CLOUD_INHERIT:}" != "$option_id" ]; then
-            _board_op "${BOARD_ARGV[@]}" --inherit-priority-from "${option_id#CLOUD_INHERIT:}"
+        if [[ "${option_id#CLOUD_INHERIT:}" != "$option_id" ]]; then
+            _board_op "${board_argv[@]}" --inherit-priority-from "${option_id#CLOUD_INHERIT:}"
             return $?
         fi
-        _board_op "${BOARD_ARGV[@]}" --priority "$option_id"
+        _board_op "${board_argv[@]}" --priority "$option_id"
         return $?
     fi
 
