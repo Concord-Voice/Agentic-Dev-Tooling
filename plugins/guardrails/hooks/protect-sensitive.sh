@@ -72,6 +72,21 @@
 # Widening any of these is fine. Doing it WITHOUT a regression test that fails
 # with only that change reverted is what this file has repeatedly punished.
 set -o pipefail
+# A hook that outlives the harness timeout is skipped, which fails OPEN, and the
+# Bash walk below grows with the number of segments. So the work runs under its own
+# 20s deadline (the hook timeout is 30s) and running out of time blocks.
+# ponytail: no timeout/gtimeout binary (stock macOS) means no deadline; install
+# coreutils to get one.
+if [[ -z "${PROTECT_SENSITIVE_INNER:-}" ]]; then
+  DEADLINE_BIN=$(command -v timeout || command -v gtimeout || true)
+  if [[ -n "$DEADLINE_BIN" ]]; then
+    PROTECT_SENSITIVE_INNER=1 "$DEADLINE_BIN" 20 bash "$0" "$@"; rc=$?
+    if [[ "$rc" -eq 124 ]]; then
+      echo "BLOCKED: protect-sensitive.sh could not check this command within 20s. Split it into shorter commands." >&2; exit 2
+    fi
+    exit "$rc"
+  fi
+fi
 if ! command -v jq >/dev/null 2>&1; then
   echo "BLOCKED: jq is required for protect-sensitive.sh but is not installed." >&2; exit 2
 fi
@@ -111,6 +126,9 @@ REPO_ROOT="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || 
 REPO_REAL=""
 [ -n "$REPO_ROOT" ] && REPO_REAL=$(cd "$REPO_ROOT" 2>/dev/null && pwd -P)
 RC_FILE="${REPO_ROOT:+$REPO_ROOT/}.claude/repo-config.json"; [ -f "$RC_FILE" ] || RC_FILE=".claude/repo-config.json"
+# No patterns means nothing is protected, so skip the walk instead of paying for it
+# on every Bash call. A marker can only widen what is allowed, so it does not matter here.
+[ -n "$(jq -r '.hooks.protected_patterns[]? // empty' "$RC_FILE" 2>/dev/null)" ] || exit 0
 
 # list_descendants <repo-relative-dir> — what a recursive delete of it would take.
 #
@@ -1115,9 +1133,11 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
       # Redirects stay UNANCHORED: a redirect is legal anywhere in a segment.
       printf '%s' "$REDIRSEG" | grep -oE '>>?[[:space:]]*[^[:space:];&|)]+' \
         | sed -E 's/^>>?[[:space:]]*//' | tr '\016' ' ' \
-        | awk '{
+        | awk -v r1="${REPO_ROOT:+$REPO_ROOT/}" -v r2="${REPO_REAL:+$REPO_REAL/}" '{
             # `>&2` and friends duplicate a descriptor; they name no file.
             if ($0 ~ /^&/) next
+            # A repo checked out under /tmp is still the repo: its paths are never scratch.
+            if ((r1 != "" && index($0, r1) == 1) || (r2 != "" && index($0, r2) == 1)) { print; next }
             # The scratch exemption keeps `> /tmp/x` free, and it was applied to the
             # RAW operand -- before `..` is collapsed. `> /tmp/../<repo>/services/
             # auth/login.go` therefore starts with `/tmp/`, was dropped here, and

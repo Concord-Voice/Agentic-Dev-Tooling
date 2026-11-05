@@ -239,6 +239,22 @@ if [ -n "$ROSTER_RAW" ]; then
         echo "      An over-broad alias satisfies coverage for reviewers it does not name." >&2
         exit 2
     fi
+    # Length alone does not stop a generic substring ("-bot", "review"): a `match`
+    # that hits two different logins on this PR would let one reviewer's name cover
+    # another's findings, so it stops here too.
+    ROSTER_AMBIG=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" '
+        ([.. | objects | .author? | objects | .login // empty] | map(ascii_downcase) | unique) as $logins
+        | $roster[] | ((.match // "") | tostring | ascii_downcase) as $m
+        | select($m != "")
+        | ([$logins[] | select(contains($m))]) as $hit
+        | select(($hit | length) > 1)
+        | "match=\"\($m)\" hits \($hit | join(", "))"' 2>/dev/null)
+    if [ -n "$ROSTER_AMBIG" ]; then
+        echo "STOP: reviewer roster at ${ROSTER_SOURCE} has a match that names more than one account on this PR:" >&2
+        printf '%s\n' "$ROSTER_AMBIG" | sed 's/^/      /' >&2
+        echo "      Narrow it to one login (or use \"login\")." >&2
+        exit 2
+    fi
 fi
 
 # --- Assertion 1 — thread coverage -------------------------------------------

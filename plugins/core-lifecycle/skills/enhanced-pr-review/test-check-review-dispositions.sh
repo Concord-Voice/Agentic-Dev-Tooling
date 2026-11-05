@@ -305,6 +305,13 @@ badroster "STOP: single-char match donates its alias to the fleet" 2 \
 badroster "STOP: a 3-char match is too broad for a substring test" 2 \
     '{"bots":[{"match":"bot","name":"Gitar","login":"x"}]}'
 
+ambig_json=$(doc "" "$(botsay gitar-bot 'verdict'),$(botsay security-bot 'SECURITY: hardcoded key'),$(human '<!-- cv-review-reconciliation -->\n| Gitar |')")
+printf '%s' '{"bots":[{"match":"-bot","name":"Gitar","login":"x"}]}' > "$TMP/ambig.json"
+printf '%s' "$ambig_json" > "$TMP/ambig-f.json"
+CV_REVIEW_FIXTURE="$TMP/ambig-f.json" CV_REPO_CONFIG="$TMP/ambig.json" CV_SKIP_EXISTENCE_CHECKS=1 "$SCRIPT" 999 >/dev/null 2>&1; got=$?
+if [ "$got" -eq 2 ]; then printf '  ok   %-52s (exit %d)\n' "STOP: a match that hits two logins on the PR" "$got"; pass=$((pass+1))
+else printf '  FAIL %-52s (want 2, got %d)\n' "STOP: a match that hits two logins on the PR" "$got"; fail=$((fail+1)); fi
+
 badroster "STOP: malformed roster is loud, not silent login-only" 2 \
     '{"bots":[{"match":'
 

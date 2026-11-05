@@ -7,6 +7,11 @@
       "Read(./.env.*.local)",
       "Read(./.env.production)",
       "Read(./.env.staging)",
+      "Read(./.env.development)",
+      "Read(./.env.test)",
+      "Read(./.env.prod)",
+      "Read(./**/.env.local)",
+      "Read(./**/.env.production)",
       "Read(~/.ssh/**)",
       "Read(~/.aws/**)",
       "Read(~/.config/gcloud/**)",
@@ -16,7 +21,7 @@
   "hooks": {
     "PreToolUse": [
       { "matcher": "Bash", "hooks": [ { "type": "command", "command": ".claude/hooks/destructive-commands.sh" } ] },
-      { "matcher": "Read|Edit|Write|Bash", "hooks": [ { "type": "command", "command": ".claude/hooks/protect-env-files.sh" } ] },
+      { "matcher": "Read|Grep|Edit|Write|Bash", "hooks": [ { "type": "command", "command": ".claude/hooks/protect-env-files.sh" } ] },
       { "matcher": "Edit|Write|Bash", "hooks": [ { "type": "command", "command": ".claude/hooks/protect-sensitive.sh" } ] },
       { "matcher": "Edit|Write", "hooks": [ { "type": "command", "command": ".claude/hooks/protect-applied-migrations.sh" } ] }
     ],

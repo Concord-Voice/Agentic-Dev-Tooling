@@ -545,9 +545,12 @@ Tier C deserves the most care. For each Tier C PR:
 4. **Run local tests if the bump touches buildable/runnable code.** Run them at the PR's head, never in the current checkout: that tree still has the old lockfile, so a pass there proves nothing about the bump. Use a throwaway worktree:
 
    ```bash
-   git fetch origin "pull/$PR/head:weekly-deps-pr-$PR"
-   git worktree add ".claude/worktrees/weekly-deps-pr-$PR" "weekly-deps-pr-$PR"
-   cd ".claude/worktrees/weekly-deps-pr-$PR/$DIR"   # then install deps and run the commands below
+   # Detached at the fetched head, named by its SHA, so a re-run after a force-push
+   # neither collides with a stale local branch nor reuses an old worktree.
+   git fetch origin "pull/$PR/head"
+   WT=".claude/worktrees/weekly-deps-pr-$PR-$(git rev-parse --short FETCH_HEAD)"
+   git worktree add --detach "$WT" FETCH_HEAD
+   cd "$WT/$DIR"   # then install deps and run the commands below
    ```
 
    Use the repo's configured per-directory commands, read from `.weekly_deps.local_test_cmds` (a map of manifest-directory → command list). When unset for a directory, fall back to a sensible per-ecosystem default for that PR's detected ecosystem:

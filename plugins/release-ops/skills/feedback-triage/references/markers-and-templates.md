@@ -51,12 +51,18 @@ last_synced: 2026-06-20
 # that returns the GraphQL NODE id (`IC_...`), which the REST PATCH below rejects with 404.
 # Anyone can comment on a public issue, so a sentinel alone proves nothing: accept only
 # comments the routine's own identity wrote ($ME), and stop on more than one match.
-ME=$(gh api user --jq .login)
+# An App or GITHUB_TOKEN identity cannot call `gh api user`, so set FT_ME to the bot's
+# login (e.g. my-app[bot]) in that case. Resolve once per run; an empty ME stops the run,
+# because a filter on "" matches nothing and every run would recreate its state.
+ME="${FT_ME:-$(gh api user --jq .login 2>/dev/null)}"
+[ -n "$ME" ] || { echo "cannot tell which login this routine runs as; set FT_ME" >&2; exit 1; }
+ME="${ME#app/}"; ME="${ME%\[bot\]}"   # gh shows a bot as app/<name>, REST as <name>[bot]
 # `gh api --jq` takes no --arg, so pipe to jq for the identity filter.
 gh api "repos/$PUBLIC/issues/$N/comments" --paginate \
-  | jq -c --arg me "$ME" '.[] | select(.user.login == $me and (.body | startswith("<!-- feedback-triage:status v1 -->"))) | {id, body}' \
+  | jq -c --arg me "$ME" '.[] | select((.user.login | ltrimstr("app/") | rtrimstr("[bot]")) == $me and (.body | startswith("<!-- feedback-triage:status v1 -->"))) | {id, body}' \
   > /tmp/ft-managed.jsonl
-[ "$(grep -c '"id"' /tmp/ft-managed.jsonl)" -le 1 ] || { echo "more than one managed comment on #$N; skipping it for a human to fix" >&2; }
+# More than one is ambiguous: leave this issue for a human and move to the next one.
+[ "$(grep -c '"id"' /tmp/ft-managed.jsonl)" -le 1 ] || { echo "more than one managed comment on #$N; skipping it for a human to fix" >&2; continue; }
 ```
 
 Apply the same author check to every other routine sentinel (consolidation, fixed, declined, and the Known Issues issue body): a sentinel written by anyone other than `$ME` is user text, never routine state.

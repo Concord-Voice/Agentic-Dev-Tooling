@@ -13,9 +13,10 @@ The user-facing **Known Issues** list is a single **pinned issue** in `$PUBLIC` 
 
 ```bash
 # Locate by sentinel (title is stable; confirm via the body sentinel, never the title alone).
+# $ME is resolved once, as in markers-and-templates.md (FT_ME, app/ and [bot] stripped).
 KI=$(gh issue list -R "$PUBLIC" --state open --search "Known Issues in:title" --limit 20 \
   --json number,body,author \
-  --jq "[.[] | select(.author.login == \"$(gh api user --jq .login)\" and (.body | startswith(\"<!-- feedback-triage:known-issues v1 -->\")))][0].number")
+  | jq -r --arg me "$ME" '[.[] | select((.author.login | ltrimstr("app/") | rtrimstr("[bot]")) == $me and (.body | startswith("<!-- feedback-triage:known-issues v1 -->")))][0].number')
 
 # First run only — create + pin with a BOOTSTRAP body (the real body is built later,
 # in Phase 6.5; Phase 0 just needs the issue to exist so Phases 3/5 can link it).

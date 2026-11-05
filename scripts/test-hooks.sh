@@ -49,14 +49,19 @@ for c in "git push --force origin main" "git push -f" "git reset --hard HEAD~1" 
          "env git reset --hard" "sudo git reset --hard" "time git push -f" "/usr/bin/git reset --hard" "GIT_DIR=.git git reset --hard" \
          "{ git reset --hard; }" "if true; then git reset --hard; fi" "! git reset --hard" "ls | xargs git push -f" \
          "git -C \\\"/tmp/a b\\\" reset --hard" "git --work-tree . reset --hard" "bash -lc \\\"rm -rf x\\\"" "find . -name x -exec rm -rf {} +" "/bin/rm -rf x" 'bash -c \"echo \\\"a\\\" && rm -rf x\"' \
-         "git -c user.name=\\\"A B\\\" push --force" "git -c alias.x='a b' reset --hard"; do
+         "git -c user.name=\\\"A B\\\" push --force" "git -c alias.x='a b' reset --hard" \
+         "timeout 60 rm -rf build" "nice rm -rf build" "sudo -u root rm -rf build" "doas rm -rf build" \
+         "xargs -I{} rm -rf {} < list" "if rm -rf build; then :; fi" "while rm -rf build; do :; done" \
+         "eval rm -rf build" "echo rm -rf build | sh" "find . -ok rm -rf {} \\;" "parallel rm -rf ::: a b" \
+         "timeout 5 bash -c 'rm -rf build'" "sudo -u root bash -c 'rm -rf build'" "bash -e -c 'rm -rf build'" \
+         "find . -exec sh -c 'rm -rf x' _ {} \\;" "git commit -m 'Document bash -c \\\"rm -rf build\\\"'"; do
   [ "$(dc "$c")" = 2 ] || fail "destructive: should block: $c"
 done
 for c in "git push --force-with-lease origin b" "git push -u origin b" "git reset --soft HEAD~1" "rm file.txt" "git checkout -- src/a.ts" "npm run format" \
          "git commit -m 'fix git reset --hard docs'" "git commit -m 'document git push --force handling'" \
          "git push --force-with-lease --force-if-includes origin topic" "git restore --staged ." \
          "git commit -m 'Prevent rm -rf from running'" "git -C \\\"/tmp/a b\\\" status" "time make test" "git -c user.name=\\\"A B\\\" status" \
-         "git rm -r --cached node_modules" "git commit -m 'Document bash -c \\\"rm -rf build\\\"'"; do
+         "git rm -r --cached node_modules" "git -C sub rm -r old"; do
   [ "$(dc "$c")" = 0 ] || fail "destructive: should allow: $c"
 done
 
@@ -162,6 +167,12 @@ done
 [[ "$(cmdrun protect-env-files.sh "cat desktop/.env")" = "2" ]] || fail "env: Bash cat of .env must BLOCK"
 [[ "$(cmdrun protect-env-files.sh "cat .env.example")" = "0" ]] || fail "env: Bash cat of .env.example should allow"
 [[ "$(cmdrun protect-env-files.sh "git status")" = "0" ]] || fail "env: unrelated Bash should allow"
+for c in "cat .env*" "cat .en?" "cat .en''v" "cat {.env,x}" "cat .ENV"; do
+  [[ "$(cmdrun protect-env-files.sh "$c")" = "2" ]] || fail "env: Bash $c must BLOCK"
+done
+for c in 'grep -rn "process.env" src' "rg import.meta.env" "ls config.env"; do
+  [[ "$(cmdrun protect-env-files.sh "$c")" = "0" ]] || fail "env: Bash $c should allow"
+done
 
 # ---- protect-applied-migrations: Write may create, never overwrite (follow-up 8) ----
 wrun() { local path="$1" rc=0; jq -cn --arg p "$path" '{tool_name:"Write",tool_input:{file_path:$p,content:"x"}}' | CLAUDE_PROJECT_DIR="$TMP" bash "$HOOKS/protect-applied-migrations.sh" >/dev/null 2>&1 || rc=$?; echo "$rc"; }

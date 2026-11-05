@@ -146,7 +146,7 @@ _strip_code_blocks() {
 parse_pr_closes() {
     local body="$1"
     _strip_code_blocks "$body" \
-        | grep -oiE '(^|[^[:alnum:]_])(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' \
+        | grep -oiE '(^|[^[:alnum:]_])(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]*:?[[:space:]]+#[0-9]+' \
         | grep -oE '#[0-9]+' | tr -d '#' \
         || true
 }
@@ -408,7 +408,7 @@ filter_inherited_labels() {
 parse_pr_refs() {
     local body="$1"
     _strip_code_blocks "$body" \
-        | grep -oiE '(^|[^[:alnum:]_])refs?[[:space:]]+#[0-9]+' \
+        | grep -oiE '(^|[^[:alnum:]_])refs?[[:space:]]*:?[[:space:]]+#[0-9]+' \
         | grep -oE '#[0-9]+' | tr -d '#' \
         || true
 }

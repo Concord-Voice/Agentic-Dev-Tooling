@@ -18,11 +18,14 @@ fi
 
 COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
 
-# Bash: block any word that names a live env file (cat .env, source app/.env.prod, ...).
-# A denylist over words, so it can over-block prose that names one; that fails closed.
+# Bash: block any word that names a live env file (cat .env, source app/.env.prod, ...),
+# or a glob that could expand to one (.env*, .en?). Quotes are deleted before the split,
+# so .en''v still reads as .env, and braces split words, so {.env,x} does too. Case is
+# ignored. A word like process.env or config.env is left alone here: prose and code
+# name those far more often than a shell reads one.
 if [[ -z "$FILE_PATH" ]] && [[ -n "$COMMAND" ]]; then
-    if printf '%s' "$COMMAND" | tr -s " \t\n;&|()<>=\"'\`" '\n' \
-        | grep -E '(^|/)(\.env(\.[^/]*)?|[^/]+\.env)$' | grep -vqE '(^|/)\.env\.example$'; then
+    if printf '%s' "$COMMAND" | tr -d "\"'" | tr -s " \t\n;&|()<>=\`{}," '\n' \
+        | grep -iE '(^|/)\.env(\.[^/]*)?$|(^|/)\.e?n?v?[*?[]' | grep -viqE '(^|/)\.env\.example$'; then
         echo "BLOCKED: Bash command touches a .env file — likely contains secrets. Use .env.example as a reference instead." >&2
         exit 2
     fi

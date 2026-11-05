@@ -9,7 +9,7 @@
         ]
       },
       {
-        "matcher": "Read|Edit|Write|Bash",
+        "matcher": "Read|Grep|Edit|Write|Bash",
         "hooks": [
           { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/protect-env-files.sh\"", "timeout": 5 }
         ]
@@ -17,7 +17,7 @@
       {
         "matcher": "Edit|Write|Bash",
         "hooks": [
-          { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/protect-sensitive.sh\"", "timeout": 5 }
+          { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/protect-sensitive.sh\"", "timeout": 30 }
         ]
       },
       {
