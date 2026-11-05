@@ -420,9 +420,7 @@ When the phase IS active: a release-signal comment is NOT a bot-only finding to 
 
 ### 2.6.1 — Parse the release-signal comment
 
-The comment is identified in Phase 1 Step 4 by its `.release_signal.marker` (the `RELEASE_MARKER` above) under a shared CI login. A typical body contains a table with load-bearing rows like:
-
-The comment is identified in Phase 1 Step 4 by its `.release_signal.marker`. Its exact shape is the classifier workflow's concern, not this skill's — read the actual body for the row labels and recommendation wording. Two shapes are common:
+The comment is identified in Phase 1 Step 4 by its `.release_signal.marker` (the `RELEASE_MARKER` above) under a shared CI login. Its exact shape is the classifier workflow's concern, not this skill's — read the actual body for the row labels and recommendation wording. Two shapes are common:
 
 - **Bump-oriented** — rows like `Version bump needed: Yes/No` and `Version bump found: Yes — <version> / No — current version is <version>`, plus a recommendation line naming the action (e.g. "Bump the version in `<version_manifest>` before merge", where `<version_manifest>` is `.release_signal.version_manifest`).
 - **Note-oriented** — a per-axis table whose last column (`Bump?` or similar) asks for something per axis, e.g. `⚠️ ADD A NOTE` under the changelog's unreleased section, or `⚠️ BUMP to <n+1>` for an API/IPC contract version. Such a classifier may carry no recommendation line at all, which is why §2.6.2 keys on the asking cell rather than on prose.
@@ -544,7 +542,7 @@ Declining this one — I believe it is a false positive, and here is the check I
 is "No `fmt.Sprintf` for SQL", and its target is value interpolation. This call interpolates a
 column *identifier* drawn from a compile-time constant set, never from request data.
 
-<!-- cv-disposition: rejected evidence: .claude/rules/backend.md -->
+<!-- cv-disposition: rejected evidence: .claude/rules/<domain>.md -->
 ```
 
 The marker is an HTML comment, so it is invisible in the rendered PR — the reviewer sees only your prose. It exists so the gate can verify a decision was made without trying to parse whether prose constitutes one.

@@ -164,9 +164,8 @@ fi
 # Takes the PR as an explicit argument: inside a function `$0` is the FUNCTION NAME, not this
 # skill's `$0` PR placeholder, so reading `$0` here would query a PR called "probe_checks".
 probe_checks() {  # $1 = PR number; echoes a count, or returns 2
-  ERRF="${TMPDIR:-/tmp}/ci-status-$$.err"
-  v=$(gh pr checks "$1" --json name --jq 'length' 2>"$ERRF")
-  e=$(cat "$ERRF" 2>/dev/null); rm -f "$ERRF"
+  # stderr merged into the capture: no temp file (a predictable /tmp name is a symlink hazard)
+  v=$(gh pr checks "$1" --json name --jq 'length' 2>&1); e="$v"
   case "$v" in
     ''|*[!0-9]*)
       case "$e" in
@@ -227,9 +226,8 @@ If yes:
 # `probe_checks: command not found` and exited 2 before `gh pr ready`, breaking the green-to-ready
 # transition this skill exists to perform. Repeated here deliberately; keep the two in step.
 probe_checks() {  # $1 = PR number; echoes a count, or returns 2
-  ERRF="${TMPDIR:-/tmp}/ci-status-$$.err"
-  v=$(gh pr checks "$1" --json name --jq 'length' 2>"$ERRF")
-  e=$(cat "$ERRF" 2>/dev/null); rm -f "$ERRF"
+  # stderr merged into the capture: no temp file (a predictable /tmp name is a symlink hazard)
+  v=$(gh pr checks "$1" --json name --jq 'length' 2>&1); e="$v"
   case "$v" in
     ''|*[!0-9]*)
       case "$e" in

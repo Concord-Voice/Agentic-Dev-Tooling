@@ -72,7 +72,7 @@ Catalog entries tagged **`design-class`** build out a design or plan (architectu
 
 **Use case:** Produce a structured ADR (Architecture Decision Record) for a non-trivial technology or design choice, with context, options considered, decision, and consequences. Use when the issue's resolution path requires committing to one of multiple credible technical alternatives.
 
-**Example:** ADR-0002 "Actions-as-SoT deploys" — exactly this skill's shape: context, alternatives considered, decision, and consequences for the infrastructure choice of "GitHub Actions as the source of truth for production deploys." An ADR catalog under `docs/adr/` (in repos that keep one) shows the established ADR pattern.
+**Example (hypothetical):** an ADR choosing CI as the source of truth for production deploys — exactly this skill's shape: context, alternatives considered, decision, and consequences. An ADR catalog under `docs/adr/` (in repos that keep one) shows the established ADR pattern.
 
 **Mode interaction:** Auto-dispatch in all modes (Phase 1 is ungated in every mode under the consolidated matrix). Architecture decisions warrant explicit buy-in, but that gate lives at the Phase 2 PLAN boundary (gated in In-the-Loop), not at understand-time; the ADR is surfaced via the Phase 1 visibility line.
 
@@ -111,7 +111,7 @@ Catalog entries tagged **`design-class`** build out a design or plan (architectu
 
 **Use case:** Refine an idea into a written design spec through structured dialogue: explore project context, ask clarifying questions, propose alternatives, present a design, get user approval, write the spec to `docs/superpowers/specs/`. Mandatory before any creative work. **Runs as the synthesis sweep** — after any matched `design-class` skill (architecture, system design, frontend design, diagnosis) produces its artifact, brainstorming integrates those artifacts into the spec rather than being the sole design step (see § Design-class sequencing).
 
-**Example:** This catalog content's spec (`docs/superpowers/specs/2026-05-22-1139-skill-catalog-content-design.md`, in the repo that owns it) was produced by this skill.
+**Example (hypothetical):** a spec such as `docs/superpowers/specs/<date>-<N>-<topic>-design.md` is produced by this skill.
 
 **Mode interaction:** Always-dispatch at Phase 2 when no `*-NNN-*-design.md` spec exists for the issue. Mode controls whether the brainstorming output's gate (HARD-GATE on design approval) waits for explicit user reply or accepts inline approval from prior context. In-the-Loop: waits explicitly. On-the-Loop / Automated End-to-End: accepts pre-approved synthesis if design was just confirmed.
 
@@ -119,7 +119,7 @@ Catalog entries tagged **`design-class`** build out a design or plan (architectu
 
 **Use case:** Produce an executable task-by-task plan from an approved spec, saved to `docs/superpowers/plans/`. Plan contains actual content (file paths, code snippets, commands) — no placeholders. Required input for `/superpowers:subagent-driven-development` or `/superpowers:executing-plans`.
 
-**Example:** The plan `docs/superpowers/plans/2026-05-22-1139-skill-catalog-content.md` (in the repo that owns it) was produced by this skill.
+**Example (hypothetical):** a plan such as `docs/superpowers/plans/<date>-<N>-<topic>.md` is produced by this skill.
 
 **Mode interaction:** Always-dispatch at Phase 2 after brainstorming produces a spec (or when the spec already exists). Read-only of the spec; write-only of the plan file.
 
@@ -149,7 +149,7 @@ Catalog entries tagged **`design-class`** build out a design or plan (architectu
 
 **Use case:** Design multi-service systems and architectures — API contracts, data modeling, service boundaries, failure-mode handling. Use when the work crosses service boundaries or introduces persistence.
 
-**Example:** The autonomy framework spec (`2026-05-21-1109-autonomy-framework-design.md`) is a multi-component system design across hooks, skills, and CLI surfaces — exactly this skill's shape.
+**Example (hypothetical):** a spec like `<date>-<N>-autonomy-framework-design.md` that is a multi-component system design across hooks, skills, and CLI surfaces — exactly this skill's shape.
 
 **Mode interaction:** Gated in In-the-Loop. Auto-dispatch in On-the-Loop / Automated End-to-End when triggers fire. Often co-dispatched with `/superpowers:brainstorming` (architecture-led brainstorm).
 
@@ -282,8 +282,8 @@ Catalog entries tagged **`design-class`** build out a design or plan (architectu
 ### `/cloudflare:wrangler` (candidate)
 
 **Trigger:**
-- **File paths in diff:** `src/frontend/functions/**` (adjust to your layout), `**/wrangler.toml`, `infrastructure/deploy/deploy-spa.sh`, any Cloudflare Worker source
-- **Keywords:** `cloudflare`, `wrangler`, `pages`, `worker`, `kv namespace`, `deploy-spa`
+- **File paths in diff:** `src/frontend/functions/**` (adjust to your layout), `**/wrangler.toml`, `<your SPA deploy script>` (adjust to your layout), any Cloudflare Worker source
+- **Keywords:** `cloudflare`, `wrangler`, `pages`, `worker`, `kv namespace`
 
 **Use case:** Current Wrangler CLI/config contract for Pages and Workers work — your deploy CLI reference whenever the repo's static/edge deploy relies on Cloudflare Pages or Workers. The `--cwd` discovery foot-gun is a known source of silent Function drops.
 

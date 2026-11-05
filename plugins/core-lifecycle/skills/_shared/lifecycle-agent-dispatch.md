@@ -230,7 +230,7 @@ before any of this — that is a skill dispatch, decided in `/dev-lifecycle` Pha
 |---|---|
 | Verification fails and the cause is not obvious | `@backend-developer` or `@frontend-developer` (by surface) — systematic debugging, then fix |
 | The same verification failure survives a second producer return, or the failing surface is an E2 surface | Escalate per § Escalation — E4 (bounce) or E2. Pass both prior attempts into the prompt |
-| Coverage below the ≥80% new-code gate | `@test-writer` |
+| Coverage below the repo's new-code gate (`.quality_gate.coverage_min`) | `@test-writer` |
 | Issue carries `risk: security`, OR the diff touches auth / crypto / E2EE / RBAC / IPC / an outbound-request path | **`@red-team`** — adversarial pass with executable PoCs, *before* the PR exists |
 | The repo's count-drift check (if it has one) reports drift, or a doc named in the acceptance criteria is unstaged | `@docs-writer` |
 

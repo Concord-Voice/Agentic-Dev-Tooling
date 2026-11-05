@@ -66,8 +66,8 @@ Trigger when the work will **call, configure, or upgrade** a third-party depende
 API / CLI / config surface. The trigger is the **API surface you touch**, not whether
 the issue text names the library:
 
-- Affected media/realtime area → the SFU/media library, Socket.IO, NATS, ioredis — even if unnamed.
-- Affected desktop area → Electron, React, Zustand, Vite, electron-updater, WebCrypto.
+- Affected media/realtime area → the libraries that area imports (e.g. a media server library, a socket library, a message bus client, a Redis client) — even if unnamed.
+- Affected desktop area → the libraries that area imports (e.g. Electron, React, a state library, the bundler, the updater, WebCrypto).
 - Affected admin/web UI area → React, Vite, and that UI's own dependencies.
 - Affected backend area → the web framework (e.g. Gin), the Go stdlib `crypto/*`, pgx, go-redis.
 - Any dependency **bump** (`area: deps`) → fetch the new version's migration/changelog.

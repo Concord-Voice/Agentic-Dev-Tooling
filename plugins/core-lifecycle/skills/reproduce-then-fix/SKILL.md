@@ -322,7 +322,7 @@ Detection resolves `branch + implementation commits + no PR` to **Phase 4: VALID
 Phase 4 is not optional bookkeeping — it is four gates this skill does not implement and must not bypass:
 
 1. `verification-before-completion` and the repo's quality gate
-2. The ≥80% new-code coverage gate — a repro test plus a fix is rarely enough on its own
+2. The repo's new-code coverage gate (`.quality_gate.coverage_min`, when `.quality_gate.enabled`) — a repro test plus a fix is rarely enough on its own
 3. The docs / count-drift probe, which is non-deferrable and lands in the same PR
 4. The pre-PR adversarial security pass on security-sensitive surfaces
 

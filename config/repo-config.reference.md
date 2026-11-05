@@ -52,6 +52,7 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 | `weekly_deps.signal3_repo_map` | map | `{}` | weekly-deps community signal |
 | `weekly_deps.tier_d_sources` | object[] | `[]` → Tier D yields nothing | weekly-deps |
 | `weekly_deps.local_test_cmds` | map(dir→cmd[]) | auto-default from ecosystem | weekly-deps |
+| `weekly_deps.ci_workflow` | string | `""` → no required-workflow check; any PR with zero checks is `missing` | weekly-deps Phase 3.1 |
 | `weekly_deps.deep_review_skill` | string | `/enhanced-pr-review` (fallback: `/review-pr` manual) | weekly-deps |
 | `weekly_deps.cron.{prep,triage,tz_label}` | string | `0 13 * * 3` / `0 15 * * 3` / `ET` | weekly-deps autonomous mode |
 | `weekly_deps.digest_issue_title` | string | `Weekly Dependency Triage — Routine Output` | weekly-deps |

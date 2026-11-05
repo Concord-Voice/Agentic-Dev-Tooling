@@ -28,7 +28,6 @@ allowed-tools:
   - Bash(cat *)
   - Bash(ls *)
   - Bash(rm -f *)
-  - Bash(./scripts/update-claude-md-counts.sh *)
   - Read
   - Grep
   - Glob
@@ -1709,7 +1708,7 @@ If `.bots == []` (or the file is absent), there is no bot to wait on — proceed
 Each `.bots[]` entry carries the fields this phase needs:
 - `.name` — display name for messages.
 - `.ci_check` — the bot's CI check-run name (may be unset for reviewers that post no CI check, e.g. an inline-comment-only reviewer).
-- `.login` / `.match` / `.marker` — how to recognize the bot's conversation comment (exact login + body `marker` for shared-login posters like `github-actions[bot]`; a login-substring `match` for dedicated-login reviewers).
+- `.login` / `.marker` — how to recognize the bot's conversation comment: exact (normalised) login equality, plus the body `marker` for shared-login posters like `github-actions[bot]`. `.match` is only a short display/alias substring (check-name matching, messages); it never identifies a comment author.
 - `.offline` (default `false`) — a bot known to be down; **skip it** from the expected set (no STOP for an offline bot).
 - `.when` — gating for whether this bot is expected on THIS PR: `always` (every PR), `active` (expected whenever the bot is online — i.e. only suppressed by `.offline:true`), or `shippable` (only when shippable code changed — see below).
 - `.blocking` (default `false`) — a gatekeeper: its absence at the timeout STOPs the lifecycle (see Required vs optional above).
@@ -1743,20 +1742,22 @@ gh pr checks <PR> --json name,state,bucket | jq --arg c "<entry.ci_check>" '.[] 
 # inside a jq string literal a pattern's `\*` is an invalid escape, and the probe errors instead
 # of filtering. An entry with no ack_pattern passes "", and every comment from it is a verdict.
 ACK=$(jq -r '.bots[] | select(.name == "<entry.name>") | .ack_pattern // ""' .claude/repo-config.json)
-gh api repos/<owner>/<repo>/issues/<PR>/comments \
-  | jq --arg login "<entry.login>" --arg marker "<entry.marker>" --arg p "$ACK" '
+# `.login` may be a string or an array, so pass the list, never one substituted string.
+LOGINS=$(jq -c '.bots[] | select(.name == "<entry.name>") | [.login] | flatten | map(select(. != null))' .claude/repo-config.json)
+gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments | jq -s 'add // []' \
+  | jq --argjson logins "$LOGINS" --arg marker "<entry.marker>" --arg p "$ACK" '
       def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
-      [ .[] | select((.user.login | norm) == ($login | norm))
+      [ .[] | select(($logins | map(norm) | index(.user.login | norm)) != null)
             | select($marker == "" or ((.body // "") | contains($marker)))
             | select($p == "" or ((.body // "") | test($p; "i") | not)) ]'
 
 # Formal PR review and/or inline review comments from this bot (same exact, normalised login)
-gh api repos/<owner>/<repo>/pulls/<PR>/reviews \
-  | jq --arg login "<entry.login>" 'def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
-      [.[] | select((.user.login | norm) == ($login | norm))] | length'
-gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
-  | jq --arg login "<entry.login>" 'def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
-      [.[] | select((.user.login | norm) == ($login | norm))] | length'
+gh api --paginate repos/<owner>/<repo>/pulls/<PR>/reviews | jq -s 'add // []' \
+  | jq --argjson logins "$LOGINS" 'def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
+      [.[] | select(($logins | map(norm) | index(.user.login | norm)) != null)] | length'
+gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments | jq -s 'add // []' \
+  | jq --argjson logins "$LOGINS" 'def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
+      [.[] | select(($logins | map(norm) | index(.user.login | norm)) != null)] | length'
 ```
 
 A bot's review has **ARRIVED** when ANY of:
@@ -1776,7 +1777,7 @@ A bot's review has **ARRIVED** when ANY of:
 
 **Codex's `head_verdict_pattern` closes that gap by the table's Commit column, not by `updated_at`.** The pattern matches one `Completed` row and captures the short SHA in its Commit cell. The monitor applies it globally, so every `Completed` row is tested. The comment leg admits the table regardless of `createdAt` when any captured SHA is at least 7 hex and prefixes the current head. The table has one row per review type, each at its own latest commit, so a Code Review row can name the head while a Security Review row still names an older commit. That is why the pattern is one row long and carries no `(?s)…marker.*` prefix: a greedy prefix matches once and captures only the last row. The Codex login already scopes the pattern to Codex's own comments. The SHA is what makes this safe where `updated_at` is not: an edit can bump the stamp for any reason, but a table naming an older commit is refused. One observed PR is that case: its table read `Completed` at one commit, and the head then moved to a newer commit Codex never reviewed. The ack exclusion still runs after the head test, so a table with a `Running` row stays out. The alternative signal was rejected: the 👍 Codex adds when a pass is clean sits on the PR, names no commit, and is one per user, so it cannot tell a pass on the current head from one on an older head. Two limits are accepted because Codex is advisory and the worst case is Phase 8 starting early: any `Completed` row at the head counts, including a Security Review row while the Code Review row is older, and the proof of freshness is a 7-hex prefix, which a determined author could collide. Use the same field for any other bot that edits a head-stamped verdict in place. Write the pattern to match one verdict unit, with the SHA as its first capture group.
 
-**Adding an `ack_pattern` for a new bot.** Put it on that bot's `.claude/repo-config.json` roster entry, beside the `match` / `login` / `ci_check` / `marker` identity fields that already live there — never as a literal in this skill body, which would fork per-bot identity across two files. It is an Oniguruma regex (jq `test`), matched case-insensitively against the comment body, and it is read only for bots that are online and gated in for this PR. To span lines, use `(?s)` with `.*`, never `[\s\S]*`: with the monitor's `"i"` flag, jq 1.8.2 aborts with `retry-limit-in-match over` when `[\s\S]*` fails to match the ~880-byte Codex table, and the monitor then exits UNKNOWN. **Err wide.** An over-broad pattern that also swallows the verdict makes the bot never arrive, which fails closed into a loud STOP for a blocking bot (an advisory one is only reported missing); too narrow a pattern silently restores the false green. **Match the frame of a prose ack, not its words.** Gitar has reworded its ack repeatedly: "a" became "the", then "a full" appeared. Each time, a pattern that listed the observed words failed open on the next wording. Its pattern (Gitar's roster entry holds it; do not copy it here) has three parts. It accepts any wording between the stable ends "running" and "review now" on one line. **It is anchored to a line start**, because unanchored it matched one of Gitar's own verdicts, which quoted the phrase mid-sentence while reviewing this pattern, and a blocking verdict read as an ack. The anchor still allows a few characters of leading markup (space, `>`, `*`, `_`) and an optional `On it` prefix, because a narrower anchor fails the other way: a reworded ack in bold or in a blockquote would count as the verdict. Do not make `On it` required: one real ack begins "Running the review now". When last audited it matched every Gitar ack and no Gitar verdict in the sample. A marker-bearing entry (`Semgrep SAST`, `Release Classifier`) needs no `ack_pattern` — the monitor already identifies it by body content, and an ack would not carry the marker.
+**Adding an `ack_pattern` for a new bot.** Put it on that bot's `.claude/repo-config.json` roster entry, beside the `match` / `login` / `ci_check` / `marker` identity fields that already live there — never as a literal in this skill body, which would fork per-bot identity across two files. It is an Oniguruma regex (jq `test`), matched case-insensitively against the comment body, and it is read only for bots that are online and gated in for this PR. To span lines, use `(?s)` with `.*`, never `[\s\S]*`: with the monitor's `"i"` flag, jq 1.8.2 aborts with `retry-limit-in-match over` when `[\s\S]*` fails to match the ~880-byte Codex table, and the monitor then exits UNKNOWN. **Err wide.** An over-broad pattern that also swallows the verdict makes the bot never arrive, which fails closed into a loud STOP for a blocking bot (an advisory one is only reported missing); too narrow a pattern silently restores the false green. **Match the frame of a prose ack, not its words.** Gitar has reworded its ack repeatedly: "a" became "the", then "a full" appeared. Each time, a pattern that listed the observed words failed open on the next wording. Its pattern (your roster entry for that bot holds it; do not copy it here) has three parts. It accepts any wording between the stable ends "running" and "review now" on one line. **It is anchored to a line start**, because unanchored it matched one of Gitar's own verdicts, which quoted the phrase mid-sentence while reviewing this pattern, and a blocking verdict read as an ack. The anchor still allows a few characters of leading markup (space, `>`, `*`, `_`) and an optional `On it` prefix, because a narrower anchor fails the other way: a reworded ack in bold or in a blockquote would count as the verdict. Do not make `On it` required: one real ack begins "Running the review now". When last audited it matched every Gitar ack and no Gitar verdict in the sample. A marker-bearing entry (`Semgrep SAST`, `Release Classifier`) needs no `ack_pattern` — the monitor already identifies it by body content, and an ack would not carry the marker.
 
 A bot is **IN-PROGRESS** when:
 - Its CI check is `pending` / `in_progress` / `queued`, OR
@@ -1791,7 +1792,7 @@ A bot is **DECLINED** when:
 
 **A refusal is neither an arrival nor a stall, and it is usually the developer's to clear.** Verified on a draft PR: `CodeRabbit state=success desc="Review skipped: draft pull request"` **plus** a draft-refusal conversation comment, with zero reviews and zero inline comments. A check-keyed arrival test counts that as a required gatekeeper arriving clean, and a comment-keyed one counts it twice. Treat DECLINED as still-MISSING for the wait, report it distinctly, and resolve it by removing the *reason* — flip the draft ready, wait out the limiter, re-summon — never by auditing configuration. `decline_pattern` is matched against both surfaces because the meaning is identical; **author it from machine markers and verbatim bot boilerplate, never loose prose**, since a comment body summarises the diff and can legitimately contain "draft" or "rate limit" when that is what the code is about.
 
-**The roster arms a `decline_pattern` for three bots, and each was authored from more than one observed wording.** CodeRabbit: the two status descriptions and the comment marker above. Gitar: the comment limiter's `You've sent several Gitar comments in a short window. Please wait about 10 minutes and comment again.` (observed where the required check run was absent for the head, so the refusal was the only signal). Codex: three quota bodies — `You have reached your Codex usage limits for code reviews.`, the same plus an add-credits sentence, and `Codex usage limits have been reached for code reviews. Please check with the admins of this repo…` — plus a failure notice, `Codex Review: Something went wrong. Try again later by commenting “@codex review”.`, which is not a review either and clears the same way, by re-summoning. The Codex pattern keys on `Codex usage limit` and not on one sentence, because the first version, `reached your Codex usage limits`, matched wording 1 and silently missed wording 2.
+**A roster typically arms a `decline_pattern` for three bots, and each was authored from more than one observed wording.** CodeRabbit: the two status descriptions and the comment marker above. Gitar: the comment limiter's `You've sent several Gitar comments in a short window. Please wait about 10 minutes and comment again.` (observed where the required check run was absent for the head, so the refusal was the only signal). Codex: three quota bodies — `You have reached your Codex usage limits for code reviews.`, the same plus an add-credits sentence, and `Codex usage limits have been reached for code reviews. Please check with the admins of this repo…` — plus a failure notice, `Codex Review: Something went wrong. Try again later by commenting “@codex review”.`, which is not a review either and clears the same way, by re-summoning. The Codex pattern keys on `Codex usage limit` and not on one sentence, because the first version, `reached your Codex usage limits`, matched wording 1 and silently missed wording 2.
 
 **Rate-limit refusals are recoverable and the EXHAUSTED rule does not apply to them.** EXHAUSTED (below) says to treat a quota wall as arrived-with-no-findings and proceed, justified by "a quota wall is not a review gap the developer can resolve by waiting". CodeRabbit's limiter names a concrete reset and a one-comment retry, so for a **required** reviewer that premise is false — re-summon and give it another window. Its allowance is org-wide over a rolling 7 days, so concurrent sessions spend each other's; bound the wait (~20 min) and only then drop it.
 
@@ -2156,7 +2157,9 @@ while :; do
       | ( [ {kind: "ack",     pattern: ($b.ack_pattern // "")},
             {kind: "decline", pattern: ($b.decline_pattern // "")} ][]
           | select(.pattern != "")
-          | {login: $b.login, name: $b.name, kind: .kind, pattern: .pattern} ) ]' "$CFG") \
+          | {logins: ([$b.login] | flatten | map(select(. != null and . != ""))
+                       | map(ascii_downcase | sub("\\[bot\\]$"; ""))),
+             name: $b.name, kind: .kind, pattern: .pattern} ) ]' "$CFG") \
     || { echo "UNKNOWN: could not read the non-verdict comment roster"; exit 2; }
   # Per-bot DECLINE patterns — the CHECK leg's version of the same false green, and the
   # more dangerous one, because a check is the cheapest and most obvious probe. A bot can
@@ -2295,7 +2298,7 @@ while :; do
                       # the BODY STRING and jq aborts with "cannot index string" — which the
                       # surrounding `2>/dev/null` then renders as a probe failure, i.e. the whole
                       # wait exits UNKNOWN on any PR where an ack-emitting bot has commented.
-                      | select( $nv | any(. as $p | ($p.login | norm) == ($c.author.login | norm)
+                      | select( $nv | any(. as $p | ($p.logins | index($c.author.login | norm)) != null
                                           and (($c.body // "") | test($p.pattern; "i"))) | not )
                       | who(.author.login)),
                    (.statusCheckRollup[]?
@@ -2372,7 +2375,7 @@ while :; do
       | jq -r --arg since "$READY_ISO" --argjson nv "$NONVERDICT" '
           def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
           [ .comments[]? | select(.createdAt > $since) | . as $c | $nv[] as $p
-              | select(($c.author.login | norm) == ($p.login | norm)
+              | select(($p.logins | index($c.author.login | norm)) != null
                        and (($c.body // "") | test($p.pattern; "i")))
               | "\($p.kind)\t\($p.name)" ] | unique | .[]' 2>/dev/null ) || nv_now=""
   # RE-READ the head AFTER THE LAST PROBE of this tick, and keep it last: no API read may follow

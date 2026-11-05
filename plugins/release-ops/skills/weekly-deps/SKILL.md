@@ -377,13 +377,14 @@ For every PR you plan to merge, verify three things. If any fails, skip that PR 
 ### 3.1 CI status
 
 ```bash
-gh pr checks "$PR" --json bucket,workflow --jq '. as $checks | if ([$checks[] | select(.workflow == "PR CI")] | length) == 0 then "missing" elif ([$checks[].bucket] | all(. == "pass" or . == "skipping")) then "green" elif ([$checks[].bucket] | any(. == "fail")) then "red" else "pending" end'
+CI_WF="$(rc_get '.weekly_deps.ci_workflow' '')"   # empty → no presence check
+gh pr checks "$PR" --json bucket,workflow | jq -r --arg wf "$CI_WF" '. as $checks | if ($wf != "" and ([$checks[] | select(.workflow == $wf)] | length) == 0) then "missing" elif ($checks | length) == 0 then "missing" elif ([$checks[].bucket] | all(. == "pass" or . == "skipping")) then "green" elif ([$checks[].bucket] | any(. == "fail")) then "red" else "pending" end'
 ```
 
 - `green` → continue to 3.2.
 - `red` → skip; suggest `@dependabot recreate` only if the failure looks like a transient or stale-lockfile issue (network blip, snapshot mismatch). Otherwise close the PR with an explanatory comment.
 - `pending` → skip for this run; the developer can re-invoke after CI settles.
-- `missing` → classify as UNKNOWN and skip. For a routine-labelled PR opened by a workflow that authenticates as a GitHub App (Phase 1), PR CI should start on its own; if it is still missing, check that workflow's App-token mint step before falling back to a close/reopen.
+- `missing` → no checks at all, or none from the workflow named in `weekly_deps.ci_workflow` when that key is set. Classify as UNKNOWN and skip. For a routine-labelled PR opened by a workflow that authenticates as a GitHub App (Phase 1), CI should start on its own; if it is still missing, check that workflow's App-token mint step before falling back to a close/reopen.
 
 ### 3.2 Mergeable status
 
