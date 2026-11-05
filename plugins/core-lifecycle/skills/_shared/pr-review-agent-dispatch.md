@@ -52,7 +52,7 @@ Matching is **over-inclusive by design**: a needless reviewer run just returns A
 | Files `src/frontend/**` (adjust to your layout — matches `frontend-reviewer.md`'s own scope) | `@frontend-reviewer` | Priority 2 |
 | Files `src/preload/*`, `src/main/ipc*` | `/ipc-channel-audit --only-new` (model-invocable skill — dispatch via the Skill tool) | Priority 1 |
 | Any `.md` file changed | `@docs-reviewer` | Priority 5 |
-| **Risk-tiered** — mandatory at tier T2, optional at T0 or T1 (see § Codex-conditional reviewers). Mandatory whenever Codex's SECURITY review has not covered the head. The primary risk signals are label `risk: security` / `risk: privacy`, files `**/auth/**`, `**/crypto/**`, `**/permissions/**`, `src/main/ipc*`, `src/preload/*`, and content **[E1]** or **[R1]** | `@red-team` | Priority 1 |
+| **Risk-tiered** — mandatory at tier T2 or T3, optional at T0 or T1 (see § Codex-conditional reviewers). Mandatory whenever Codex's SECURITY review has not covered the head. The primary risk signals are label `risk: security` / `risk: privacy`, files `**/auth/**`, `**/crypto/**`, `**/permissions/**`, `src/main/ipc*`, `src/preload/*`, and content **[E1]** or **[R1]** | `@red-team` | Priority 1 |
 | Files `**/*.go` · content **[S1]** | `@pr-review-toolkit:silent-failure-hunter` (plugin agent) | Priority 2 |
 | Files `**/*_test.go`, `**/*.test.ts`, `**/*.test.tsx`, `**/tests/**` | `@pr-review-toolkit:pr-test-analyzer` (plugin agent) | Priority 3 |
 | Always | `@security-reviewer` | Priority 1 |
@@ -138,7 +138,7 @@ needs none. Either way, record the decision in the dispatch line, for example
 
 ### `@red-team`: risk tiers
 
-Compute three inputs on the head, then take the **highest** tier whose condition holds.
+Compute three inputs on the head (four when `.red_team.critical_agent` is set: add the changed files against `.red_team.critical_paths[]`), then take the **highest** tier whose condition holds.
 
 1. **Codex security coverage:** covered or not covered, as defined above.
 2. **Codex severity:** the highest Codex Security Review finding still unresolved on the head.
@@ -160,12 +160,34 @@ Compute three inputs on the head, then take the **highest** tier whose condition
 
 | Tier | Condition | `@red-team` |
 |---|---|---|
+| **T3 Critical** (only when `.red_team.critical_agent` is set) | Codex Security has an unresolved P0 or P1 on the head; OR a changed file matches `.red_team.critical_paths[]`; OR `@red-team` returns a CRITICAL or HIGH finding with a passing PoC | Mandatory, and the critical agent is mandatory too |
 | **T2 Elevated** | Codex Security did not cover the head; OR it left an unresolved P0, P1 or P2; OR any primary signal; OR two or more secondary signals | Mandatory |
 | **T1 Guarded** | Codex Security covered the head with nothing above P3, no primary signal, exactly one secondary signal | Optional (recommended) |
 | **T0 Clear** | Codex Security covered the head with nothing above P3, and no risk signal | Optional |
 
 The primary signals reproduce `@red-team`'s unconditional trigger, so Codex coverage can only make
 it optional on a PR that touches none of those surfaces.
+
+**T3 and the critical agent.** A repo may name a second, deeper red-team agent for its most
+sensitive code in `.claude/repo-config.json`: `.red_team.critical_agent` (a bare agent name, no
+`@`, resolving to `.claude/agents/<name>.md`) and `.red_team.critical_paths[]` (globs, matched
+exactly as review-pr matches `.review_agents.patterns[].glob`: a bash pattern match against each
+changed path from the repo root, where `*` also matches `/`). Read both keys from the **merge
+base**, never the head: a PR must not be able to lower its own tier by editing them. Resolve
+`MERGE_BASE_SHA` the way review-pr's agent-definition guard does, then read
+`git show "$MERGE_BASE_SHA:.claude/repo-config.json" | jq '.red_team'`. If the merge base or that
+file cannot be read, treat the PR as T3 (fail closed). A PR that changes either key, or the critical
+agent's own file, is T3. When the PR modifies `.claude/agents/<critical_agent>.md`, never dispatch
+the edited definition; that would let the PR weaken its own critical reviewer. Report the PR as
+blocked on a run of the merge-base definition or on a human security review, the same refusal
+review-pr applies to any reviewer whose definition the PR modifies. With `critical_agent` unset there is no T3 tier, and an unresolved Codex P0 or P1 stays T2. A T3 reached
+through a `@red-team` finding is evaluated **after** `@red-team` reports, so it adds the critical
+agent to the same review run rather than starting a new one. The critical agent never replaces
+`@red-team` or a domain reviewer; they still run on their own rows. If the critical agent cannot
+run on the current harness, or its agent file does not exist, report the PR as blocked on a run of
+that agent (fail closed). Record it in the dispatch line, for example
+`red-team: T3, mandatory; <critical-agent>: mandatory (critical_paths match)`. Do not substitute
+another agent or model.
 
 ## Agent names in GitHub posts
 

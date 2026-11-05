@@ -83,9 +83,12 @@ on the same diff and was raised to 30.
 Escalation applies only to a repo whose fleet is split — producer agents pinned
 below the design agents (e.g. Sonnet producers, Opus designers) — **and** that
 defines a repo-local escalation agent: a higher-pinned agent that owns both the
-backend and frontend producer surfaces. The producers shipped here pin Opus and no
-escalation agent ships, so out of the box these criteria select no agent: when one
-fires, record it and surface the task to the developer instead (an E4 bounce is
+backend and frontend producer surfaces. A repo names it in `.claude/repo-config.json`
+as `.agents.escalation` (read it with `rc_get '.agents.escalation' ''`): a bare
+agent name, no `@`, resolving to `.claude/agents/<name>.md`. If that file does not
+exist, treat the key as unset and say so in the dispatch line. The producers shipped here pin Opus and no
+escalation agent ships, so with the key unset these criteria select no agent: when
+one fires, record it and surface the task to the developer instead (an E4 bounce is
 the common case). Where a repo does define one, it is the escalation target
 wherever a producer agent is dispatched — Phase 3 (execute), Phase 4
 (validate/remediate), Phase 6 (CI-failure remediation), and Phase 8 (review-fix
