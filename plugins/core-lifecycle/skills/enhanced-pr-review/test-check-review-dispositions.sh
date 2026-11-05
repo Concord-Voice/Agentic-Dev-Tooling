@@ -390,13 +390,14 @@ badroster "ok: a well-formed roster is accepted" 1 \
 # that drops the malformed login, unrosters its reviewer, and passes — a false
 # PASS is strictly worse here than a loud UNKNOWN.
 badroster_msg() { # badroster_msg <name> <expected-exit> <expected-substring> <roster-json>
+    local name="$1" want="$2" msg="$3"
     printf '%s' "$4" > "$TMP/bad.json"
     printf '%s' "$(doc "" "$(botsay gitar-bot 'verdict'),$(human '<!-- cv-review-reconciliation -->\nNothing to see here.')")" > "$TMP/f.json"
     local out; out=$(CV_REVIEW_FIXTURE="$TMP/f.json" CV_REPO_CONFIG="$TMP/bad.json" CV_SKIP_EXISTENCE_CHECKS=1 "$SCRIPT" 999 2>&1); local got=$?
-    if [[ "$got" -eq "$2" ]] && printf '%s' "$out" | grep -F "$3" >/dev/null; then
-        printf '  ok   %-52s (exit %d)\n' "$1" "$got"; pass=$((pass+1))
+    if [[ "$got" -eq "$want" ]] && printf '%s' "$out" | grep -F "$msg" >/dev/null; then
+        printf '  ok   %-52s (exit %d)\n' "$name" "$got"; pass=$((pass+1))
     else
-        printf '  FAIL %-52s (want %d + msg %s)\n' "$1" "$2" "$3"; printf '%s\n' "$out" | sed 's/^/         | /'; fail=$((fail+1))
+        printf '  FAIL %-52s (want %d + msg %s)\n' "$name" "$want" "$msg"; printf '%s\n' "$out" | sed 's/^/         | /'; fail=$((fail+1))
     fi
 }
 

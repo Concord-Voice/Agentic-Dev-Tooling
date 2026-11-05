@@ -165,8 +165,9 @@ query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
     # `exit 2` would kill only the subshell and leave the script running with an
     # empty variable — a fail-OPEN in the one place this gate cannot afford one.
     cv_fetch_pages() { # cv_fetch_pages <query>
+        local query="$1"
         gh api graphql --paginate --slurp \
-            -F owner="$OWNER" -F repo="$REPO" -F pr="$PR" -f query="$1" 2>&1
+            -F owner="$OWNER" -F repo="$REPO" -F pr="$PR" -f query="$query" 2>&1
     }
 
     if ! THREAD_PAGES=$(cv_fetch_pages "$Q_THREADS"); then
