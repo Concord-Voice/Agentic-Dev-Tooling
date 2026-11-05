@@ -38,7 +38,7 @@ list, never code execution.
 
 ### Base agents (always dispatched)
 
-Read the base agent list from config. The mandatory floor defaults to `security-reviewer`, `code-reviewer`, and `docs-reviewer`. A repo can replace that floor with `.review_agents.mandatory`, but the trust guard below reads it from the merge base only, so a PR cannot change its own floor; this block always prints the default floor, and the guard's `DISPATCH_AGENTS` is authoritative. `.review_agents.base` only adds to the floor:
+Read the base agent list from config. The mandatory floor defaults to `security-reviewer`, `code-reviewer`, and `docs-reviewer`. A repo can replace that floor with `.review_agents.mandatory`, but the trust guard below reads it only from the merge base with the default branch, so a PR cannot change its own floor; this block always prints the provisional default floor, and the guard's `DISPATCH_AGENTS` is authoritative. `.review_agents.base` only adds to the floor:
 
 ```bash
 CFG="${RC_FILE:-$(git rev-parse --show-toplevel)/.claude/repo-config.json}"
@@ -406,24 +406,49 @@ for tree_side in "$HEAD_TREE" "$MERGE_BASE_TREE"; do
   }
 done
 
-# THE MANDATORY FLOOR CAN BE REPLACED, BUT ONLY FROM THE MERGE BASE. A repo whose
+# THE MANDATORY FLOOR CAN BE REPLACED, BUT ONLY FROM THE DEFAULT BRANCH. A repo whose
 # always-run reviewers differ from the default (for example one that retired
 # `security-reviewer` for `red-team`) sets `.review_agents.mandatory` in
-# `.claude/repo-config.json`. It is read from the merge-base tree, never from the
-# checkout, so the PR under review cannot shrink its own floor: a change to the key
-# takes effect only after it merges. File absent at the merge base, or key absent,
-# keeps the default. Present but unreadable or malformed stops the review.
-MB_CFG_SHA="$(printf '%s' "$MERGE_BASE_TREE" | jq -r '
-  [.tree[] | select(.path == ".claude/repo-config.json" and .type == "blob") | .sha] | first // ""
-')" || { echo "FATAL: could not search the merge-base tree for the repo config" >&2; exit 1; }
+# `.claude/repo-config.json`. It is never read from the checkout. It is read from the
+# merge base of the head with the repo's DEFAULT branch, so the PR under review cannot
+# shrink its own floor: a change to the key takes effect only after it merges there.
+# The PR's own base is not enough, because the author picks it: an unreviewed branch,
+# or a stacked PR, could set a weaker floor or drop the key. When the PR targets the
+# default branch the two merge bases are the same and no extra call is made. File or
+# key absent keeps the default. Present but unreadable, malformed, or not a regular
+# file stops the review. The path is spelled split so the mirror generator's
+# substring rewrite leaves it alone.
+PR_BASE="$(gh api "repos/{owner}/{repo}/pulls/$0" --jq '.base.ref + " " + .base.sha')" \
+  && DEFAULT_REF="$(gh api "repos/{owner}/{repo}" --jq '.default_branch')" \
+  && [ -n "$DEFAULT_REF" ] \
+  || { echo "FATAL: could not resolve the PR base branch or the default branch" >&2; exit 1; }
+[ "${PR_BASE##* }" = "$BASE_SHA" ] || { echo "FATAL: the PR base moved during the review" >&2; exit 1; }
+CFG_TREE="$MERGE_BASE_TREE"
+if [ "${PR_BASE%% *}" != "$DEFAULT_REF" ]; then
+  CFG_TREE="$(gh api "repos/{owner}/{repo}/compare/${DEFAULT_REF}...${HEAD_SHA}" --jq '.merge_base_commit.commit.tree.sha' \
+    | jq -Rer 'select(test("\\A[0-9a-fA-F]{40,64}\\z"))' \
+    | { read -r t && gh api "repos/{owner}/{repo}/git/trees/${t}?recursive=1"; })" \
+    && printf '%s' "$CFG_TREE" | jq -e 'type == "object" and .truncated == false and (.tree | type == "array")' >/dev/null \
+    || { echo "FATAL: could not read the tree at the head's merge base with the default branch" >&2; exit 1; }
+fi
+MB_CFG_SHA="$(printf '%s' "$CFG_TREE" | jq -r --arg p ".cl""aude/repo-config.json" '
+  [.tree[] | select(.path == $p)]
+  | if length == 0 then ""
+    elif length == 1 and .[0].type == "blob" and .[0].mode == "100644" then .[0].sha
+    else error("the merge-base repo config is not a regular file") end
+')" || { echo "FATAL: could not search the merge-base tree, or its repo config is not a regular file" >&2; exit 1; }
 if [ -n "$MB_CFG_SHA" ]; then
-  MB_FLOOR="$(gh api "repos/{owner}/{repo}/git/blobs/${MB_CFG_SHA}" --jq '.content' \
-    | jq -Rrs 'gsub("\\s"; "") | @base64d | fromjson
-        | if has("review_agents") and (.review_agents | type == "object") and (.review_agents | has("mandatory"))
-          then .review_agents.mandatory
+  MB_FLOOR="$(gh api "repos/{owner}/{repo}/git/blobs/${MB_CFG_SHA}" --jq 'select(.encoding == "base64") | .content' \
+    | jq -Rrs 'gsub("\\s"; "") | if . == "" then error("empty blob") else . end | @base64d | fromjson
+        | if type != "object" then error("the repo config must be a JSON object")
+          elif has("review_agents") | not then ""
+          elif (.review_agents | type) != "object" then error("review_agents must be an object")
+          elif .review_agents | has("mandatory") | not then ""
+          else .review_agents.mandatory
             | if type == "array" and length > 0 and all(.[]; type == "string" and test("\\A[a-z0-9][a-z0-9-]*\\z"))
               then join(" ") else error("review_agents.mandatory must be a non-empty array of agent names") end
-          else "" end')"     || { echo "FATAL: the merge-base repo config could not be read or its .review_agents.mandatory is malformed" >&2; exit 1; }
+          end')" \
+    || { echo "FATAL: the merge-base repo config could not be read or its .review_agents.mandatory is malformed" >&2; exit 1; }
   [ -z "$MB_FLOOR" ] || MANDATORY_BASE="$MB_FLOOR"
 fi
 

@@ -115,14 +115,20 @@ for a worked template.
 
 A repo that replaced `@security-reviewer` with another always-on reviewer (for example one
 that retired the checklist reviewer in favour of `@red-team`) lists its floor in
-`.review_agents.mandatory`. Read it from the merge base, the same way the T3 keys are read
-(`git show "$MERGE_BASE_SHA:.claude/repo-config.json" | jq '.review_agents.mandatory'`), never
-from the checkout. When it is set and does not include `security-reviewer`, every agent it
-lists is the always-on row here in place of `@security-reviewer`, and the `@security-reviewer`
-references in the rest of this table mean that floor. A PR that changes the key is judged by
-the old value. When the merge base has no config file, or the file has no such key, use the default
-floor. When the file cannot be read or the key is malformed, stop and report it; do not
-fall back silently.
+`.review_agents.mandatory`. It is never read from the checkout. It is read from the merge base
+of the head with the repo's **default branch**, which review-pr's trust guard resolves. When the
+PR targets the default branch, that is the PR's own merge base. When it targets another branch, it
+is not, because the author picks the base and an unreviewed branch or a stacked PR could carry a
+weaker floor. When the key is set, its agents replace the default floor
+(`security-reviewer code-reviewer docs-reviewer`), and the `@security-reviewer` references in the
+rest of this table mean that floor. A PR that changes the key is judged by the old value. When
+the merge base has no config file, or the file has no such key, use the default floor. Stop and
+report it, rather than falling back silently, when any of these hold:
+
+- the file is not a regular file;
+- the file cannot be read or is not a JSON object;
+- `review_agents` is not an object;
+- the key is not a non-empty array of names matching `^[a-z0-9][a-z0-9-]*$`.
 
 ## Codex-conditional reviewers
 
@@ -187,8 +193,10 @@ sensitive code in `.claude/repo-config.json`: `.red_team.critical_agent` (a bare
 `@`, resolving to `.claude/agents/<name>.md`) and `.red_team.critical_paths[]` (globs, matched
 exactly as review-pr matches `.review_agents.patterns[].glob`: a bash pattern match against each
 changed path from the repo root, where `*` also matches `/`). Read both keys from the **merge
-base**, never the head: a PR must not be able to lower its own tier by editing them. Resolve
-`MERGE_BASE_SHA` the way review-pr's agent-definition guard does, then read
+base**, never the head: a PR must not be able to lower its own tier by editing them. Use the merge base of the head with the repo's **default branch**, not with the
+PR's own base: the author picks the base, so an unreviewed branch or a stacked PR could carry a
+weaker value. Resolve it with `git merge-base "origin/$DEFAULT_REF" "$HEAD_SHA"` (review-pr's
+floor guard does the same through the API), then read
 `git show "$MERGE_BASE_SHA:.claude/repo-config.json" | jq '.red_team'`. If the merge base or that
 file cannot be read, treat the PR as T3 (fail closed). A PR that changes either key, or the critical
 agent's own file, is T3. When the PR modifies `.claude/agents/<critical_agent>.md`, never dispatch

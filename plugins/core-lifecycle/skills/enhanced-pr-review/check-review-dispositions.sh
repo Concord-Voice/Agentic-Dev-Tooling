@@ -404,13 +404,17 @@ if [ -n "$ROSTER_RAW" ]; then
     fi
     # Length alone does not stop a generic substring ("-bot", "review"): a `match`
     # that hits two different logins on this PR would let one reviewer's name cover
-    # another's findings, so it stops here too.
+    # another's findings, so it stops here too. Logins the same entry already lists
+    # are its own accounts (one reviewer can post as two), so they never count as a clash.
     if ! ROSTER_AMBIG=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" '
         ([.. | objects | .author? | objects | .login // empty] | map(ascii_downcase) | unique) as $logins
         | $roster[] | ((.match // "") | tostring | ascii_downcase) as $m
         | select($m != "")
+        | ([(.login // []) | if type == "array" then .[] else . end | tostring
+            | ascii_downcase | sub("\\[bot\\]$"; "")]) as $own
+        | ([$logins[] | select(contains($m)) | select(sub("\\[bot\\]$"; "") as $l | ($own | index($l)) | not)]) as $other
         | ([$logins[] | select(contains($m))]) as $hit
-        | select(($hit | length) > 1)
+        | select(($other | length) > 0 and ($hit | length) > 1)
         | "match=\"\($m)\" hits \($hit | join(", "))"' 2>&1); then
         echo "STOP: could not check the roster for ambiguous matches: ${ROSTER_AMBIG}" >&2
         exit 2
