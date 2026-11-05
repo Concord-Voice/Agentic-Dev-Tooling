@@ -47,7 +47,7 @@ echo "$out5" | grep -qx "555" && fail "parse_pr_closes leaked an indented-fence 
 # A labels source that was named but is missing fails closed: no passthrough, exit 1.
 ( out="$(LABELS_FILE=/nonexistent/labels-$$.md bash -c 'source "'"$HERE"'/lib.sh"; printf "type: bug\n" | validate_against_active_labels' 2>/dev/null)" \
     && fail "missing named labels source must exit non-zero"
-  [ -z "$out" ] || fail "missing named labels source must print nothing" )
+  [[ -z "$out" ]] || fail "missing named labels source must print nothing" )
 
 # Empty-namespace config: validate_against_active_labels degrades to passthrough no-op (no error).
 ( tmpd="$(mktemp -d)"; mkdir -p "$tmpd/.claude"

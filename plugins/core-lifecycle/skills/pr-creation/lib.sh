@@ -411,9 +411,11 @@ find_project_item_id() {
 #   <repo-root>/.claude/rules/labels.md.
 # Deprecated labels are dropped with a stderr WARN.
 #
-# Graceful degradation: when the labels source file is ABSENT, this is a NO-OP —
-# every candidate label is passed through unchanged and the function returns
-# success. (A repo may legitimately not maintain a curated labels.md.)
+# Graceful degradation: when NO labels source was named (no $LABELS_FILE, no
+# repo-config `.labels.source`) and the default .claude/rules/labels.md is ABSENT,
+# this is a NO-OP passthrough that returns success. (A repo may legitimately not
+# maintain a curated labels.md.) When a source WAS named and is missing, it fails
+# closed (exit 1, no output) so the taxonomy check is not silently skipped.
 #
 # When the source file EXISTS but its Active section is empty/malformed, that's a
 # real misconfiguration: return exit 1 rather than silently passing through
@@ -427,7 +429,7 @@ validate_against_active_labels() {
         local root configured
         root="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
         configured="$(rc_get '.labels.source' '')"
-        [ -n "$configured" ] || { explicit=0; configured=.claude/rules/labels.md; }
+        [[ -n "$configured" ]] || { explicit=0; configured=.claude/rules/labels.md; }
         labels_file="${root%/}/${configured}"
     fi
 
@@ -435,7 +437,7 @@ validate_against_active_labels() {
     # A source that was named (LABELS_FILE or .labels.source) and is missing fails
     # closed, because passing labels through would skip the taxonomy check.
     if [ ! -f "$labels_file" ]; then
-        if [ "$explicit" = 1 ]; then
+        if [[ "$explicit" == 1 ]]; then
             echo "ERROR: labels source '${labels_file}' not found; refusing to pass labels through unchecked." >&2
             return 1
         fi
