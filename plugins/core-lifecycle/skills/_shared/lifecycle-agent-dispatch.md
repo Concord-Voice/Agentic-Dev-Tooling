@@ -209,9 +209,12 @@ first match.
 `rc_get '.agents.producer_rows' '[]'`: an array of `{"match": [<globs>], "agent": "<name>"}`.
 After rows 1 and 2 (test authoring and migrations keep their owners), check the repo
 rows top to bottom and dispatch the first whose globs match the task's paths; only when
-none matches do rows 3 onward apply. A row whose agent has no
-`.claude/agents/<name>.md` is skipped and named in the dispatch line, never silently
-dropped. This is how a repo routes a surface to its own producer (for example CI and
+none matches do rows 3 onward apply. `rc_get` returns the array as JSON text; parse
+it with `jq`. `agent` is a bare name (no `@`, no `/`) resolving to
+`.claude/agents/<name>.md`, and `match` globs use the same `**` dialect as the rows
+above. A row that is malformed (missing or non-array `match`, missing or non-bare
+`agent`) or whose agent file is absent is skipped and named in the dispatch line,
+never silently dropped. This is how a repo routes a surface to its own producer (for example CI and
 infrastructure to a dedicated DevOps agent) without editing this shared file.
 
 **A path no row names is a gap, not a free choice.** If the repo has a surface no
@@ -227,7 +230,7 @@ rules that a generic path match would otherwise silently override.
 same dispatch.** Separating them is what keeps a test task from "fixing"
 production code to make a test pass — a recorded failure mode.
 
-**Then check E1-E4.** When row 3 or row 4 matched, evaluate the escalation
+**Then check E1-E4.** When row 3, row 4 or a repo row matched, evaluate the escalation
 criteria above; if one fires, handle it per § Escalation. Rows 1, 2, 5, 6 and 7
 are not eligible for escalation. A task whose
 *shape* is defect repair rather than construction routes to `/reproduce-then-fix`
