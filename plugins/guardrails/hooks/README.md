@@ -20,9 +20,9 @@ expanded permissions deny/allow list, and optional third-party hook entries.
 | [`destructive-commands.sh`](destructive-commands.sh) | PreToolUse(Bash) | Before every Bash command | Blocks force-push (not `--force-with-lease`), `git reset --hard`, `git clean -f`, recursive `rm`, working-tree `git checkout`/`git restore`, `git branch -D`, `DROP TABLE`, `pkill`, etc. A best-effort regex guard: it covers common forms, not every shell construct, so keep the settings.json deny list too. Needs `perl` (standard on macOS and most Linux images) to read quoted spans; without it the hook blocks every Bash command. See "Scoped bypass channels" below. |
 | [`detect-secrets.sh`](detect-secrets.sh) | UserPromptSubmit | On prompt submit | Scans the submitted prompt for likely secrets (AWS keys, GitHub tokens, PEM blobs, etc.) and blocks submission on a high-confidence match. |
 | [`issue-creation-nudge.sh`](issue-creation-nudge.sh) | UserPromptSubmit | On prompt submit | Nudges toward `/issue-creation` when the user describes new work. |
-| [`protect-applied-migrations.sh`](protect-applied-migrations.sh) | PreToolUse(Edit) | Before editing a migration file | Blocks edits to migrations that already shipped to production. |
-| [`protect-env-files.sh`](protect-env-files.sh) | PreToolUse(Edit/Write) | Before editing `.env` files | Hard block; env files must be edited by the operator on the server, not via agent. |
-| [`protect-sensitive.sh`](protect-sensitive.sh) | PreToolUse(Edit/Write) | Before editing files matching `PROTECTED_PATTERNS` | Blocks edits to security-sensitive paths (`/e2ee/`, `/crypto/`, `/auth/`, `/preload/`, `src/main/ipc/`, etc.) unless authorized via marker file. |
+| [`protect-applied-migrations.sh`](protect-applied-migrations.sh) | PreToolUse(Edit/Write) | Before editing or overwriting a migration file | Blocks edits to migrations that already shipped to production. Write may create a new migration file, never overwrite one. |
+| [`protect-env-files.sh`](protect-env-files.sh) | PreToolUse(Read/Edit/Write/Bash) | Before reading or editing `.env` files | Hard block on every `.env`, `.env.*` and `*.env` file except `.env.example`, including Bash commands that name one; env files must be edited by the operator on the server, not via agent. |
+| [`protect-sensitive.sh`](protect-sensitive.sh) | PreToolUse(Edit/Write/Bash) | Before editing files matching `PROTECTED_PATTERNS`, including Bash writes (`sed -i`, `tee`, `>` and similar; a denylist, see the file header) | Blocks edits to security-sensitive paths (`/e2ee/`, `/crypto/`, `/auth/`, `/preload/`, `src/main/ipc/`, etc.) unless authorized via marker file. |
 | [`test-reminder.sh`](test-reminder.sh) | PostToolUse(Edit/Write) | After editing a test file | Reminds to run tests. |
 
 ## Scoped bypass channels
@@ -51,7 +51,7 @@ The hook string-matches the prefix in the command text (NOT the inherited env va
 
 ### `protect-sensitive.sh` — marker file
 
-**Mechanism.** Write a list of authorized file paths to `.claude/state/hook-bypass/<sanitized-branch>.txt`. The hook reads the file and allows edits to listed paths.
+**Mechanism.** Write a list of authorized file paths to `.claude/state/hook-bypass/<sanitized-branch>.txt`. The hook reads the file and allows edits to listed paths. Write the marker yourself, in your own terminal: when `protected_patterns` lists `.claude/state/hook-bypass/` (as the example config does), the agent cannot create or change it, which is the point.
 
 **Use case.** When a spec or plan deliberately edits a security-sensitive file (e.g., a key-rotation feature that touches `/e2ee/`), the brainstorming and writing-plans skills prompt the developer to authorize the bypass once for the branch.
 

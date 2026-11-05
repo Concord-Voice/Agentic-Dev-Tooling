@@ -134,7 +134,22 @@ install_claude() {
           (($bh[.]) // []) as $barr |
           ($aarr | [.[] | .hooks[]?.command | norm]) as $existing |
           ($barr | map(select(((.hooks // []) | any(. as $h | ($existing | index($h.command | norm)) != null)) | not))) as $toadd |
-          ($aarr + $toadd)
+          # An adopter entry that runs a base hook keeps its own matcher, widened by the
+          # base matcher, so a release that adds a tool (Edit -> Edit|Write) reaches
+          # existing installs without ever narrowing what the adopter chose.
+          ($aarr | map(. as $ae |
+            ([$barr[] | select(((.hooks // []) | map(.command | norm)) as $bc
+                | (($ae.hooks // []) | any(.command | norm | IN($bc[]))))
+              | .matcher // empty]) as $bm |
+            # Only an entry that runs nothing but base hooks is widened, so an adopter hook
+            # sharing the entry never starts firing on new tools; "*" already matches all.
+            ([$barr[] | .hooks[]?.command | norm]) as $allbase |
+            if ($bm | length) > 0 and ($ae.matcher | type) == "string" and $ae.matcher != "" and $ae.matcher != "*"
+               and (($ae.hooks // []) | all(.command | norm | IN($allbase[])))
+            then .matcher = (($ae.matcher | split("|")) as $own
+                | ($own + (($bm | map(split("|")) | add) - $own | unique)) | join("|"))
+            else . end)) as $aarr2 |
+          ($aarr2 + $toadd)
         )
       }) | from_entries)
     ) as $mergedhooks |
