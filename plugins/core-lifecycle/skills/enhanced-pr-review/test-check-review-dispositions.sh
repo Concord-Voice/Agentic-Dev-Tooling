@@ -805,6 +805,16 @@ run_pages "pagination: a disposition on thread-comment page 2 is found" 0 \
     "[$(rpage false "")]" \
     "[{\"data\":{\"node\":{\"comments\":{\"pageInfo\":{\"hasNextPage\":true},\"nodes\":[$BOT]}}}},{\"data\":{\"node\":{\"comments\":{\"pageInfo\":{\"hasNextPage\":false},\"nodes\":[$(human '<!-- cv-disposition: accepted evidence: e5c34d0 -->')]}}}}]"
 
+# Page size: Linux caps one argv string at 128 KiB, so pages handed to jq as
+# --argjson made a large PR exit 2 (UNKNOWN) instead of being read. One ~200 KB
+# review page and one ~200 KB nested thread-comment page must still go green.
+BIG_BODY="$(head -c 200000 /dev/zero | tr '\0' 'x')"
+run_pages "pagination: pages over 128 KiB are still read" 0 \
+    "[$(tpage false "$NESTED_T")]" \
+    "[$(cpage false "$BOT_TOP,$RECON3")]" \
+    "[$(rpage false "$(botsay 'copilot-pull-request-reviewer' "$BIG_BODY")")]" \
+    "[{\"data\":{\"node\":{\"comments\":{\"pageInfo\":{\"hasNextPage\":false},\"nodes\":[$(botsay 'coderabbitai[bot]' "$BIG_BODY"),$(human '<!-- cv-disposition: accepted evidence: e5c34d0 -->')]}}}}]"
+
 # Fail-closed still holds per connection. An error envelope on a LATER page is
 # the dangerous one: page 1 parses and only page 2 carries the null.
 #

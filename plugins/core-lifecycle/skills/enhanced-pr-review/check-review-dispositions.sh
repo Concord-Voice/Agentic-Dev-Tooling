@@ -205,10 +205,10 @@ query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
     # pageInfo flags are set false because the pages above ARE the whole
     # connection; the truncation guard further down still runs, and now means
     # "assembly did not finish" rather than "the PR is too big".
-    if ! RAW=$(jq -n \
-            --argjson t "$THREAD_PAGES" \
-            --argjson c "$COMMENT_PAGES" \
-            --argjson r "$REVIEW_PAGES" '
+    # The pages go in on stdin, not as --argjson: one argv string is capped at
+    # 128 KiB on Linux, and a page of 100 long bot reviews passes that.
+    if ! RAW=$(printf '%s\n%s\n%s\n' "$THREAD_PAGES" "$COMMENT_PAGES" "$REVIEW_PAGES" \
+            | jq -s '.[0] as $t | .[1] as $c | .[2] as $r |
         {data:{repository:{pullRequest:{
           reviewThreads:{pageInfo:{hasNextPage:false},
                          nodes:[$t[].data.repository.pullRequest.reviewThreads.nodes[]]},
@@ -250,8 +250,8 @@ query($id:ID!,$endCursor:String){
             echo "STOP: could not read the comments of thread ${tid} for #${PR}: ${TC_PAGES}" >&2
             exit 2
         fi
-        if ! RAW=$(printf '%s' "$RAW" | jq \
-                --arg id "$tid" --argjson tc "$TC_PAGES" '
+        if ! RAW=$(printf '%s\n%s\n' "$RAW" "$TC_PAGES" | jq -s \
+                --arg id "$tid" '.[1] as $tc | .[0] |
             .data.repository.pullRequest.reviewThreads.nodes |= map(
               if .id == $id
               then .comments = {pageInfo:{hasNextPage:false},
