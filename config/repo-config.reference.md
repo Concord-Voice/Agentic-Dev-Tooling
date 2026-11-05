@@ -19,7 +19,7 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 | `project.fields.priority.id` + `.options{}` | string + map | — | set Priority |
 | `project.fields.size.id` + `.options{}` | string + map | — | set Size |
 | `labels.namespaces` | string[] | `["type","area","domain","release","risk","routine","workflow-validation"]` | issue-creation, pr-creation, labels rule |
-| `labels.source` | string | `.claude/rules/labels.md` (skip validation if absent) | pr-creation label validation |
+| `labels.source` | string | unset → `.claude/rules/labels.md`, validation skipped if that file is absent; set but missing → validation fails closed | pr-creation label validation |
 | `board.release_label_prefix` | string | `release:` | phase-status |
 | `board.priority_labels` | string[] | `["P1","P2","P3","P4","P5"]` | phase-status |
 | `migrations.dir` | string | `migrations/` | migration-reviewer, create-migration, protect-applied-migrations.sh |

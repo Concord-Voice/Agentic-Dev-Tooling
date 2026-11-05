@@ -110,8 +110,10 @@ _strip_code_blocks() {
             BEGIN { in_fence = 0; fence_len = 0 }
             {
                 # Strip up to 3 leading spaces for fence detection (GFM rule)
+                # (match + substr, not / ? ? ?/: mawk strips only one space with that)
                 stripped = $0
-                sub(/^ ? ? ?/, "", stripped)
+                match(stripped, /^ */)
+                if (RLENGTH <= 3) stripped = substr(stripped, RLENGTH + 1)
                 # Check if this line is a candidate fence opener/closer
                 if (match(stripped, /^```+/)) {
                     run = RLENGTH
@@ -420,16 +422,23 @@ find_project_item_id() {
 # The namespace allowlist regex is built from LABEL_NAMESPACES (default from
 # repo-config `.labels.namespaces`).
 validate_against_active_labels() {
-    local labels_file="${LABELS_FILE:-}"
+    local labels_file="${LABELS_FILE:-}" explicit=1
     if [ -z "$labels_file" ]; then
         local root configured
         root="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
-        configured="$(rc_get '.labels.source' '.claude/rules/labels.md')"
+        configured="$(rc_get '.labels.source' '')"
+        [ -n "$configured" ] || { explicit=0; configured=.claude/rules/labels.md; }
         labels_file="${root%/}/${configured}"
     fi
 
-    # Source file absent → degrade to a no-op passthrough (return success).
+    # Source file absent: a repo that never named one degrades to a passthrough.
+    # A source that was named (LABELS_FILE or .labels.source) and is missing fails
+    # closed, because passing labels through would skip the taxonomy check.
     if [ ! -f "$labels_file" ]; then
+        if [ "$explicit" = 1 ]; then
+            echo "ERROR: labels source '${labels_file}' not found; refusing to pass labels through unchecked." >&2
+            return 1
+        fi
         echo "INFO: labels source '${labels_file}' not found; skipping Active-labels validation (passthrough)." >&2
         cat
         return 0

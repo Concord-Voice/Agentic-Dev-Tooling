@@ -38,6 +38,17 @@ out3="$(parse_pr_closes "$body3")"
 echo "$out3" | grep -qx "6" || fail "parse_pr_closes should catch Fixes #6"
 echo "$out3" | grep -qx "888" && fail "parse_pr_closes leaked a 3-backtick fenced Closes #888" || true
 
+# A fence indented up to 3 spaces is a fence (GFM); mawk's `/^ ? ? ?/` stripped only one space.
+body5=$'Title\n\n   ```\n   Closes #555\n   ```\n\nCloses #7'
+out5="$(parse_pr_closes "$body5")"
+echo "$out5" | grep -qx "7" || fail "parse_pr_closes should catch Closes #7 after an indented fence"
+echo "$out5" | grep -qx "555" && fail "parse_pr_closes leaked an indented-fence Closes #555" || true
+
+# A labels source that was named but is missing fails closed: no passthrough, exit 1.
+( out="$(LABELS_FILE=/nonexistent/labels-$$.md bash -c 'source "'"$HERE"'/lib.sh"; printf "type: bug\n" | validate_against_active_labels' 2>/dev/null)" \
+    && fail "missing named labels source must exit non-zero"
+  [ -z "$out" ] || fail "missing named labels source must print nothing" )
+
 # Empty-namespace config: validate_against_active_labels degrades to passthrough no-op (no error).
 ( tmpd="$(mktemp -d)"; mkdir -p "$tmpd/.claude"
   printf '%s\n' '{ "labels": { "namespaces": [] } }' > "$tmpd/.claude/repo-config.json"
