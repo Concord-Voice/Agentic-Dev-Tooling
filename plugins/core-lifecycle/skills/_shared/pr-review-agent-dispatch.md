@@ -173,9 +173,14 @@ sensitive code in `.claude/repo-config.json`: `.red_team.critical_agent` (a bare
 `@`, resolving to `.claude/agents/<name>.md`) and `.red_team.critical_paths[]` (globs, matched
 exactly as review-pr matches `.review_agents.patterns[].glob`: a bash pattern match against each
 changed path from the repo root, where `*` also matches `/`). Read both keys from the **merge
-base**, never the head, the same way review-pr reads `.review_agents.base`: a PR must not be able to
-lower its own tier by editing them. A PR that changes either key, or the critical agent's own file,
-is T3. With `critical_agent` unset there is no T3 tier, and an unresolved Codex P0 or P1 stays T2. A T3 reached
+base**, never the head: a PR must not be able to lower its own tier by editing them. Resolve
+`MERGE_BASE_SHA` the way review-pr's agent-definition guard does, then read
+`git show "$MERGE_BASE_SHA:.claude/repo-config.json" | jq '.red_team'`. If the merge base or that
+file cannot be read, treat the PR as T3 (fail closed). A PR that changes either key, or the critical
+agent's own file, is T3. When the PR modifies `.claude/agents/<critical_agent>.md`, never dispatch
+the edited definition; that would let the PR weaken its own critical reviewer. Report the PR as
+blocked on a run of the merge-base definition or on a human security review, the same refusal
+review-pr applies to any reviewer whose definition the PR modifies. With `critical_agent` unset there is no T3 tier, and an unresolved Codex P0 or P1 stays T2. A T3 reached
 through a `@red-team` finding is evaluated **after** `@red-team` reports, so it adds the critical
 agent to the same review run rather than starting a new one. The critical agent never replaces
 `@red-team` or a domain reviewer; they still run on their own rows. If the critical agent cannot
