@@ -47,6 +47,13 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 | `quality_gate.server` | string | `none`; `sonarqube` reads the server verdict via MCP when those tools are available | verify-quality-gate |
 | `epic_linkage.enabled` | bool | `false` → parent-epic linkage skipped | dev-lifecycle |
 | `epic_linkage.epic_title_pattern` / `.epic_label` | string | `Epic: v{version} release` / `type: epic` | epic linkage |
+| `epic_linkage.version_epics` | bool | `true`; `false` → feature epics only, no missing-version-epic flag | phase-status |
+| `agents.escalation_surfaces` | string[] | `[]` | reproduce-then-fix E2: extra surfaces (for example a concurrency fence) that count as escalation-worthy |
+| `feedback_triage.public` / `.tracker` | string (`owner/repo`) | unset → Phase 0 stops | feedback-triage: public intake repo and private tracker |
+| `feedback_triage.sentinel_prefix` | string | `feedback-triage` | feedback-triage: HTML-comment marker prefix (`<!-- {prefix}:status v1 -->`) |
+| `release.frontend_dir` / `.backend_dir` | string | `frontend` / `backend` | release-checklist |
+| `release.tag_prefix` | string | `v` | release-checklist, release-notes |
+| `release.workflow` | string | `release.yml` | release-checklist |
 | `version_bump.enabled` | bool | `false` → version-bump step skipped | dev-lifecycle |
 | `version_bump.source_check` / `.bump_file` | string | — | version-bump handoff |
 | `branch_protection.doc_path` / `.code_owner_team` | string | optional prose substitution | enhanced-pr-review, dev-lifecycle |

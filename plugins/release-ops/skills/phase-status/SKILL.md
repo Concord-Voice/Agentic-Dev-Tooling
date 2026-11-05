@@ -129,6 +129,15 @@ Surface both kinds. A release stream with no open epic, and an epic whose childr
 are all closed but which is still open, are both planning signals worth reporting —
 not errors this skill should fix (it is read-only).
 
+**A repo can opt out of version epics.** Some repos track each version with its
+milestone and `release:` label alone, and keep epics for features. Such a repo sets
+`.epic_linkage.version_epics` to `false`. Then surface feature epics only, and do
+NOT flag a release stream that has no version epic, or suggest filing one:
+
+```bash
+VERSION_EPICS="$(rc_get '.epic_linkage.version_epics' 'true')"   # "false" = feature epics only
+```
+
 Fetch the open epics for the stream under review:
 
 ```bash

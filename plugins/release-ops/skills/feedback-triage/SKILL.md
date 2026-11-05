@@ -61,8 +61,17 @@ Resolve mode from `$ARGUMENTS` (default `auto`). **Always read [`references/auto
 ## Phase 0 — Resolve context + safety envelope (read-only)
 
 ```bash
-PUBLIC=${public:-example-org/example-repo}         # source-available feedback repo (FEEDBACK_REPO)
-TRACKER=${tracker:-example-org/example-repo-private}  # private tracker
+source scripts/repo-config.sh
+# Repo pair and sentinel prefix come from .claude/repo-config.json (.feedback_triage.*);
+# a flag still wins. A scheduled run passes no flags, so a repo that runs this routine
+# MUST set .feedback_triage.public and .tracker: the placeholders below stop the run.
+PUBLIC=${public:-$(rc_get '.feedback_triage.public' 'example-org/example-repo')}           # source-available feedback repo (FEEDBACK_REPO)
+TRACKER=${tracker:-$(rc_get '.feedback_triage.tracker' 'example-org/example-repo-private')}  # private tracker
+case "$PUBLIC $TRACKER" in *example-org/*) echo "FATAL: set .feedback_triage.public and .tracker in .claude/repo-config.json" >&2; exit 1 ;; esac
+# Sentinel prefix for every routine marker. Keep the prefix a repo already has on
+# its public issues: a renamed prefix orphans the existing status comments and the
+# pinned Known Issues issue, and the next run would duplicate them.
+SP="$(rc_get '.feedback_triage.sentinel_prefix' 'feedback-triage')"
 TODAY=$(date -u +%Y-%m-%d)
 ```
 
@@ -94,7 +103,7 @@ For each open issue derive its **state record** (see [`references/idempotency.md
 - **reporter_id** — the dedup/uniqueness key; parsed from the `report \`<token>\`` line — now the per-user HMAC correlation token (stable per user; no longer a raw UUID).
 - **managed marker** — parse the routine's status comment if present (`reports`, `consolidated`, `alpha`, `state`, `release`, `fixed_in`, `last_synced`). Absent ⇒ `state: untriaged`.
 - **human-touched?** — any non-routine maintainer comment, or a `wontfix`/`duplicate`/`invalid`/`question` label. Human-touched issues are **reported in the catalog but excluded from auto-consolidation and auto-close** — a human already exercised judgment.
-- **Routine artifacts excluded.** The routine's own pinned **Known Issues** issue (its body starts with the `<!-- feedback-triage:known-issues v1 -->` sentinel) is NOT user feedback — skip it entirely in catalog / cluster / consolidate. See [`references/known-issues.md`](references/known-issues.md).
+- **Routine artifacts excluded.** The routine's own pinned **Known Issues** issue (its body starts with the `<!-- $SP:known-issues v1 -->` sentinel, where `$SP` is the Phase 0 sentinel prefix) is NOT user feedback — skip it entirely in catalog / cluster / consolidate. See [`references/known-issues.md`](references/known-issues.md).
 
 Emit the catalog table: `# | kind | age | reporter | status | reports | alpha | flags`.
 
@@ -192,7 +201,7 @@ Respect the combined closure cap.
 
 Maintain ONE pinned **Known Issues** issue in `$PUBLIC` — the user-facing list of what's been reported and where it stands. Its body is **regenerated wholesale** each run from the per-issue marker state collected in Phases 1–6, so it's idempotent by construction (same state ⇒ same body ⇒ no edit). Full templates + create/pin/find mechanics in [`references/known-issues.md`](references/known-issues.md).
 
-1. **Locate or create.** Find the pinned issue by the `<!-- feedback-triage:known-issues v1 -->` sentinel. If absent, create it (label `documentation`, pin via the GraphQL `pinIssue` mutation) — first run only.
+1. **Locate or create.** Find the pinned issue by the `<!-- $SP:known-issues v1 -->` sentinel. If absent, create it (label `documentation`, pin via the GraphQL `pinIssue` mutation) — first run only.
 2. **Build the body** from the surviving (non-dupe, non-human-closed) catalog issues, grouped by `state`:
    - 🔧 **In progress** (`state: in-progress`) — fix underway, with target version.
    - 📋 **Tracked** (`state: tracked`, plus surviving `untriaged`) — acknowledged, with release window.

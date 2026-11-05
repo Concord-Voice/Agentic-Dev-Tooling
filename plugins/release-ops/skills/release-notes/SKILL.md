@@ -48,8 +48,15 @@ the two distinguishable.
 
 ### Step 1: Determine the range
 - If `--since` is provided, use it as the from-tag.
-- Otherwise, run `git tag --sort=-v:refname | head -2` and pick the one
-  that isn't $0 as the previous release.
+- Otherwise, list this repo's release tags and pick the one that isn't $0
+  as the previous release. The prefix comes from `.release.tag_prefix`
+  (default `v`), so a repo with other tags (for example per-component
+  prefixes) only sees its own release line:
+  ```bash
+  source scripts/repo-config.sh
+  TAG_PREFIX="$(rc_get '.release.tag_prefix' 'v')"
+  git tag -l "${TAG_PREFIX}*" --sort=-v:refname | head -2
+  ```
 - If no previous tag exists (first release), collect all commits since the repository's initial commit.
 - Print the range: `<previous>..HEAD` (or `<previous>..<target-tag>`).
 

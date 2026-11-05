@@ -15,23 +15,32 @@ allowed-tools:
 
 Release checklist for version **$0**.
 
-> Paths below use `frontend/` and `backend/` as literal stand-ins for this
-> repo's actual frontend and backend directories (e.g. `apps/desktop/` and
-> `services/api/`) — adjust every occurrence to your actual layout
-> before running these commands.
+## 0. Resolve this repo's layout
+
+Read the layout from `.claude/repo-config.json` (`.release.*`) once. Every command
+below uses these values. A repo that has not set them gets placeholders that make
+the commands fail loudly, rather than check the wrong path or match no tag.
+
+```bash
+source scripts/repo-config.sh
+FRONTEND_DIR="$(rc_get '.release.frontend_dir' 'frontend')"     # e.g. apps/desktop
+BACKEND_DIR="$(rc_get '.release.backend_dir' 'backend')"         # e.g. services/api
+TAG_PREFIX="$(rc_get '.release.tag_prefix' 'v')"                 # e.g. v, or app-v
+RELEASE_WORKFLOW="$(rc_get '.release.workflow' 'release.yml')"   # the workflow that builds the release
+git tag -l "${TAG_PREFIX}*" | head -3   # must list real tags; empty means TAG_PREFIX is wrong
+```
 
 ## 1. Version Consistency
 
-- [ ] Check current version: `cat frontend/package.json | jq .version`
-- [ ] Verify tag doesn't exist: `git tag -l "<tag-prefix>$0"` — use the repo's
-      actual release-tag scheme (e.g. `v$0`, or a prefixed `app-v$0`). Check it
-      with `git tag -l | head` first: a pattern that matches no tag in the repo
+- [ ] Check current version: `jq .version "$FRONTEND_DIR/package.json"`
+- [ ] Verify tag doesn't exist: `git tag -l "${TAG_PREFIX}$0"`. Step 0 checked that
+      the prefix matches real tags: a pattern that matches no tag in the repo
       returns empty for every version and can never fire.
-- [ ] Verify no release is published for it: `gh release view "<tag-prefix>$0"`
+- [ ] Verify no release is published for it: `gh release view "${TAG_PREFIX}$0"`
       (expect `release not found`). Do NOT check with `gh release list` or
       `GET /releases/latest` — if every release is a prerelease, that endpoint
       404s and the check proves nothing.
-- [ ] Desktop version matches: `frontend/package.json`
+- [ ] Desktop version matches: `$FRONTEND_DIR/package.json`
 
 ## 2. CI Status
 
@@ -48,8 +57,8 @@ Release checklist for version **$0**.
 
 ## 3. Test Suite
 
-- [ ] Go tests pass: `cd backend/ && go test ./... -race`
-- [ ] Frontend tests pass: `cd frontend/ && npx vitest run`
+- [ ] Go tests pass: `(cd "$BACKEND_DIR" && go test ./... -race)`
+- [ ] Frontend tests pass: `(cd "$FRONTEND_DIR" && npx vitest run)`
 - [ ] Coverage >= 80% on new code (SonarQube enforced)
 
 ## 4. Security Checks
@@ -66,19 +75,19 @@ Release checklist for version **$0**.
 
 ## 6. Build Verification
 
-- [ ] Desktop build succeeds locally: `cd frontend/ && npm run build`
-- [ ] Go build succeeds: `cd backend/ && go build ./...`
+- [ ] Desktop build succeeds locally: `(cd "$FRONTEND_DIR" && npm run build)`
+- [ ] Go build succeeds: `(cd "$BACKEND_DIR" && go build ./...)`
 
 ## 7. Release Steps
 
 Once all checks pass:
-1. Bump version in `frontend/package.json` to `$0`
+1. Bump version in `$FRONTEND_DIR/package.json` to `$0`
 2. Commit: `git commit -m "chore: bump version to $0"`
 3. Push to main and let the repo's release workflow run. If the main-branch CI
    workflow **dispatches** the release build through the REST API (rather than via
    `workflow_call`, e.g. because a called workflow cannot reach the release
    environment's secrets), the build is a separate run.
-4. Monitor build: `gh run list --branch main -L 1 --workflow <release-workflow>.yml`.
+4. Monitor build: `gh run list --branch main -L 1 --workflow "$RELEASE_WORKFLOW"`.
    **A dispatched release run is `event_name == 'workflow_dispatch'` and appears
    under the release workflow, not the dispatcher.** The dispatcher shows only its
    dispatch step, not the build/signing matrix — watching it is the common mistake.
