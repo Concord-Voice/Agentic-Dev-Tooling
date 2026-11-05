@@ -160,12 +160,23 @@ Compute three inputs on the head, then take the **highest** tier whose condition
 
 | Tier | Condition | `@red-team` |
 |---|---|---|
+| **T3 Critical** (only when `.red_team.critical_agent` is set) | Codex Security has an unresolved P0 or P1 on the head; OR a changed file matches `.red_team.critical_paths[]`; OR `@red-team` returns a PROVEN CRITICAL or HIGH finding | Mandatory, **plus** the critical agent |
 | **T2 Elevated** | Codex Security did not cover the head; OR it left an unresolved P0, P1 or P2; OR any primary signal; OR two or more secondary signals | Mandatory |
 | **T1 Guarded** | Codex Security covered the head with nothing above P3, no primary signal, exactly one secondary signal | Optional (recommended) |
 | **T0 Clear** | Codex Security covered the head with nothing above P3, and no risk signal | Optional |
 
 The primary signals reproduce `@red-team`'s unconditional trigger, so Codex coverage can only make
 it optional on a PR that touches none of those surfaces.
+
+**T3 and the critical agent.** A repo may name a second, deeper red-team agent for its most
+sensitive code in `.claude/repo-config.json`: `.red_team.critical_agent` (agent name) and
+`.red_team.critical_paths[]` (globs, same syntax as `.review_agents.patterns[].glob`). With
+`critical_agent` unset there is no T3 tier, and an unresolved Codex P0 or P1 stays T2. A T3 reached
+through a `@red-team` finding is evaluated **after** `@red-team` reports, so it adds the critical
+agent to the same review run rather than starting a new one. The critical agent never replaces
+`@red-team` or a domain reviewer; they still run on their own rows. If the critical agent cannot
+run on the current harness, report the PR as blocked on a run of that agent. Do not substitute
+another agent or model.
 
 ## Agent names in GitHub posts
 
