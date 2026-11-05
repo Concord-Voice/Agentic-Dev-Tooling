@@ -36,10 +36,10 @@ Re-pinning an already-pinned issue is a safe no-op. If all 3 pin slots are taken
 
 ## Body template (regenerated wholesale each run)
 
-The first line is the sentinel with the repo's prefix (`$SP`); the default is shown.
+The first line is the sentinel: write it with the resolved `$SP` value (default `feedback-triage`), never the literal default.
 
 ```markdown
-<!-- feedback-triage:known-issues v1 -->
+<!-- $SP:known-issues v1 -->
 # 📋 Known Issues
 
 **Before filing a bug or feature request, please check this list.** If your issue is here, we're already aware and tracking it — 👍 the linked issue to add your vote (it helps us prioritize). This list is maintained automatically and refreshed daily.

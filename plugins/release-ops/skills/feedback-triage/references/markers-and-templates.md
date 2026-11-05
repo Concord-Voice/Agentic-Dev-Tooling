@@ -8,10 +8,10 @@ The public repo is source-available; the reporter's words are theirs. The routin
 
 ## The managed status comment
 
-Sentinel (first line, exact) lets the routine locate its comment among all comments. It uses the Phase 0 prefix `$SP` (default `feedback-triage`, shown here):
+Sentinel (first line, exact) lets the routine locate its comment among all comments. It uses the Phase 0 prefix `$SP` (default `feedback-triage`); write it with the resolved value:
 
 ```markdown
-<!-- feedback-triage:status v1 -->
+<!-- $SP:status v1 -->
 ### 🛰️ Feedback triage status
 
 👥 **Reported by 3 user(s)** · 📌 Tracked as `example-repo-private#1234` · 🗓️ Tracked for **an upcoming Beta update**

@@ -63,17 +63,22 @@ Resolve mode from `$ARGUMENTS` (default `auto`). **Always read [`references/auto
 ## Phase 0 — Resolve context + safety envelope (read-only)
 
 ```bash
-source "$(git rev-parse --show-toplevel)/scripts/repo-config.sh" || { echo "FATAL: scripts/repo-config.sh not found" >&2; exit 1; }
+# On any FATAL below, stop the skill and report it. The snippet uses `return`
+# so it ends the snippet without killing a sourced or shared shell.
+source "$(git rev-parse --show-toplevel)/scripts/repo-config.sh" || { echo "FATAL: scripts/repo-config.sh not found" >&2; return 1 2>/dev/null || exit 1; }
 # Repo pair and sentinel prefix come from .claude/repo-config.json (.feedback_triage.*);
-# a flag still wins. A scheduled run passes no flags, so a repo that runs this routine
-# MUST set .feedback_triage.public and .tracker: the placeholders below stop the run.
+# a flag (--public / --tracker, or a repo named in the request) still wins. A scheduled
+# run passes no flags, so a repo that runs this routine MUST set .feedback_triage.public
+# and .tracker. The example-org placeholders are allowed only in --mode=dry-run (read-only).
 PUBLIC=${public:-$(rc_get '.feedback_triage.public' 'example-org/example-repo')}           # source-available feedback repo (FEEDBACK_REPO)
 TRACKER=${tracker:-$(rc_get '.feedback_triage.tracker' 'example-org/example-repo-private')}  # private tracker
 # Fail closed: an empty, placeholder, malformed or identical pair would send private
 # tracker detail to the public repo (gh -R "" falls back to the current checkout).
 nwo='^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'
-if [[ ! $PUBLIC =~ $nwo || ! $TRACKER =~ $nwo || $PUBLIC == example-org/* || $TRACKER == example-org/* || $PUBLIC == "$TRACKER" ]]; then
-  echo "FATAL: set .feedback_triage.public and .tracker (owner/repo, different repos) in .claude/repo-config.json" >&2; exit 1
+placeholder=0; [[ $PUBLIC == example-org/example-repo || $TRACKER == example-org/example-repo-private ]] && placeholder=1
+if [[ ! $PUBLIC =~ $nwo || ! $TRACKER =~ $nwo || $PUBLIC == "$TRACKER" ]] || { [ "$placeholder" = 1 ] && [ "${mode:-auto}" != dry-run ]; }; then
+  echo "FATAL: set .feedback_triage.public and .tracker (owner/repo, different repos) in .claude/repo-config.json, or pass --public/--tracker" >&2
+  return 1 2>/dev/null || exit 1
 fi
 # Sentinel prefix for every routine marker. Keep the prefix a repo already has on
 # its public issues: a renamed prefix orphans the existing status comments and the
