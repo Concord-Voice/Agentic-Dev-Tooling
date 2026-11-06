@@ -17,9 +17,9 @@
 #   PRIORITY_FIELD_ID / OWNER / REPO_NAME / LABELS_FILE / LABEL_NAMESPACES.
 
 # Source the shared repo-config reader (best-effort; absent => helpers degrade).
-# Installed, it lives at <repo>/scripts/repo-config.sh; in this tooling repo it is two levels up.
+# Installed, it lives at <repo>/scripts/repo-config.sh; in this tooling repo it is four levels up.
 _rc_helper="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/repo-config.sh"
-[ -f "$_rc_helper" ] || _rc_helper="$(dirname "${BASH_SOURCE[0]}")/../../scripts/repo-config.sh"
+[ -f "$_rc_helper" ] || _rc_helper="$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/repo-config.sh"
 # shellcheck disable=SC1090,SC1091 # path resolved at runtime
 source "$_rc_helper" 2>/dev/null || true
 unset _rc_helper
@@ -428,7 +428,13 @@ validate_against_active_labels() {
     if [ -z "$labels_file" ]; then
         local root configured
         root="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
-        configured="$(rc_get '.labels.source' '')"
+        # Without the helper (a --user or plugin-only install) read the key directly,
+        # so a named source still fails closed instead of degrading to passthrough.
+        if declare -F rc_get >/dev/null; then
+            configured="$(rc_get '.labels.source' '')"
+        else
+            configured="$(jq -r '.labels.source // empty' "${root%/}/.claude/repo-config.json" 2>/dev/null || true)"
+        fi
         [[ -n "$configured" ]] || { explicit=0; configured=.claude/rules/labels.md; }
         labels_file="${root%/}/${configured}"
     fi

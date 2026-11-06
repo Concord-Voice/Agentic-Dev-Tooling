@@ -49,6 +49,13 @@ echo "$out5" | grep -qx "555" && fail "parse_pr_closes leaked an indented-fence 
     && fail "missing named labels source must exit non-zero"
   [[ -z "$out" ]] || fail "missing named labels source must print nothing" )
 
+# Same, when the source is named in repo-config and the reader helper is absent.
+( tmpd="$(mktemp -d)"; mkdir -p "$tmpd/.claude"
+  printf '%s\n' '{ "labels": { "source": "nope.md" } }' > "$tmpd/.claude/repo-config.json"
+  REPO_ROOT="$tmpd" bash -c 'source "'"$HERE"'/lib.sh"; unset -f rc_get; printf "type: bug\n" | validate_against_active_labels' >/dev/null 2>&1 \
+    && fail "named-but-missing source must fail closed without the rc_get helper"
+  rm -rf "$tmpd" )
+
 # Empty-namespace config: validate_against_active_labels degrades to passthrough no-op (no error).
 ( tmpd="$(mktemp -d)"; mkdir -p "$tmpd/.claude"
   printf '%s\n' '{ "labels": { "namespaces": [] } }' > "$tmpd/.claude/repo-config.json"
