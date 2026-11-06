@@ -603,7 +603,7 @@ If `yes — process HIGH now`: skip directly to Phase 4 with only the HIGH-confi
 
 If `no — wait`: print the resume command and exit.
 
-If a Copilot review request fails (auth issue, repo billing, API hiccup): surface the error, name the affected PR, and offer fallbacks — (a) retry, (b) skip Copilot and dispatch the specialist subagents directly for that PR (per `_shared/pr-review-agent-dispatch.md`; the model cannot invoke the user-only review skill), or (c) defer to manual review by the developer in the GitHub UI.
+If a Copilot review request fails (auth issue, repo billing, API hiccup): surface the error, name the affected PR, and offer fallbacks — (a) retry, (b) skip Copilot and dispatch the specialist subagents directly for that PR (per `_shared/pr-review-agent-dispatch.md`, unioned with the repo's `.claude/repo-config.json` `.review_agents`; the model cannot invoke the user-only review skill), or (c) defer to manual review by the developer in the GitHub UI.
 
 ---
 
