@@ -23,12 +23,13 @@ below uses these values. A repo that has not set them gets generic defaults
 repo before running anything below: a default can name a real but wrong path.
 
 ```bash
-source "$(git rev-parse --show-toplevel)/scripts/repo-config.sh" || exit 1
+source "$(git rev-parse --show-toplevel)/scripts/repo-config.sh" || exit 1   # no helper? install it, or set these by hand
 FRONTEND_DIR="$(rc_get '.release.frontend_dir' 'frontend')"     # e.g. apps/desktop
 BACKEND_DIR="$(rc_get '.release.backend_dir' 'backend')"         # e.g. services/api
 TAG_PREFIX="$(rc_get '.release.tag_prefix' 'v')"                 # e.g. v, or app-v
 RELEASE_WORKFLOW="$(rc_get '.release.workflow' 'release.yml')"   # the workflow that builds the release
 echo "frontend=$FRONTEND_DIR backend=$BACKEND_DIR tag_prefix=$TAG_PREFIX workflow=$RELEASE_WORKFLOW"
+for d in "$FRONTEND_DIR" "$BACKEND_DIR"; do [ -n "$d" ] && [ -d "$d" ] || echo "WARN: release dir '$d' not found; set .release.*_dir"; done
 git tag -l "${TAG_PREFIX}*" | head -3   # must list real tags; empty means TAG_PREFIX is wrong
 ```
 
@@ -71,7 +72,7 @@ git tag -l "${TAG_PREFIX}*" | head -3   # must list real tags; empty means TAG_P
 
 ## 5. Documentation
 
-- [ ] CHANGELOG.md updated for v$0
+- [ ] CHANGELOG.md updated for ${TAG_PREFIX}$0 (`$0` is the bare version, without the prefix)
 - [ ] CLAUDE.md counts current (migrations, stores, routes)
 - [ ] API docs reflect any new endpoints
 

@@ -55,8 +55,10 @@ the two distinguishable.
   (default `v`), so a repo with other tags (for example per-component
   prefixes) only sees its own release line:
   ```bash
-  source "$(git rev-parse --show-toplevel)/scripts/repo-config.sh" || exit 1
-  TAG_PREFIX="$(rc_get '.release.tag_prefix' 'v')"
+  # The helper is optional here (a --user install has none); default to v.
+  RC="$(git rev-parse --show-toplevel)/scripts/repo-config.sh"
+  if [ -f "$RC" ]; then source "$RC"; TAG_PREFIX="$(rc_get '.release.tag_prefix' 'v')"; fi
+  TAG_PREFIX="${TAG_PREFIX:-v}"
   TAGS="$(git tag -l "${TAG_PREFIX}*" --sort=-v:refname)"
   # A repo with bare tags (1.2.3) and no .release.tag_prefix would otherwise
   # find nothing and treat this as a first release.

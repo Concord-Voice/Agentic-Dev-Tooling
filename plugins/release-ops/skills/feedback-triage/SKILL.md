@@ -75,8 +75,9 @@ TRACKER=${tracker:-$(rc_get '.feedback_triage.tracker' 'example-org/example-repo
 # Fail closed: an empty, placeholder, malformed or identical pair would send private
 # tracker detail to the public repo (gh -R "" falls back to the current checkout).
 nwo='^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'
+PUBLIC=${PUBLIC%.git}; TRACKER=${TRACKER%.git}   # GitHub names ignore case and a .git suffix
 placeholder=0; [[ $PUBLIC == example-org/example-repo || $TRACKER == example-org/example-repo-private ]] && placeholder=1
-if [[ ! $PUBLIC =~ $nwo || ! $TRACKER =~ $nwo || $PUBLIC == "$TRACKER" ]] || { [ "$placeholder" = 1 ] && [ "${mode:-auto}" != dry-run ]; }; then
+if [[ ! $PUBLIC =~ $nwo || ! $TRACKER =~ $nwo || ${PUBLIC,,} == "${TRACKER,,}" ]] || { [ "$placeholder" = 1 ] && [ "${mode:-auto}" != dry-run ]; }; then
   echo "FATAL: set .feedback_triage.public and .tracker (owner/repo, different repos) in .claude/repo-config.json, or pass --public/--tracker" >&2
   return 1 2>/dev/null || exit 1
 fi
@@ -84,6 +85,9 @@ fi
 # its public issues: a renamed prefix orphans the existing status comments and the
 # pinned Known Issues issue, and the next run would duplicate them.
 SP="$(rc_get '.feedback_triage.sentinel_prefix' 'feedback-triage')"
+# An empty or odd prefix would miss existing markers (duplicating them) or close the
+# HTML comment early (exposing the marker text), so fail closed.
+[[ $SP =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "FATAL: .feedback_triage.sentinel_prefix must match ^[a-z0-9][a-z0-9-]*\$" >&2; return 1 2>/dev/null || exit 1; }
 TODAY=$(date -u +%Y-%m-%d)
 ```
 
