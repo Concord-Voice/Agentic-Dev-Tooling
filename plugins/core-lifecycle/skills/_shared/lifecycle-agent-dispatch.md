@@ -98,7 +98,9 @@ application). One agent, one criteria set, four dispatch points.
 it.** The table answers *which surface*; these answer *which tier of that
 surface*. A task that resolves to `@test-writer`, `@database-migration`,
 `@docs-writer`, `@architect`, or `@researcher` is not eligible — escalation
-substitutes only for `@backend-developer` / `@frontend-developer`.
+substitutes only for `@backend-developer` / `@frontend-developer`, or for a
+producer named by a repo row (`.agents.producer_rows`) that is not one of those
+five.
 
 | # | Criterion | Escalate when |
 |---|---|---|
@@ -198,7 +200,7 @@ first match.
 | # | Task touches | Agent |
 |---|---|---|
 | 1 | Test authoring or coverage remediation, in ANY surface (`**/*_test.go`, `**/*.test.ts(x)`, `**/tests/**`) | `@test-writer` |
-| 2 | `src/backend/migrations/**` (adjust to your layout; authoring a migration) | `@database-migration` |
+| 2 | Authoring a migration: any path under `rc_get '.migrations.dir' 'migrations/'` | `@database-migration` |
 | 3 | `src/frontend/**`, `src/admin/**` (adjust to your layout) | `@frontend-developer` |
 | 4 | `src/backend/**`, `src/media/**` (adjust to your layout), `infrastructure/**`, `.github/workflows/**` | `@backend-developer` |
 | 5 | Documentation that must ship with this change | `@docs-writer` |
@@ -210,11 +212,13 @@ first match.
 After rows 1 and 2 (test authoring and migrations keep their owners), check the repo
 rows top to bottom and dispatch the first whose globs match the task's paths; only when
 none matches do rows 3 onward apply. `rc_get` returns the array as JSON text; parse
-it with `jq`. `agent` is a bare name (no `@`, no `/`) resolving to
-`.claude/agents/<name>.md`, and `match` globs use the same `**` dialect as the rows
-above. A row that is malformed (missing or non-array `match`, missing or non-bare
-`agent`) or whose agent file is absent is skipped and named in the dispatch line,
-never silently dropped. This is how a repo routes a surface to its own producer (for example CI and
+it with `jq`. A value that is not an array is ignored and named in the dispatch
+line. `agent` must match `^[a-z0-9][a-z0-9-]*$` (the same rule as
+`pr-review-agent-dispatch.md`) and resolves to `.claude/agents/<name>.md`; `match`
+globs use the same `**` dialect as the rows above. A row that is malformed (missing
+or non-array `match`, missing `agent`, or an `agent` that fails the pattern) or whose
+agent file is absent is skipped and named in the dispatch line, never silently
+dropped. This is how a repo routes a surface to its own producer (for example CI and
 infrastructure to a dedicated DevOps agent) without editing this shared file.
 
 **A path no row names is a gap, not a free choice.** If the repo has a surface no
@@ -232,7 +236,8 @@ production code to make a test pass — a recorded failure mode.
 
 **Then check E1-E4.** When row 3, row 4 or a repo row matched, evaluate the escalation
 criteria above; if one fires, handle it per § Escalation. Rows 1, 2, 5, 6 and 7
-are not eligible for escalation. A task whose
+are not eligible for escalation, and neither is a repo row whose agent is one of
+the ineligible agents § Escalation lists. A task whose
 *shape* is defect repair rather than construction routes to `/reproduce-then-fix`
 before any of this — that is a skill dispatch, decided in `/dev-lifecycle` Phase
 3, and the agent selection here happens inside it.
@@ -243,7 +248,7 @@ before any of this — that is a skill dispatch, decided in `/dev-lifecycle` Pha
 
 | Condition | Agent |
 |---|---|
-| Verification fails and the cause is not obvious | `@backend-developer` or `@frontend-developer` (by surface) — systematic debugging, then fix |
+| Verification fails and the cause is not obvious | `@backend-developer` or `@frontend-developer` (by surface), or the repo-row producer that owns the surface — systematic debugging, then fix |
 | The same verification failure survives a second producer return, or the failing surface is an E2 surface | Escalate per § Escalation — E4 (bounce) or E2. Pass both prior attempts into the prompt |
 | Coverage below the repo's new-code gate (`.quality_gate.coverage_min`) | `@test-writer` |
 | Issue carries `risk: security`, OR the diff touches auth / crypto / E2EE / RBAC / IPC / an outbound-request path | **`@red-team`** — adversarial pass with executable PoCs, *before* the PR exists |
