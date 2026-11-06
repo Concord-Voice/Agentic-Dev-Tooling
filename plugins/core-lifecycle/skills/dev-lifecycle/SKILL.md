@@ -2923,7 +2923,7 @@ Typical shapes, for orientation (map them to the repo's own workflow names):
 | Deploy / CD | per the repo's trigger — on push, or dispatched by a scheduled job; path scoping is often a JOB-level condition inside the run | **production services** — user-visible |
 | Release build | dispatched only when a release is pending and the merge is meant to cut it (e.g. a `risk: hotfix` merge); otherwise by a scheduled (e.g. nightly) job | release cut; a stranded version bump |
 | Release-asset sync | dispatched by the release build after a successful release | update-server assets — user-visible |
-| Public-mirror / docs publish | every merge, if it has an unconditional `push` trigger; may also trigger on `release: published` | public repo / site rebuild |
+| Public-mirror / docs publish | every merge, if it has an unconditional `push` trigger; may also trigger when a release is published (`on: release`, `types: [published]`) | public repo / site rebuild |
 
 A pending version bump that produces **no** release-build run is the stranded-release
 signature — but **only when the release was supposed to be cut by THIS merge.** In a repo where

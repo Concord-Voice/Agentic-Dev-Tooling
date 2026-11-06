@@ -603,7 +603,7 @@ If `yes — process HIGH now`: skip directly to Phase 4 with only the HIGH-confi
 
 If `no — wait`: print the resume command and exit.
 
-If a Copilot review request fails (auth issue, repo billing, API hiccup): surface the error, name the affected PR, and offer fallbacks — (a) retry, (b) skip Copilot and dispatch `/review-pr` instead for that PR (subagent-based review using the repo's existing agent table), or (c) defer to manual review by the developer in the GitHub UI.
+If a Copilot review request fails (auth issue, repo billing, API hiccup): surface the error, name the affected PR, and offer fallbacks — (a) retry, (b) skip Copilot and dispatch the specialist subagents directly for that PR (per `_shared/pr-review-agent-dispatch.md`, unioned with the repo's `.claude/repo-config.json` `.review_agents`; the model cannot invoke the user-only review skill), or (c) defer to manual review by the developer in the GitHub UI.
 
 ---
 
@@ -658,7 +658,7 @@ Proceed? [merge / fix in-PR / hold]
 
 **Tier C → full deep-review dispatch.** For major version bumps and framework changes, the lighter inline triage is insufficient. Invoke the repo's configured deep-review skill via the Skill tool — `$DEEP_REVIEW_SKILL <PR>` (from Phase 0; default `/enhanced-pr-review <PR>`). That skill is designed precisely for this — it fetches all bot-authored review comments via author-type filter, dispatches the repo's declared specialist subagents (`.review_agents`) directly to add coverage, auto-triages known patterns, and presents a unified triage table.
 
-If `.weekly_deps.deep_review_skill` is unset AND `/enhanced-pr-review` is not available in the repo, fall back to dispatching the specialist suite directly (per `_shared/pr-review-agent-dispatch.md`); if no reviewer agents exist at all, hand the PR to the developer for manual review (they can run `/review-pr <PR>` themselves — it is user-invoked only).
+If `.weekly_deps.deep_review_skill` is unset AND `/enhanced-pr-review` is not available in the repo, fall back to dispatching the specialist suite directly (per `_shared/pr-review-agent-dispatch.md`); if no reviewer agents exist at all, hand the PR to the developer for manual review (they can run `/review-pr <PR>` themselves — it is user-invoked only). <!-- dispatch-lint:ok — a user-facing suggestion, not a model dispatch -->
 
 Do NOT substitute inline gh commands or a single dispatched agent for the deep-review skill here — the DISPATCH-GATE at the top of this skill applies. The deep-review skill owns the execution; `weekly-deps` owns the sequencing.
 
