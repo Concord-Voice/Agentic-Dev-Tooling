@@ -1468,9 +1468,42 @@ verification is worse than one that admits it.
 **MANDATORY when the repo ships one — count-drift probe.** Some repos keep metric counts (e.g. a
 "Key Counts" block in `CLAUDE.md`: migrations, routes, stores, test files, packages) that go stale
 on *code* changes, while the `docs-reviewer` agent that normally catches this only runs when a PR
-touches **doc** surfaces — so a code-only PR can silently desync the counts. When the repo
-provides a count-refresh script, run its dry-run whenever this branch's diff touches a
-**count-bearing surface**, regardless of whether any `.md` file changed. If the dry-run diff is
+touches **doc** surfaces — so a code-only PR can silently desync the counts. A repo names its
+count-refresh script in `.claude/repo-config.json` `.docs.counts_script` (dry-run with no
+arguments, `--apply` to write) and the paths that feed it in `.docs.count_globs[]`. When the
+script is set, run its dry-run whenever this branch's diff touches one of those globs (empty or
+unset `count_globs` → every PR), regardless of whether any `.md` file changed.
+
+The script is code the reviewer runs, so a PR must not be able to choose or rewrite it. Read the
+keys (`counts_script` and `count_globs`) from the merge base with the default branch, not the checkout, and run it only when it is a
+tracked repo-relative file this branch leaves unchanged. That guarantee covers the script file
+only: it must be self-contained, and must not source or call other repo files a PR could edit.
+
+```bash
+ROOT="$(git rev-parse --show-toplevel)"
+MB="$(git -C "$ROOT" merge-base HEAD "origin/${DEFAULT_BRANCH}")"
+MB_CFG=""   # without a merge base, `git show :path` would read the PR's own index
+[ -n "$MB" ] && MB_CFG="$(git -C "$ROOT" show "$MB:.claude/repo-config.json" 2>/dev/null)"
+COUNTS_SCRIPT="$(jq -r '.docs.counts_script // empty' <<<"$MB_CFG" 2>/dev/null)"
+mapfile -t COUNT_GLOBS < <(jq -r '.docs.count_globs // [] | .[]' <<<"$MB_CFG" 2>/dev/null)
+if [ -z "$MB" ]; then
+  echo "WARN: count-drift probe skipped: no merge base with origin/${DEFAULT_BRANCH}" >&2
+elif [ -z "$COUNTS_SCRIPT" ]; then
+  echo "count-drift probe: skipped (no .docs.counts_script)"
+elif [ "${#COUNT_GLOBS[@]}" -gt 0 ] \
+     && [ -z "$(git -C "$ROOT" diff --name-only "$MB" -- "${COUNT_GLOBS[@]/#/:(glob)}")" ]; then
+  echo "count-drift probe: skipped (no change under .docs.count_globs)"
+elif [[ $COUNTS_SCRIPT == /* || $COUNTS_SCRIPT == *..* ]] \
+     || [ "$(git -C "$ROOT" cat-file -t "$MB:$COUNTS_SCRIPT" 2>/dev/null)" != blob ] \
+     || ! git -C "$ROOT" diff --quiet "$MB" -- ":/$COUNTS_SCRIPT"; then   # working tree vs merge base
+  echo "WARN: count-drift probe skipped: $COUNTS_SCRIPT is not a tracked file unchanged by this branch" >&2
+else
+  (cd "$ROOT" && "./$COUNTS_SCRIPT")   # dry-run; a non-empty diff is the finding
+fi
+```
+
+A skip with a WARN means the probe did not run: say so in the PR, never report it as clean. If
+the dry-run diff is
 **non-empty**, the count is stale and the refresh is **non-deferrable — it lands in THIS PR**,
 never a follow-up (a numeric/metadata count is in scope exactly like behavior-describing prose).
 

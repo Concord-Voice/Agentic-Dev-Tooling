@@ -17,9 +17,9 @@
 #   PRIORITY_FIELD_ID / OWNER / REPO_NAME / LABELS_FILE / LABEL_NAMESPACES.
 
 # Source the shared repo-config reader (best-effort; absent => helpers degrade).
-# Installed, it lives at <repo>/scripts/repo-config.sh; in this tooling repo it is two levels up.
+# Installed, it lives at <repo>/scripts/repo-config.sh; in this tooling repo it is four levels up.
 _rc_helper="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/repo-config.sh"
-[ -f "$_rc_helper" ] || _rc_helper="$(dirname "${BASH_SOURCE[0]}")/../../scripts/repo-config.sh"
+[ -f "$_rc_helper" ] || _rc_helper="$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/repo-config.sh"
 # shellcheck disable=SC1090,SC1091 # path resolved at runtime
 source "$_rc_helper" 2>/dev/null || true
 unset _rc_helper
@@ -110,8 +110,10 @@ _strip_code_blocks() {
             BEGIN { in_fence = 0; fence_len = 0 }
             {
                 # Strip up to 3 leading spaces for fence detection (GFM rule)
+                # (match + substr, not / ? ? ?/: mawk strips only one space with that)
                 stripped = $0
-                sub(/^ ? ? ?/, "", stripped)
+                match(stripped, /^ */)
+                if (RLENGTH <= 3) stripped = substr(stripped, RLENGTH + 1)
                 # Check if this line is a candidate fence opener/closer
                 if (match(stripped, /^```+/)) {
                     run = RLENGTH
@@ -409,9 +411,11 @@ find_project_item_id() {
 #   <repo-root>/.claude/rules/labels.md.
 # Deprecated labels are dropped with a stderr WARN.
 #
-# Graceful degradation: when the labels source file is ABSENT, this is a NO-OP —
-# every candidate label is passed through unchanged and the function returns
-# success. (A repo may legitimately not maintain a curated labels.md.)
+# Graceful degradation: when NO labels source was named (no $LABELS_FILE, no
+# repo-config `.labels.source`) and the default .claude/rules/labels.md is ABSENT,
+# this is a NO-OP passthrough that returns success. (A repo may legitimately not
+# maintain a curated labels.md.) When a source WAS named and is missing, it fails
+# closed (exit 1, no output) so the taxonomy check is not silently skipped.
 #
 # When the source file EXISTS but its Active section is empty/malformed, that's a
 # real misconfiguration: return exit 1 rather than silently passing through
@@ -420,16 +424,29 @@ find_project_item_id() {
 # The namespace allowlist regex is built from LABEL_NAMESPACES (default from
 # repo-config `.labels.namespaces`).
 validate_against_active_labels() {
-    local labels_file="${LABELS_FILE:-}"
+    local labels_file="${LABELS_FILE:-}" explicit=1
     if [ -z "$labels_file" ]; then
         local root configured
         root="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
-        configured="$(rc_get '.labels.source' '.claude/rules/labels.md')"
+        # Without the helper (a --user or plugin-only install) read the key directly,
+        # so a named source still fails closed instead of degrading to passthrough.
+        if declare -F rc_get >/dev/null; then
+            configured="$(rc_get '.labels.source' '')"
+        else
+            configured="$(jq -r '.labels.source // empty' "${root%/}/.claude/repo-config.json" 2>/dev/null || true)"
+        fi
+        [[ -n "$configured" ]] || { explicit=0; configured=.claude/rules/labels.md; }
         labels_file="${root%/}/${configured}"
     fi
 
-    # Source file absent → degrade to a no-op passthrough (return success).
+    # Source file absent: a repo that never named one degrades to a passthrough.
+    # A source that was named (LABELS_FILE or .labels.source) and is missing fails
+    # closed, because passing labels through would skip the taxonomy check.
     if [ ! -f "$labels_file" ]; then
+        if [[ "$explicit" == 1 ]]; then
+            echo "ERROR: labels source '${labels_file}' not found; refusing to pass labels through unchecked." >&2
+            return 1
+        fi
         echo "INFO: labels source '${labels_file}' not found; skipping Active-labels validation (passthrough)." >&2
         cat
         return 0

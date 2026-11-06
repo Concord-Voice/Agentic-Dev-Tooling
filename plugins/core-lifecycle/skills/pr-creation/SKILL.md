@@ -25,7 +25,8 @@ config reader and defaults its env vars from it.
 
 **Canonical reference (labels):** the labels source file (config `.labels.source`,
 default `.claude/rules/labels.md`) — label inheritance is validated against its Active section
-when the file exists. If the file is absent, validation degrades to passthrough.
+when the file exists. If no source is configured and the default file is absent, validation
+degrades to passthrough; a configured source that is missing fails closed.
 
 **Catalog Dispatch:** when this repo defines a shared dispatchable-skills catalog
 (`.claude/skills/_shared/dispatchable-skills.md`), this skill's catalog obligation is narrow — it
@@ -67,7 +68,7 @@ If `$CLOSES` is empty: emit a warning and skip Phase 3a (no issue Status to chan
 
 ### Phase 2 — Inherit labels from issue(s)
 
-Union of labels across all closing-referenced AND refs-referenced issues. Filter out `routine:*`, `type: epic`, and `risk: hotfix`, then validate against the Active labels section in the configured labels source (`.labels.source`, default `.claude/rules/labels.md`). When that file is absent, `validate_against_active_labels` passes labels through unchanged.
+Union of labels across all closing-referenced AND refs-referenced issues. Filter out `routine:*`, `type: epic`, and `risk: hotfix`, then validate against the Active labels section in the configured labels source (`.labels.source`, default `.claude/rules/labels.md`). When no labels source is configured and the default file is absent, `validate_against_active_labels` passes labels through unchanged; a configured source (`LABELS_FILE` or `.labels.source`) that is missing fails closed (exit 1).
 
 > **`risk: hotfix` is filtered for a different reason than the other two.** They are semantically wrong on a PR; this one is a *release control* in repos that define it — on a PR it cuts a release the moment it merges, bypassing the scheduled blocking-red gate, so it can ship on a red suite. On the issue it meant only "this problem is urgent", decided at triage. Inheriting would turn a weeks-old triage opinion into an ungated release nobody chose. The skill warns and prints the exact `gh pr edit` command instead, so a person decides at PR time.
 
