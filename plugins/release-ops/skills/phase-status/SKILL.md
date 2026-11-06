@@ -117,7 +117,7 @@ red flag during planning — call them out.
 ### Step 5.5: Surface open epics
 
 Epics are first-class tracking artifacts. Per `.claude/rules/release-tracking-epics.md`
-(installed by `install.sh claude`) the convention is **one release epic per semver
+(installed by `install.sh claude`; a repo may skip it and set `.epic_linkage.version_epics: false`) the convention is **one release epic per semver
 bump** — titled `Epic: vX.Y.Z release`, carrying `type: epic` plus the release label,
 and sitting on that version's milestone — with **feature** epics alongside them. A
 repo can override the title pattern and label via `.claude/repo-config.json`

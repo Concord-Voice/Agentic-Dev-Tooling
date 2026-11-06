@@ -149,7 +149,7 @@ Fetch the issue and check for child issues:
 gh issue view $0 --json body,title,state,labels --jq '{title: .title, state: .state, labels: [.labels[].name], body: .body}'
 ```
 
-Check for children: native sub-issues first (REST `/sub_issues`, per `.claude/rules/release-tracking-epics.md`), then legacy checkbox references only when there are none:
+Check for children: native sub-issues first (REST `/sub_issues`, see `.claude/rules/release-tracking-epics.md` where the repo installs it), then legacy checkbox references only when there are none:
 
 ```bash
 CHILDREN=$(gh api --paginate "repos/{owner}/{repo}/issues/$0/sub_issues?per_page=100" --jq '.[].number')
@@ -1446,6 +1446,11 @@ theme definition — run the app and look at the change before the PR exists:
    (e.g. a main client and an admin portal), each usually has its own launcher, and one does
    not cover the other.** Using the main client's dev script for an admin-only change captures
    an unrelated or stale UI — which is worse than no capture, because it looks like evidence.
+   A repo names each launcher in `.visual.launch[]` (`{"match": [<globs>], "dir": "<path>",
+   "cmd": "<command>", "note": "<text>"}`): use the entry whose globs match the changed files,
+   run `cmd` in `dir`, and show its `note` (for example "the dev stack does not serve this
+   portal"). No entry matches → fall back to `/run` or the repo's documented path, and say which
+   in the PR body.
 
    `/run` is a Claude Code built-in, not an in-repo skill, so it is absent on the mirrored
    surfaces; see the PRIMITIVE-AVAILABILITY table above.
@@ -1475,9 +1480,11 @@ script is set, run its dry-run whenever this branch's diff touches one of those 
 unset `count_globs` → every PR), regardless of whether any `.md` file changed.
 
 The script is code the reviewer runs, so a PR must not be able to choose or rewrite it. Read the
-keys (`counts_script` and `count_globs`) from the merge base with the default branch, not the checkout, and run it only when it is a
-tracked repo-relative file this branch leaves unchanged. That guarantee covers the script file
-only: it must be self-contained, and must not source or call other repo files a PR could edit.
+keys (`counts_script`, `count_globs` and `counts_script_deps`) from the merge base with the default branch, not the checkout, and run it only when it is a
+tracked repo-relative file this branch leaves unchanged. A script that sources or calls other
+repo files lists them (files or directories) in `.docs.counts_script_deps[]`; the probe also
+refuses when this branch changes or adds anything under them. Anything else the script runs is
+unguarded, so it must not call other repo files a PR could edit.
 
 ```bash
 ROOT="$(git rev-parse --show-toplevel)"
@@ -1486,6 +1493,7 @@ MB_CFG=""   # without a merge base, `git show :path` would read the PR's own ind
 [ -n "$MB" ] && MB_CFG="$(git -C "$ROOT" show "$MB:.claude/repo-config.json" 2>/dev/null)"
 COUNTS_SCRIPT="$(jq -r '.docs.counts_script // empty' <<<"$MB_CFG" 2>/dev/null)"
 mapfile -t COUNT_GLOBS < <(jq -r '.docs.count_globs // [] | .[]' <<<"$MB_CFG" 2>/dev/null)
+mapfile -t COUNT_DEPS < <(jq -r '.docs.counts_script_deps // [] | .[] | strings | select(startswith("/") or contains("..") | not)' <<<"$MB_CFG" 2>/dev/null)
 if [ -z "$MB" ]; then
   echo "WARN: count-drift probe skipped: no merge base with origin/${DEFAULT_BRANCH}" >&2
 elif [ -z "$COUNTS_SCRIPT" ]; then
@@ -1495,8 +1503,10 @@ elif [ "${#COUNT_GLOBS[@]}" -gt 0 ] \
   echo "count-drift probe: skipped (no change under .docs.count_globs)"
 elif [[ $COUNTS_SCRIPT == /* || $COUNTS_SCRIPT == *..* ]] \
      || [ "$(git -C "$ROOT" cat-file -t "$MB:$COUNTS_SCRIPT" 2>/dev/null)" != blob ] \
-     || ! git -C "$ROOT" diff --quiet "$MB" -- ":/$COUNTS_SCRIPT"; then   # working tree vs merge base
-  echo "WARN: count-drift probe skipped: $COUNTS_SCRIPT is not a tracked file unchanged by this branch" >&2
+     || ! git -C "$ROOT" diff --quiet "$MB" -- ":/$COUNTS_SCRIPT" "${COUNT_DEPS[@]/#/:/}" \
+     || { [ "${#COUNT_DEPS[@]}" -gt 0 ] \
+          && [ -n "$(git -C "$ROOT" ls-files --others --exclude-standard -- "${COUNT_DEPS[@]/#/:/}")" ]; }; then   # new untracked files too
+  echo "WARN: count-drift probe skipped: $COUNTS_SCRIPT or a .docs.counts_script_deps path is changed by this branch" >&2
 else
   (cd "$ROOT" && "./$COUNTS_SCRIPT")   # dry-run; a non-empty diff is the finding
 fi
@@ -2671,7 +2681,8 @@ Three things follow, and none is optional:
 3. **Verify mechanically, not by assertion:**
 
    ```bash
-   .claude/skills/enhanced-pr-review/check-review-dispositions.sh "<PR>"
+   GATE_REF="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD || echo origin/main)"   # the default branch, never this PR
+   GATE_SH="$(git show "$GATE_REF:.claude/skills/enhanced-pr-review/check-review-dispositions.sh")" && bash -c "$GATE_SH" check-review-dispositions "<PR>"
    ```
 
    Exit 0 → the ledger is complete. Exit 1 → the blocking list names each gap. Exit 2 → the check could not run; treat as UNKNOWN and re-run, never as clean.
@@ -2753,7 +2764,8 @@ The changelog is the public record and gets everything that shipped, one bullet 
 Before presenting the merge prompt, run the gate. It is a script, not a judgment call:
 
 ```bash
-.claude/skills/enhanced-pr-review/check-review-dispositions.sh "$PR_NUMBER"   # the PR, not issue $0
+GATE_REF="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD || echo origin/main)"   # the default branch, never this PR
+GATE_SH="$(git show "$GATE_REF:.claude/skills/enhanced-pr-review/check-review-dispositions.sh")" && bash -c "$GATE_SH" check-review-dispositions "$PR_NUMBER"   # the PR, not issue $0
 ```
 
 Branch on the exit code — and on nothing else:

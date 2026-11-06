@@ -11,6 +11,7 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 | `default_branch` | string | `gh repo view --json defaultBranchRef` → else `main` | dev-lifecycle, release-notes |
 | `docs.spec_dir` / `docs.plan_dir` | string | `docs/superpowers/specs/` / `…/plans/` | dev-lifecycle |
 | `docs.counts_script` | string | unset → count-drift probe skipped | dev-lifecycle Phase 4, enhanced-pr-review §2.5.0: repo-relative script that dry-runs (no args) or applies (`--apply`) a metric-count refresh. Read from the default-branch merge base; it runs only if tracked there and unchanged by the PR. |
+| `docs.counts_script_deps[]` | string[] | `[]` → the script must call no other repo file | dev-lifecycle Phase 4, enhanced-pr-review §2.5.0: repo-relative files or directories the counts script sources or calls. Read from the merge base; the probe is skipped with a WARN when the PR changes or adds anything under them. |
 | `docs.count_globs[]` | string[] | `[]` → run the probe on every PR when `counts_script` is set | dev-lifecycle Phase 4: paths whose change can make a count stale, as git `:(glob)` pathspecs from the repo root (`*` stays within a directory, `**` crosses them) |
 | `project` | object\|null | null → all project-board ops skipped | issue-creation, pr-creation, dev-lifecycle |
 | `project.id` | string | — | board mutations (`PVT_…` node id) |
@@ -25,6 +26,8 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 | `migrations.dir` | string | `migrations/` | migration-reviewer, create-migration, protect-applied-migrations.sh |
 | `paths.electron_dir` | string | `.` (repo root) | ipc-channel-audit, pr-review-agent-dispatch |
 | `agents.escalation` | string | unset → no escalation agent; an E1-E4 hit is surfaced to the developer | dev-lifecycle, reproduce-then-fix, weekly-deps (`lifecycle-agent-dispatch.md` § Escalation) |
+| `agents.design_rows[]` | array of `{agent, match?: [globs], with?: agent}` | `[]` → the shared Phase-2 panel alone | lifecycle-agent-dispatch Phase 2: extra stage-1 design seats. A row fires when a `match` glob is in scope or the `with` agent is dispatched. |
+| `visual.launch[]` | array of `{match: [globs], dir, cmd, note?}` | `[]` → `/run` or the repo's documented path | dev-lifecycle Phase 4 visual verification: the launcher for each UI surface, picked by the changed files. |
 | `agents.producer_rows[]` | array of `{match: [globs], agent}` | `[]` → the shared Phase-3 producer table alone | dev-lifecycle Phase 3 (`lifecycle-agent-dispatch.md` § producer table); checked after shared rows 1–2 (tests, migrations) and before row 3; first match wins; `agent` matches `\A[a-z0-9][a-z0-9-]*\z`; a non-array value or malformed row is skipped and named; repo-row matches are E1–E4 eligible unless the agent is one § Escalation lists as ineligible |
 | `red_team.critical_agent` | string | unset → no T3 tier; read from the merge base | enhanced-pr-review (`pr-review-agent-dispatch.md` § risk tiers) |
 | `red_team.critical_paths[]` | string[] | `[]` | globs whose change forces T3; ignored unless `critical_agent` is set |

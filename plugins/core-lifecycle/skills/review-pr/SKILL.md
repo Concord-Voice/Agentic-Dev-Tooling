@@ -451,6 +451,12 @@ if [ -n "$MB_CFG_SHA" ]; then
     || { echo "FATAL: the merge-base repo config could not be read or its .review_agents.mandatory is malformed" >&2; exit 1; }
   [ -z "$MB_FLOOR" ] || MANDATORY_BASE="$MB_FLOOR"
 fi
+# A floor agent the repo does not ship would be dropped silently at dispatch, leaving the
+# always-run set to the checkout's .review_agents.base, which this PR controls. Fail closed.
+for agent in $MANDATORY_BASE; do
+  printf '%s' "$CFG_TREE" | jq -e --arg p ".cl""aude/agents/${agent}.md" 'any(.tree[]; .path == $p and .type == "blob")' >/dev/null \
+    || { echo "FATAL: floor agent '$agent' has no definition at the merge base; set .review_agents.mandatory to agents this repo ships" >&2; exit 1; }
+done
 
 TREE_DIFF="$(printf '%s\n%s\n' "$MERGE_BASE_TREE" "$HEAD_TREE" | jq -sc '
   (.[0].tree | map({key: .path, value: {type: .type, mode: .mode, sha: .sha}}) | from_entries) as $base

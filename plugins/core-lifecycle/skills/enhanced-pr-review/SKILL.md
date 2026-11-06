@@ -310,7 +310,7 @@ Two classes of finding are **categorically non-deferrable** — they route to Fi
 
 **(i) Documentation findings the PR makes stale.** A finding is a *documentation finding* if its fix is an edit to a doc surface (`*.md`, `docs/**`, `.claude/rules/**`, `CLAUDE.md`, `README*`, ADRs, runbooks, or doc comments tracked by `docs-reviewer`) AND the doc describes behavior or structure this PR changes. The §2.5.2 radius test does NOT apply — it is code-structural (imports, packages, directories) and blind to a Markdown file that *describes* code without importing it. Replace it with one semantic test: **"Does this PR make this doc stale?"** If yes → **Fix in this PR**, regardless of the doc's filesystem distance from the diff. Preexisting doc debt in an *untouched* doc file follows the normal gate; in a *touched* doc file it is non-deferrable via rule (ii).
 
-> **Named case — metric-count drift (Key Counts drift).** When the repo sets `.docs.counts_script` in `.claude/repo-config.json`, a numeric or metadata count that this PR makes stale (for example a "Key Counts" block in `CLAUDE.md`) is a documentation finding under (i): it is **non-deferrable and refreshed in THIS PR**. The count is metadata, and the PR may touch no `.md` file (so `docs-reviewer` is never dispatched), so raise the finding by probing: run the script with no arguments (dry-run), resolved the same way as `/dev-lifecycle` Phase 4: the key comes from the merge base with the default branch, and the script must be a tracked, self-contained file this PR leaves unchanged (it must not source or call other PR-editable files), because a PR must not choose the code its reviewer runs. A non-empty diff IS the finding; remediate with its `--apply` mode. `/dev-lifecycle` Phase 4 front-loads this probe; this section is the merge-time backstop.
+> **Named case — metric-count drift (Key Counts drift).** When the repo sets `.docs.counts_script` in `.claude/repo-config.json`, a numeric or metadata count that this PR makes stale (for example a "Key Counts" block in `CLAUDE.md`) is a documentation finding under (i): it is **non-deferrable and refreshed in THIS PR**. The count is metadata, and the PR may touch no `.md` file (so `docs-reviewer` is never dispatched), so raise the finding by probing: run the script with no arguments (dry-run), resolved the same way as `/dev-lifecycle` Phase 4: the key comes from the merge base with the default branch, and the script must be a tracked file this PR leaves unchanged, as must every path in `.docs.counts_script_deps[]` (the repo files it sources or calls; it must call no others), because a PR must not choose the code its reviewer runs. A non-empty diff IS the finding; remediate with its `--apply` mode. `/dev-lifecycle` Phase 4 front-loads this probe; this section is the merge-time backstop.
 
 **(ii) No-rot rule — findings in files the PR modifies.** Any finding whose file appears in `gh pr diff $0 --name-only` (radius-test **Q1 = YES**) is **non-deferrable, whether or not this PR introduced it.** Touching a file makes its preexisting issues yours to fix — a chore/bug-style fix that stops rot from lingering. "Preexisting" / "out of scope" / "follow-up issue" are not defer reasons here. Bounded to files actually in the diff.
 
@@ -495,7 +495,7 @@ Recommended next steps:
 1. Fix all Agreed + valid Bot-only + Subagent-only findings
 2. Review Conflicts and decide
 3. Carry every row to a disposition and record it in its thread (Post-Report)
-4. Post/update the Phase 3.5 reconciliation post, then run `.claude/skills/enhanced-pr-review/check-review-dispositions.sh "$0"`
+4. Post/update the Phase 3.5 reconciliation post, then run the disposition gate from the default branch (§3.5.3)
 ```
 
 If NO bots posted findings (the filter returned an empty array in Phase 1), the report should explicitly call that out — an empty bot-findings section is itself a signal (bots either agree the PR is clean, or they haven't reviewed yet).
@@ -504,7 +504,7 @@ If NO bots posted findings (the filter returned an empty array in Phase 1), the 
 
 ## Post-Report — Interactive Phase (the disposition ledger)
 
-After the developer reviews the table, every row is carried to a **disposition** — a recorded decision, written into the conversation the finding came from. The ledger is the set of those dispositions. It is complete when `.claude/skills/enhanced-pr-review/check-review-dispositions.sh "$0"` exits 0, and Phase 4 will not pass until it does.
+After the developer reviews the table, every row is carried to a **disposition** — a recorded decision, written into the conversation the finding came from. The ledger is the set of those dispositions. It is complete when the disposition gate (§3.5.3, run from the default branch) exits 0, and Phase 4 will not pass until it does.
 
 ### The four dispositions (closed set)
 
@@ -640,10 +640,13 @@ Stage the body to a file — the marker and the tables contain characters that m
 ### 3.5.3 — Verify
 
 ```bash
-.claude/skills/enhanced-pr-review/check-review-dispositions.sh "$0"
+GATE_REF="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD || echo origin/main)"   # the default branch, never this PR
+GATE_SH="$(git show "$GATE_REF:.claude/skills/enhanced-pr-review/check-review-dispositions.sh")" && bash -c "$GATE_SH" check-review-dispositions "$0"
 ```
 
-Exit 0 means every in-scope thread carries a decision, every deferral names an issue that exists, and the reconciliation post accounts for every reviewer that spoke. Exit 1 → the blocking list is printed. Exit 2 means the check could not be made — treat that as UNKNOWN, never as clean.
+Exit 0 means every in-scope thread carries a decision, every deferral names an issue that exists, and the reconciliation post accounts for every reviewer that spoke. Exit 1 → the blocking list is printed. Exit 2 means the check could not be made — treat that as UNKNOWN, never as clean. Any other non-zero exit (for example `git show` failing because the default branch has no gate yet) is also UNKNOWN.
+
+**The gate runs from the default branch, never from this checkout.** A PR can edit the checkout's copy, for example by adding `exit 0` at the top, and a gate the PR controls verifies nothing. So every invocation reads the script from `origin/HEAD` with `git show` and runs that copy, the same trust rule the gate already applies to the roster. A PR that changes the gate is therefore judged by the previous gate, and its own version takes effect after it merges.
 
 **What a green run proves, and what it does not.** It proves the decisions are recorded, addressable, and auditable. It does **not** prove a human made them: `gh` authenticates as the repo owner, so an agent's reply is authored by a `User` and clears the non-bot filter exactly as the developer's would. The gate cannot distinguish them and does not try. What changes is that the reasoning is now written down in one reviewable place instead of living in a terminal scrollback — a developer can read the reconciliation post and audit five decisions in one pass. Human judgment enters at the Phase 8 mode gate (`On-the-Loop` pauses on the triage outcome), not at this check. Never cite a green run as evidence that a person reviewed anything.
 
@@ -656,7 +659,8 @@ This phase runs **after** all fix commits land and CI is green. It gates `/dev-l
 Run the check; it is the gate, and the rest of this phase is how to read and clear its output:
 
 ```bash
-.claude/skills/enhanced-pr-review/check-review-dispositions.sh "$0"
+GATE_REF="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD || echo origin/main)"   # the default branch, never this PR
+GATE_SH="$(git show "$GATE_REF:.claude/skills/enhanced-pr-review/check-review-dispositions.sh")" && bash -c "$GATE_SH" check-review-dispositions "$0"
 ```
 
 Exit 0 → proceed. Exit 1 → the blocking list is printed; clear it. Exit 2 → the lookup failed; treat as UNKNOWN and re-run, never as clean.
@@ -845,7 +849,7 @@ The approval artifact may be emitted ONLY if ALL of the following hold. If ANY f
 3. **Every blocking Quality-Gate / SAST check = passed.** A `PENDING` / queued / not-yet-reported check is **NOT** a pass. Wait for the result; never approve ahead of a gate that has not reported.
 4. **All required CI checks green** — `gh pr checks $0` shows zero `fail` and zero `pending` in the required set. **Pending ≠ green.** Report the actual state, never the assumed-imminent one.
 5. **(Only when `.release_signal` is configured)** the release signal = ALL CLEAR or SATISFIED, or an explicitly-approved defer per §2.6.4. When `.release_signal` is absent, this precondition does not exist — skip it.
-6. **The disposition ledger is complete** — `.claude/skills/enhanced-pr-review/check-review-dispositions.sh "$0"` exits 0 at the current HEAD: every in-scope conversation carries a decision, every deferral names an issue that exists, and exactly one Phase 3.5 reconciliation post accounts for every reviewer that spoke. Re-run it here if the Phase 4 result isn't fresh; when Phase 6 is invoked directly rather than via `/dev-lifecycle` Step 9.1.5 there is no prior run to consume, so run it. **Exit 2 fails this precondition** — an unverifiable ledger is not a clean one.
+6. **The disposition ledger is complete** — the disposition gate, run from the default branch per §3.5.3, exits 0 at the current HEAD: every in-scope conversation carries a decision, every deferral names an issue that exists, and exactly one Phase 3.5 reconciliation post accounts for every reviewer that spoke. Re-run it here if the Phase 4 result isn't fresh; when Phase 6 is invoked directly rather than via `/dev-lifecycle` Step 9.1.5 there is no prior run to consume, so run it. **Exit 2 fails this precondition** — an unverifiable ledger is not a clean one.
 7. **Every `Fix`-marked finding is actually resolved** — verify by reading `gh pr diff $0` / the fix-commit SHAs, not by asserting it. A finding you intended to fix but didn't push is still open.
 8. **HEAD is the commit being approved** — no unpushed local fixes. The artifact references the current HEAD SHA. If the active ruleset dismisses stale reviews on push (the common configuration), **any later push dismisses the approval** — so Phase 6 is genuinely the last step before merge. If a fix still needs to land, you are not in Phase 6 yet.
 9. **No UNVERIFIED autonomous-agent (autofix) action remains** (Phase 1.7). Every footprint action carries a disposition; every non-`Verified-correct`, non-`No-finding` disposition has a landed Fix commit (verify by diff per precondition 7). This precondition is about the autofix agent's **change**, and precondition 6 is about the **decision record**; they are independent and both must hold. A `cv-disposition` marker on a thread does not discharge this one — an agent's unreviewed commit needs re-review on its merits no matter how well the thread was answered. A manufactured green — the agent resolved a thread it did not fix, a reviewer bot re-approved a cosmetic change, or a failing test was deleted/skipped to green CI — does NOT satisfy this gate. If any footprint action is still `UNVERIFIED`, this precondition FAILS. A **`No-finding`** disposition (a benign non-autofix commit that §1.7.2 tied to no finding and no thread) is informational and does NOT block. When Phase 1.7 reported `Autofix footprint: none detected`, this precondition is trivially satisfied.

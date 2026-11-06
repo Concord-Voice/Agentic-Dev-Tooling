@@ -178,6 +178,16 @@ realization). Hand-dispatch only when a Workflow is unavailable.
 | Always | `@architect` (Mode 3 — reconciliation) | 3 — final spec from all stage-2 outputs |
 | Any stage surfaces an unanswered external/internal question | `@researcher` | any (interrupt) |
 
+**Repo design seats.** A repo adds stage-1 seats without editing this file through
+`rc_get '.agents.design_rows' '[]'`: an array of `{"agent": "<name>", "match": [<globs>], "with": "<agent>"}`.
+A row fires when any `match` glob is in the plan's scope, or when the agent it names
+in `with` is dispatched (so `{"agent": "platform-engineer", "with": "system-engineer"}`
+always pairs the two). Fired seats run in parallel at stage 1 and feed the same
+reconciliation. `agent` and `with` follow the `.agents.producer_rows` name rule
+(`\A[a-z0-9][a-z0-9-]*\z`), and a row that is malformed, has neither `match` nor
+`with`, or names an absent agent file is skipped and named in the dispatch line.
+List every fired seat in the dispatch line.
+
 **`@ui-designer` and `@ux-designer` are dispatched as a pair or not at all.**
 The reconciliation step exists to resolve their tension; running one alone
 produces an unbalanced spec with nothing to reconcile.
