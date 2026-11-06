@@ -5,6 +5,8 @@ argument-hint: "[version] [--since=<tag>] [--dry-run]"
 allowed-tools:
   - Bash(git log *)
   - Bash(git tag *)
+  - Bash(git rev-parse *)
+  - Bash(source *)
   - Bash(git show *)
   - Bash(gh release *)
   - Bash(gh issue view *)
@@ -48,8 +50,21 @@ the two distinguishable.
 
 ### Step 1: Determine the range
 - If `--since` is provided, use it as the from-tag.
-- Otherwise, run `git tag --sort=-v:refname | head -2` and pick the one
-  that isn't $0 as the previous release.
+- Otherwise, list this repo's release tags and pick the one that isn't $0
+  as the previous release. The prefix comes from `.release.tag_prefix`
+  (default `v`), so a repo with other tags (for example per-component
+  prefixes) only sees its own release line:
+  ```bash
+  # The helper is optional here (a --user install has none); default to v.
+  RC="$(git rev-parse --show-toplevel)/scripts/repo-config.sh"
+  if [ -f "$RC" ]; then source "$RC"; TAG_PREFIX="$(rc_get '.release.tag_prefix' 'v')"; fi
+  TAG_PREFIX="${TAG_PREFIX:-v}"
+  TAGS="$(git tag -l "${TAG_PREFIX}*" --sort=-v:refname)"
+  # A repo with bare tags (1.2.3) and no .release.tag_prefix would otherwise
+  # find nothing and treat this as a first release.
+  [ -n "$TAGS" ] || { echo "WARN: no ${TAG_PREFIX}* tags; using all tags" >&2; TAGS="$(git tag -l --sort=-v:refname)"; }
+  printf '%s\n' "$TAGS" | head -2
+  ```
 - If no previous tag exists (first release), collect all commits since the repository's initial commit.
 - Print the range: `<previous>..HEAD` (or `<previous>..<target-tag>`).
 
