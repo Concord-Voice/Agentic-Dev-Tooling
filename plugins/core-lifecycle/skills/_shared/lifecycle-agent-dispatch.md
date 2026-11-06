@@ -213,8 +213,8 @@ After rows 1 and 2 (test authoring and migrations keep their owners), check the 
 rows top to bottom and dispatch the first whose globs match the task's paths; only when
 none matches do rows 3 onward apply. `rc_get` returns the array as JSON text; parse
 it with `jq`. A value that is not an array is ignored and named in the dispatch
-line. `agent` must match `^[a-z0-9][a-z0-9-]*$` (the same rule as
-`pr-review-agent-dispatch.md`) and resolves to `.claude/agents/<name>.md`; `match`
+line. `agent` must match `\A[a-z0-9][a-z0-9-]*\z` (jq `test`; `^…$` also accepts a
+trailing newline) and resolves to `.claude/agents/<name>.md`; `match`
 globs use the same `**` dialect as the rows above. A row that is malformed (missing
 or non-array `match`, missing `agent`, or an `agent` that fails the pattern) or whose
 agent file is absent is skipped and named in the dispatch line, never silently
