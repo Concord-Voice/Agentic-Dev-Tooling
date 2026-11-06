@@ -26,8 +26,7 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 | `migrations.dir` | string | `migrations/` | migration-reviewer, create-migration, protect-applied-migrations.sh |
 | `paths.electron_dir` | string | `.` (repo root) | ipc-channel-audit, pr-review-agent-dispatch |
 | `agents.escalation` | string | unset → no escalation agent; an E1-E4 hit is surfaced to the developer | dev-lifecycle, reproduce-then-fix, weekly-deps (`lifecycle-agent-dispatch.md` § Escalation) |
-| `agents.design_rows[]` | array of `{agent, match?: [globs], with?: agent}` | `[]` → the shared Phase-2 panel alone | lifecycle-agent-dispatch Phase 2: extra stage-1 design seats. A row fires when a `match` glob is in scope or the `with` agent is dispatched. |
-| `visual.launch[]` | array of `{match: [globs], dir, cmd, note?}` | `[]` → `/run` or the repo's documented path | dev-lifecycle Phase 4 visual verification: the launcher for each UI surface, picked by the changed files. |
+| `agents.design_rows[]` | array of `{agent, match?: [globs], with?: agent}` | `[]` → the shared Phase-2 panel alone | lifecycle-agent-dispatch Phase 2: extra stage-1 design seats, hand-dispatch only (the `design-panel` Workflow does not read it yet). A row fires when a `match` glob is in scope or the `with` agent is dispatched. |
 | `agents.producer_rows[]` | array of `{match: [globs], agent}` | `[]` → the shared Phase-3 producer table alone | dev-lifecycle Phase 3 (`lifecycle-agent-dispatch.md` § producer table); checked after shared rows 1–2 (tests, migrations) and before row 3; first match wins; `agent` matches `\A[a-z0-9][a-z0-9-]*\z`; a non-array value or malformed row is skipped and named; repo-row matches are E1–E4 eligible unless the agent is one § Escalation lists as ineligible |
 | `red_team.critical_agent` | string | unset → no T3 tier; read from the merge base | enhanced-pr-review (`pr-review-agent-dispatch.md` § risk tiers) |
 | `red_team.critical_paths[]` | string[] | `[]` | globs whose change forces T3; ignored unless `critical_agent` is set |
@@ -55,6 +54,7 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 | `epic_linkage.epic_title_pattern` / `.epic_label` | string | `Epic: v{version} release` / `type: epic` | epic linkage |
 | `epic_linkage.version_epics` | bool | `true`; `false` → feature epics only, no missing-version-epic flag | phase-status |
 | `agents.escalation_surfaces` | string[] | `[]` | reproduce-then-fix E2 only: extra surfaces (for example a concurrency fence) that count as escalation-worthy in its debugging loop; dev-lifecycle's E2 list is fixed in `_shared/lifecycle-agent-dispatch.md` |
+| `visual.launch[]` | array of `{match: [globs], dir, cmd, note?}` | `[]` → `/run` or the repo's documented path | dev-lifecycle Phase 4 visual verification: the launcher for each UI surface, picked by the changed files. |
 | `feedback_triage.public` / `.tracker` | string (`owner/repo`) | unset → Phase 0 stops | feedback-triage: public intake repo and private tracker |
 | `feedback_triage.sentinel_prefix` | string | `feedback-triage` | feedback-triage: HTML-comment marker prefix (`<!-- {prefix}:status v1 -->`) |
 | `release.frontend_dir` / `.backend_dir` | string | `frontend` / `backend` | release-checklist |

@@ -332,10 +332,10 @@ elif git rev-parse --git-dir >/dev/null 2>&1; then
     # output is indistinguishable from a legitimately roster-less repo.
     # /dev-lifecycle knows this from `gh pr view --json baseRefName`.
     BASE_REF="${CV_BASE_REF:-${GITHUB_BASE_REF:-}}"
-    [ -n "$BASE_REF" ] && BASE_REF="origin/${BASE_REF#origin/}"
+    [ -n "$BASE_REF" ] && BASE_REF="refs/remotes/origin/${BASE_REF#origin/}"   # full refname: a local branch or tag named origin/<x> cannot shadow it
     if [ -z "$BASE_REF" ]; then
-        BASE_REF=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) \
-            || BASE_REF="origin/${CV_DEFAULT_BRANCH:-main}"
+        BASE_REF=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null) \
+            || BASE_REF="refs/remotes/origin/${CV_DEFAULT_BRANCH:-main}"
     fi
     if ROSTER_RAW=$(git show "${BASE_REF}:.claude/repo-config.json" 2>/dev/null); then
         ROSTER_SOURCE="${BASE_REF}:.claude/repo-config.json"

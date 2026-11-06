@@ -179,7 +179,7 @@ realization). Hand-dispatch only when a Workflow is unavailable.
 | Any stage surfaces an unanswered external/internal question | `@researcher` | any (interrupt) |
 
 **Repo design seats.** A repo adds stage-1 seats without editing this file through
-`rc_get '.agents.design_rows' '[]'`: an array of `{"agent": "<name>", "match": [<globs>], "with": "<agent>"}`.
+`rc_get '.agents.design_rows' '[]'` (hand-dispatch only: the `design-panel` Workflow has fixed seats and does not read this key yet, so a repo that relies on these rows dispatches Phase 2 by hand and says so in the dispatch line): an array of `{"agent": "<name>", "match": [<globs>], "with": "<agent>"}`.
 A row fires when any `match` glob is in the plan's scope, or when the agent it names
 in `with` is dispatched (so `{"agent": "platform-engineer", "with": "system-engineer"}`
 always pairs the two). Fired seats run in parallel at stage 1 and feed the same

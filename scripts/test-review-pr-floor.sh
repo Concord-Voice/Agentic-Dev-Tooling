@@ -18,7 +18,7 @@ gh() {  # stub: PR base, repo default branch, or the config blob
   esac
 }
 DEFAULT='security-reviewer code-reviewer docs-reviewer'
-AG='{"path":".claude/agents/security-reviewer.md","type":"blob"},{"path":".claude/agents/code-reviewer.md","type":"blob"},{"path":".claude/agents/docs-reviewer.md","type":"blob"},{"path":".claude/agents/red-team.md","type":"blob"}'
+AG='{"path":".claude/agents/security-reviewer.md","type":"blob","mode":"100644"},{"path":".claude/agents/code-reviewer.md","type":"blob","mode":"100644"},{"path":".claude/agents/docs-reviewer.md","type":"blob","mode":"100644"},{"path":".claude/agents/red-team.md","type":"blob","mode":"100644"}'
 T='{"tree":[{"path":".claude/repo-config.json","type":"blob","mode":"100644","sha":"abc"},'"$AG"']}'
 PASS=0; FAIL=0
 check() {  # name want-floor|STOP cfg tree
@@ -50,5 +50,6 @@ check "non-object review_agents stops" STOP '{"review_agents":"x"}' "$T"
 check "non-object config stops" STOP '[1]' "$T"
 check "config path is a tree stops" STOP "$KEY" '{"tree":[{"path":".claude/repo-config.json","type":"tree","mode":"040000","sha":"abc"}]}'
 check "config path is a symlink stops" STOP "$KEY" '{"tree":[{"path":".claude/repo-config.json","type":"blob","mode":"120000","sha":"abc"}]}'
+check "symlinked floor agent stops" STOP '{"review_agents":{"mandatory":["red-team"]}}' '{"tree":[{"path":".claude/repo-config.json","type":"blob","mode":"100644","sha":"abc"},{"path":".claude/agents/red-team.md","type":"blob","mode":"120000"}]}'
 echo "passed: $PASS   failed: $FAIL"
 [[ "$FAIL" -eq 0 ]]
