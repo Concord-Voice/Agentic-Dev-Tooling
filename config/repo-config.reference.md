@@ -8,7 +8,7 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 
 | Key | Type | Default / when absent | Consumed by |
 |---|---|---|---|
-| `default_branch` | string | `gh repo view --json defaultBranchRef` → else `main` | release-notes. dev-lifecycle ignores it and uses `refs/remotes/origin/HEAD` (else `gh`), because a PR can edit this key. |
+| `default_branch` | string | `gh repo view --json defaultBranchRef` → else `main` | release-notes. dev-lifecycle, verify-quality-gate and pr-creation ignore it and use the GitHub API, then `refs/remotes/origin/HEAD`, then `main`, because a PR can edit this key. |
 | `docs.spec_dir` / `docs.plan_dir` | string | `docs/superpowers/specs/` / `…/plans/` | dev-lifecycle |
 | `docs.counts_script` | string | unset → count-drift probe skipped | dev-lifecycle Phase 4, enhanced-pr-review §2.5.0: repo-relative script that dry-runs (no args) or applies (`--apply`) a metric-count refresh. Read from the default-branch merge base; it runs only if tracked there and unchanged by the PR. |
 | `docs.count_globs[]` | string[] | `[]` → run the probe on every PR when `counts_script` is set | dev-lifecycle Phase 4: paths whose change can make a count stale, as git `:(glob)` pathspecs from the repo root (`*` stays within a directory, `**` crosses them) |

@@ -39,12 +39,26 @@ A repo may add an automated-reviewer-assignment workflow later.
 
 ## Execution
 
-All phases source the helpers in `.claude/skills/pr-creation/lib.sh` (which in turn sources
-`scripts/repo-config.sh` for `rc_get`/`rc_has`):
+All phases load the helpers in `.claude/skills/pr-creation/lib.sh` and `scripts/repo-config.sh`
+from the default branch, never from this checkout, because on a PR branch both are the PR's code:
 
 ```bash
-REPO_ROOT=$(git rev-parse --show-toplevel)
-source "${REPO_ROOT}/.claude/skills/pr-creation/lib.sh"
+RC_REF="refs/remotes/origin/$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null)"   # the API is the authority; origin/HEAD goes stale after a rename
+[ "$RC_REF" != refs/remotes/origin/ ] || RC_REF="$(git symbolic-ref --quiet refs/remotes/origin/HEAD || echo refs/remotes/origin/main)"
+case "$RC_REF" in refs/remotes/origin/HEAD) RC_REF= ;; refs/remotes/origin/?*) ;; *) RC_REF= ;; esac
+RC_OID="$([ -n "$RC_REF" ] && git show-ref --verify --hash "$RC_REF" 2>/dev/null)"   # exact refname, no DWIM: a same-named branch or tag cannot stand in
+case "$([ -n "$RC_OID" ] && git ls-tree "$RC_OID" -- scripts/repo-config.sh | cut -d' ' -f1)" in
+  100644|100755) ;;
+  *) echo "FATAL: ${RC_REF:-the default branch} is not fetched or has no regular scripts/repo-config.sh" >&2; return 1 2>/dev/null || exit 1 ;;
+esac
+RC_SRC="$(git show "$RC_OID:scripts/repo-config.sh")" || { echo "FATAL: could not read the default-branch helper" >&2; return 1 2>/dev/null || exit 1; }
+eval "$RC_SRC"   # the commit that was checked; the checkout's copy is never sourced
+RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json" 2>/dev/null)"   # default-branch config, for keys that pick commands or reviewers
+DEFAULT_BRANCH="${RC_REF#refs/remotes/origin/}"
+case "$(git ls-tree "$RC_OID" -- .claude/skills/pr-creation/lib.sh | cut -d' ' -f1)" in
+  100644|100755) eval "$(git show "$RC_OID:.claude/skills/pr-creation/lib.sh")" ;;   # rc_get is already defined, so lib.sh skips its own helper load
+  *) echo "FATAL: $RC_REF has no regular .claude/skills/pr-creation/lib.sh" >&2; return 1 2>/dev/null || exit 1 ;;
+esac
 ```
 
 ### Phase 1 — Resolve underlying issue(s)
