@@ -41,11 +41,15 @@ When a phase says "Run `/skill-name`", you MUST invoke it via the Skill tool. Do
 
 > **Structure is generic; the repo-specific knobs are data.** The 9-phase flow, the mode-to-gate matrix, the dispatch gate, and the never-`--admin`-bypass discipline are fixed. Everything that varies per repo — the default branch, artifact directories, the bot roster waited on at Phase 7.5, the reviewer roster at Phase 8, the quality gate, parent-epic linkage, version-bump, and branch-protection prose — is read from the OPTIONAL per-repo `.claude/repo-config.json` via the shared helper `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has '<jq-filter>'`). With an absent file, or any absent/`null` key, the affected step **degrades gracefully** — it is skipped, never errored. The bot roster in particular lives in `.bots[]` as the **single source of truth** shared with `/enhanced-pr-review`, so the two can never drift on which bots are online/offline or blocking. See `config/repo-config.reference.md` for the full schema.
 >
-> Load the helper once at the top of any phase that reads config, and resolve the default branch up front (used throughout in place of a hard-coded `main`):
+> Load the helper once at the top of any phase that reads config, and resolve the default branch up front (used throughout in place of a hard-coded `main`). **Load the helper from the default branch, never from this checkout:** on a PR branch, `scripts/repo-config.sh` is the PR's code, and sourcing it runs that code before any review gate does. The checkout's `.claude/repo-config.json` is still the config `rc_get` reads, so treat it as PR-controlled: a key that decides what runs or who reviews is read from the default branch directly (the count-drift probe, the review floor and the disposition gate all do this).
 >
 > ```bash
-> source "$(git rev-parse --show-toplevel)/scripts/repo-config.sh"   # path where the org tooling is installed/symlinked
-> DEFAULT_BRANCH="$(rc_get '.default_branch' "$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo main)")"
+> RC_REF="$(git symbolic-ref --quiet refs/remotes/origin/HEAD \
+>   || echo "refs/remotes/origin/$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo main)")"   # full refname: a branch or tag named origin/main cannot shadow it
+> [ "$(git ls-tree "$RC_REF" -- scripts/repo-config.sh | cut -d' ' -f1)" = 100755 ] || [ "$(git ls-tree "$RC_REF" -- scripts/repo-config.sh | cut -d' ' -f1)" = 100644 ] \
+>   || { echo "FATAL: $RC_REF has no regular scripts/repo-config.sh; install the org tooling on the default branch first" >&2; return 1 2>/dev/null || exit 1; }
+> eval "$(git show "$RC_REF:scripts/repo-config.sh")"   # the default branch's helper; the checkout's copy is never sourced
+> DEFAULT_BRANCH="${RC_REF#refs/remotes/origin/}"   # from the remote, not the PR-editable .default_branch key
 > SPEC_DIR="$(rc_get '.docs.spec_dir' 'docs/superpowers/specs/')"
 > PLAN_DIR="$(rc_get '.docs.plan_dir' 'docs/superpowers/plans/')"
 > ```
