@@ -8,7 +8,7 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 
 | Key | Type | Default / when absent | Consumed by |
 |---|---|---|---|
-| `default_branch` | string | `gh repo view --json defaultBranchRef` → else `main` | dev-lifecycle, release-notes |
+| `default_branch` | string | `gh repo view --json defaultBranchRef` → else `main` | release-notes. dev-lifecycle, verify-quality-gate and pr-creation ignore it and use the GitHub API, then `refs/remotes/origin/HEAD`, then `main`, because a PR can edit this key. |
 | `docs.spec_dir` / `docs.plan_dir` | string | `docs/superpowers/specs/` / `…/plans/` | dev-lifecycle |
 | `docs.counts_script` | string | unset → count-drift probe skipped | dev-lifecycle Phase 4, enhanced-pr-review §2.5.0: repo-relative script that dry-runs (no args) or applies (`--apply`) a metric-count refresh. Read from the default-branch tip (`refs/remotes/origin/HEAD`), never the checkout; it runs only if it is a regular tracked file there (not a symlink) and the branch matches the tip at it and its directory. |
 | `docs.counts_script_deps[]` | string[] | `[]` → the script must call no other repo file | dev-lifecycle Phase 4, enhanced-pr-review §2.5.0: repo-relative files or directories the counts script sources or calls. Read from the default-branch tip. Entries must be plain relative paths (one bad entry skips the probe). The probe is skipped with a WARN when the branch differs from the tip under any of them or the directory of a file dep, when one is a symlink, or when untracked files (ignored ones included) sit there. |

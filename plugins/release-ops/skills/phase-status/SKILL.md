@@ -41,7 +41,19 @@ rather than the literals. With an absent file or absent keys both fall back to
 the documented defaults, so this step never errors.
 
 ```bash
-source scripts/repo-config.sh
+# Load the helper from the default branch, never this checkout (on a PR branch it is the PR's code).
+RC_REF="refs/remotes/origin/$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null)"   # the API is the authority; origin/HEAD goes stale after a rename
+[ "$RC_REF" != refs/remotes/origin/ ] || RC_REF="$(git symbolic-ref --quiet refs/remotes/origin/HEAD || echo refs/remotes/origin/main)"
+case "$RC_REF" in refs/remotes/origin/HEAD) RC_REF= ;; refs/remotes/origin/?*) ;; *) RC_REF= ;; esac
+RC_OID="$([ -n "$RC_REF" ] && git show-ref --verify --hash "$RC_REF" 2>/dev/null)"   # exact refname, no DWIM: a same-named branch or tag cannot stand in
+case "$([ -n "$RC_OID" ] && git ls-tree "$RC_OID" -- scripts/repo-config.sh | cut -d' ' -f1)" in
+  100644|100755) ;;
+  *) echo "FATAL: ${RC_REF:-the default branch} is not fetched or has no regular scripts/repo-config.sh" >&2; return 1 2>/dev/null || exit 1 ;;
+esac
+RC_SRC="$(git show "$RC_OID:scripts/repo-config.sh")" || { echo "FATAL: could not read the default-branch helper" >&2; return 1 2>/dev/null || exit 1; }
+eval "$RC_SRC"   # the commit that was checked; the checkout's copy is never sourced
+RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json" 2>/dev/null)"   # default-branch config, for keys that pick commands or reviewers
+DEFAULT_BRANCH="${RC_REF#refs/remotes/origin/}"
 RELEASE_PREFIX="$(rc_get '.board.release_label_prefix' 'release:')"
 PRIORITY_LABELS="$(rc_get '.board.priority_labels' '["P1","P2","P3","P4","P5"]')"   # JSON array, highest priority first
 ```
