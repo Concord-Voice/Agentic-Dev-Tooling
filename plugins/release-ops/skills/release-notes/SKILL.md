@@ -55,9 +55,10 @@ the two distinguishable.
   (default `v`), so a repo with other tags (for example per-component
   prefixes) only sees its own release line:
   ```bash
-  # The helper is optional here (a --user install has none); default to v.
-  RC="$(git rev-parse --show-toplevel)/scripts/repo-config.sh"
-  if [ -f "$RC" ]; then source "$RC"; TAG_PREFIX="$(rc_get '.release.tag_prefix' 'v')"; fi
+  # Read the key from the default branch's config as data (no helper to source, and a
+  # PR branch's copy is never read); absent config or key → v.
+  RC_REF="$(git symbolic-ref --quiet refs/remotes/origin/HEAD || echo refs/remotes/origin/main)"
+  TAG_PREFIX="$(git show "$RC_REF:.claude/repo-config.json" 2>/dev/null | jq -r '.release.tag_prefix // empty' 2>/dev/null)"
   TAG_PREFIX="${TAG_PREFIX:-v}"
   TAGS="$(git tag -l "${TAG_PREFIX}*" --sort=-v:refname)"
   # A repo with bare tags (1.2.3) and no .release.tag_prefix would otherwise

@@ -39,13 +39,23 @@ When a phase says "Run `/skill-name`", you MUST invoke it via the Skill tool. Do
 
 # Dev Lifecycle
 
-> **Structure is generic; the repo-specific knobs are data.** The 9-phase flow, the mode-to-gate matrix, the dispatch gate, and the never-`--admin`-bypass discipline are fixed. Everything that varies per repo — the default branch, artifact directories, the bot roster waited on at Phase 7.5, the reviewer roster at Phase 8, the quality gate, parent-epic linkage, version-bump, and branch-protection prose — is read from the OPTIONAL per-repo `.claude/repo-config.json` via the shared helper `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has '<jq-filter>'`). With an absent file, or any absent/`null` key, the affected step **degrades gracefully** — it is skipped, never errored. The bot roster in particular lives in `.bots[]` as the **single source of truth** shared with `/enhanced-pr-review`, so the two can never drift on which bots are online/offline or blocking. See `config/repo-config.reference.md` for the full schema.
+> **Structure is generic; the repo-specific knobs are data.** The 9-phase flow, the mode-to-gate matrix, the dispatch gate, and the never-`--admin`-bypass discipline are fixed. Everything that varies per repo — artifact directories, the bot roster waited on at Phase 7.5, the reviewer roster at Phase 8, the quality gate, parent-epic linkage, version-bump, and branch-protection prose — is read from the OPTIONAL per-repo `.claude/repo-config.json` via the shared helper `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has '<jq-filter>'`). With an absent file, or any absent/`null` key, the affected step **degrades gracefully** — it is skipped, never errored. The bot roster in particular lives in `.bots[]` as the **single source of truth** shared with `/enhanced-pr-review`, so the two can never drift on which bots are online/offline or blocking. See `config/repo-config.reference.md` for the full schema.
 >
-> Load the helper once at the top of any phase that reads config, and resolve the default branch up front (used throughout in place of a hard-coded `main`):
+> Load the helper once at the top of any phase that reads config, and resolve the default branch up front (used throughout in place of a hard-coded `main`). **Load the helper from the default branch, never from this checkout:** on a PR branch, `scripts/repo-config.sh` is the PR's code, and sourcing it runs that code before any review gate does. The block below loads the default branch's helper (the branch comes from the GitHub API, then `origin/HEAD`, then `main`), takes `DEFAULT_BRANCH` from that ref rather than the PR-editable `.default_branch` key, and puts the default branch's config in `RC_TRUSTED_CFG`. Each Bash call starts a fresh shell, so run this block again in any call that uses `rc_get` or `RC_TRUSTED_CFG`. `rc_get` still reads the checkout's `.claude/repo-config.json`, so treat it as PR-controlled. These steps read the default branch's config instead, because their keys pick commands or reviewers: the Phase 4 count-drift probe, the Phase 7.5 bot roster, `/verify-quality-gate`, and the review floor and disposition gate in `/review-pr` and `/enhanced-pr-review`. `/pr-creation` and every other skill that uses the helper load it the same way. Every other `rc_get` key in this skill only shapes paths, prose or board fields, and a PR may change those.
 >
 > ```bash
-> source "$(git rev-parse --show-toplevel)/scripts/repo-config.sh"   # path where the org tooling is installed/symlinked
-> DEFAULT_BRANCH="$(rc_get '.default_branch' "$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo main)")"
+> RC_REF="refs/remotes/origin/$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null)"   # the API is the authority; origin/HEAD goes stale after a rename
+> [ "$RC_REF" != refs/remotes/origin/ ] || RC_REF="$(git symbolic-ref --quiet refs/remotes/origin/HEAD || echo refs/remotes/origin/main)"
+> case "$RC_REF" in refs/remotes/origin/HEAD) RC_REF= ;; refs/remotes/origin/?*) ;; *) RC_REF= ;; esac
+> RC_OID="$([ -n "$RC_REF" ] && git show-ref --verify --hash "$RC_REF" 2>/dev/null)"   # exact refname, no DWIM: a same-named branch or tag cannot stand in
+> case "$([ -n "$RC_OID" ] && git ls-tree "$RC_OID" -- scripts/repo-config.sh | cut -d' ' -f1)" in
+>   100644|100755) ;;
+>   *) echo "FATAL: ${RC_REF:-the default branch} is not fetched or has no regular scripts/repo-config.sh" >&2; return 1 2>/dev/null || exit 1 ;;
+> esac
+> RC_SRC="$(git show "$RC_OID:scripts/repo-config.sh")" || { echo "FATAL: could not read the default-branch helper" >&2; return 1 2>/dev/null || exit 1; }
+> eval "$RC_SRC"   # the commit that was checked; the checkout's copy is never sourced
+> RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json" 2>/dev/null)"   # default-branch config, for keys that pick commands or reviewers
+> DEFAULT_BRANCH="${RC_REF#refs/remotes/origin/}"
 > SPEC_DIR="$(rc_get '.docs.spec_dir' 'docs/superpowers/specs/')"
 > PLAN_DIR="$(rc_get '.docs.plan_dir' 'docs/superpowers/plans/')"
 > ```
@@ -553,7 +563,7 @@ then re-authors a spec that already shipped:
 # origin/<default> degrades to working-tree-only, which is exactly today's behaviour.
 find_artifacts() {   # $1 = artifact dir with trailing slash ("$SPEC_DIR" or "$PLAN_DIR")
   { ls "$1" 2>/dev/null | sed "s|^|$1|"
-    git ls-tree -r --name-only "origin/${DEFAULT_BRANCH}" "$1" 2>/dev/null
+    git ls-tree -r --name-only "refs/remotes/origin/${DEFAULT_BRANCH}" "$1" 2>/dev/null
   } | grep -- "-$0-" | sort -u
 }
 SPEC_MATCHES=$(find_artifacts "$SPEC_DIR")
@@ -561,7 +571,7 @@ PLAN_MATCHES=$(find_artifacts "$PLAN_DIR")
 
 # H1 of each match, whichever source it came from. Working tree wins when both have it.
 artifact_h1() {   # $1 = path
-  if [ -f "$1" ]; then head -1 "$1"; else git show "origin/${DEFAULT_BRANCH}:$1" 2>/dev/null | head -1; fi
+  if [ -f "$1" ]; then head -1 "$1"; else git show "refs/remotes/origin/${DEFAULT_BRANCH}:$1" 2>/dev/null | head -1; fi
 }
 ```
 
@@ -609,7 +619,7 @@ ARTIFACT_SEQ=$(printf '%s\n%s\n' "$SPEC_H1" "$PLAN_H1" \
 ARTIFACT_ON_MAIN=""
 for f in "$SPEC_FILE" "$PLAN_FILE"; do
   [ -n "$f" ] || continue
-  git cat-file -e "origin/${DEFAULT_BRANCH}:${f}" 2>/dev/null && ARTIFACT_ON_MAIN="yes"
+  git cat-file -e "refs/remotes/origin/${DEFAULT_BRANCH}:${f}" 2>/dev/null && ARTIFACT_ON_MAIN="yes"
 done
 ```
 
@@ -717,7 +727,7 @@ change removes.
 To distinguish Phase 3 from Phase 4, check for implementation commits beyond spec/plan (excluding both artifact dirs on the default branch):
 
 ```bash
-IMPL_COMMITS=$(git log "${DEFAULT_BRANCH}..${BRANCH}" --oneline -- ":!${SPEC_DIR}" ":!${PLAN_DIR}" | wc -l | tr -d ' ')
+IMPL_COMMITS=$(git log "refs/remotes/origin/${DEFAULT_BRANCH}..${BRANCH}" --oneline -- ":!${SPEC_DIR}" ":!${PLAN_DIR}" | wc -l | tr -d ' ')
 ```
 
 If `IMPL_COMMITS` > 0 → Phase 4. If `IMPL_COMMITS` = 0 → Phase 3.
@@ -1774,9 +1784,9 @@ gh pr checks <PR> --json name,state,bucket | jq --arg c "<entry.ci_check>" '.[] 
 # filtered out. The ack pattern goes in as data through `--arg`, never pasted into the filter:
 # inside a jq string literal a pattern's `\*` is an invalid escape, and the probe errors instead
 # of filtering. An entry with no ack_pattern passes "", and every comment from it is a verdict.
-ACK=$(jq -r '.bots[] | select(.name == "<entry.name>") | .ack_pattern // ""' .claude/repo-config.json)
+ACK=$(jq -r '.bots[] | select(.name == "<entry.name>") | .ack_pattern // ""' <<<"$RC_TRUSTED_CFG")   # default-branch roster (config loader above)
 # `.login` may be a string or an array, so pass the list, never one substituted string.
-LOGINS=$(jq -c '.bots[] | select(.name == "<entry.name>") | [.login] | flatten | map(select(. != null))' .claude/repo-config.json)
+LOGINS=$(jq -c '.bots[] | select(.name == "<entry.name>") | [.login] | flatten | map(select(. != null))' <<<"$RC_TRUSTED_CFG")
 gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments | jq -s 'add // []' \
   | jq --argjson logins "$LOGINS" --arg marker "<entry.marker>" --arg p "$ACK" '
       def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
@@ -2018,7 +2028,9 @@ files=$(gh pr diff <PR> --name-only 2>/dev/null) \
 #   present but garbage  -> cannot determine who to wait for; UNKNOWN, fail closed
 #   present, all filtered-> nobody is expected FOR THIS PR; a no-op, but say so out loud
 # Only the middle case is an error. An empty result that was correctly COMPUTED is an answer.
-CFG=.claude/repo-config.json
+# Run the config loader from the top of this skill in this same shell first: the roster is the
+# default branch's (RC_TRUSTED_CFG), never the checkout's, so a PR cannot drop a blocking bot.
+CFG="$(mktemp)"; if [ -n "$RC_TRUSTED_CFG" ]; then printf '%s' "$RC_TRUSTED_CFG" > "$CFG"; else rm -f "$CFG"; fi
 # A no-op completion is still a COMPLETION and must leave the same evidence as the two success
 # exits below. Step 7 of phase detection reads PHASE75_DONE to decide a ready PR has cleared the
 # wait, so a no-op that records nothing leaves detection at REVIEW_WAIT=unknown, which routes
