@@ -409,6 +409,19 @@ Lockstep-companion (companion-PR: #NNN, approver: <dev>, reason: disproportionat
 **This entire phase runs ONLY when the repo declares a release signal** — i.e. `rc_has '.release_signal'` is true. Most repos don't have a release-classification workflow; for them this phase is **skipped in full** (and §6.0 precondition 5 below is dropped). Run the gate first:
 
 ```bash
+# Load the helper from the default branch, never this checkout (on a PR branch it is the PR's code).
+RC_REF="refs/remotes/origin/$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null)"   # the API is the authority; origin/HEAD goes stale after a rename
+[ "$RC_REF" != refs/remotes/origin/ ] || RC_REF="$(git symbolic-ref --quiet refs/remotes/origin/HEAD || echo refs/remotes/origin/main)"
+case "$RC_REF" in refs/remotes/origin/HEAD) RC_REF= ;; refs/remotes/origin/?*) ;; *) RC_REF= ;; esac
+RC_OID="$([ -n "$RC_REF" ] && git show-ref --verify --hash "$RC_REF" 2>/dev/null)"   # exact refname, no DWIM: a same-named branch or tag cannot stand in
+case "$([ -n "$RC_OID" ] && git ls-tree "$RC_OID" -- scripts/repo-config.sh | cut -d' ' -f1)" in
+  100644|100755) ;;
+  *) echo "FATAL: ${RC_REF:-the default branch} is not fetched or has no regular scripts/repo-config.sh" >&2; return 1 2>/dev/null || exit 1 ;;
+esac
+RC_SRC="$(git show "$RC_OID:scripts/repo-config.sh")" || { echo "FATAL: could not read the default-branch helper" >&2; return 1 2>/dev/null || exit 1; }
+eval "$RC_SRC"   # the commit that was checked; the checkout's copy is never sourced
+RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json" 2>/dev/null)"   # default-branch config, for keys that pick commands or reviewers
+DEFAULT_BRANCH="${RC_REF#refs/remotes/origin/}"
 if ! rc_has '.release_signal'; then
   : # no release signal configured — skip Phase 2.6 entirely; release classification is not a gate for this repo
 else

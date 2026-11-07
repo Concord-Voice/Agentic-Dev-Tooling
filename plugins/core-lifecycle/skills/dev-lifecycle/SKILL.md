@@ -563,7 +563,7 @@ then re-authors a spec that already shipped:
 # origin/<default> degrades to working-tree-only, which is exactly today's behaviour.
 find_artifacts() {   # $1 = artifact dir with trailing slash ("$SPEC_DIR" or "$PLAN_DIR")
   { ls "$1" 2>/dev/null | sed "s|^|$1|"
-    git ls-tree -r --name-only "origin/${DEFAULT_BRANCH}" "$1" 2>/dev/null
+    git ls-tree -r --name-only "refs/remotes/origin/${DEFAULT_BRANCH}" "$1" 2>/dev/null
   } | grep -- "-$0-" | sort -u
 }
 SPEC_MATCHES=$(find_artifacts "$SPEC_DIR")
@@ -571,7 +571,7 @@ PLAN_MATCHES=$(find_artifacts "$PLAN_DIR")
 
 # H1 of each match, whichever source it came from. Working tree wins when both have it.
 artifact_h1() {   # $1 = path
-  if [ -f "$1" ]; then head -1 "$1"; else git show "origin/${DEFAULT_BRANCH}:$1" 2>/dev/null | head -1; fi
+  if [ -f "$1" ]; then head -1 "$1"; else git show "refs/remotes/origin/${DEFAULT_BRANCH}:$1" 2>/dev/null | head -1; fi
 }
 ```
 
@@ -619,7 +619,7 @@ ARTIFACT_SEQ=$(printf '%s\n%s\n' "$SPEC_H1" "$PLAN_H1" \
 ARTIFACT_ON_MAIN=""
 for f in "$SPEC_FILE" "$PLAN_FILE"; do
   [ -n "$f" ] || continue
-  git cat-file -e "origin/${DEFAULT_BRANCH}:${f}" 2>/dev/null && ARTIFACT_ON_MAIN="yes"
+  git cat-file -e "refs/remotes/origin/${DEFAULT_BRANCH}:${f}" 2>/dev/null && ARTIFACT_ON_MAIN="yes"
 done
 ```
 

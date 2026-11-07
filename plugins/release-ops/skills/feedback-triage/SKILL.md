@@ -65,7 +65,19 @@ Resolve mode from `$ARGUMENTS` (default `auto`). **Always read [`references/auto
 ```bash
 # On any FATAL below, stop the skill and report it. The snippet uses `return`
 # so it ends the snippet without killing a sourced or shared shell.
-source "$(git rev-parse --show-toplevel)/scripts/repo-config.sh" || { echo "FATAL: scripts/repo-config.sh not found" >&2; return 1 2>/dev/null || exit 1; }
+# Load the helper from the default branch, never this checkout (on a PR branch it is the PR's code).
+RC_REF="refs/remotes/origin/$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null)"   # the API is the authority; origin/HEAD goes stale after a rename
+[ "$RC_REF" != refs/remotes/origin/ ] || RC_REF="$(git symbolic-ref --quiet refs/remotes/origin/HEAD || echo refs/remotes/origin/main)"
+case "$RC_REF" in refs/remotes/origin/HEAD) RC_REF= ;; refs/remotes/origin/?*) ;; *) RC_REF= ;; esac
+RC_OID="$([ -n "$RC_REF" ] && git show-ref --verify --hash "$RC_REF" 2>/dev/null)"   # exact refname, no DWIM: a same-named branch or tag cannot stand in
+case "$([ -n "$RC_OID" ] && git ls-tree "$RC_OID" -- scripts/repo-config.sh | cut -d' ' -f1)" in
+  100644|100755) ;;
+  *) echo "FATAL: ${RC_REF:-the default branch} is not fetched or has no regular scripts/repo-config.sh" >&2; return 1 2>/dev/null || exit 1 ;;
+esac
+RC_SRC="$(git show "$RC_OID:scripts/repo-config.sh")" || { echo "FATAL: could not read the default-branch helper" >&2; return 1 2>/dev/null || exit 1; }
+eval "$RC_SRC"   # the commit that was checked; the checkout's copy is never sourced
+RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json" 2>/dev/null)"   # default-branch config, for keys that pick commands or reviewers
+DEFAULT_BRANCH="${RC_REF#refs/remotes/origin/}"
 # Repo pair and sentinel prefix come from .claude/repo-config.json (.feedback_triage.*);
 # a flag (--public / --tracker, or a repo named in the request) still wins. A scheduled
 # run passes no flags, so a repo that runs this routine MUST set .feedback_triage.public
