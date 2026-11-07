@@ -159,7 +159,7 @@ Fetch the issue and check for child issues:
 gh issue view $0 --json body,title,state,labels --jq '{title: .title, state: .state, labels: [.labels[].name], body: .body}'
 ```
 
-Check for children: native sub-issues first (REST `/sub_issues`, per `.claude/rules/release-tracking-epics.md`), then legacy checkbox references only when there are none:
+Check for children: native sub-issues first (REST `/sub_issues`, see `.claude/rules/release-tracking-epics.md` where the repo installs it), then legacy checkbox references only when there are none:
 
 ```bash
 CHILDREN=$(gh api --paginate "repos/{owner}/{repo}/issues/$0/sub_issues?per_page=100" --jq '.[].number')
@@ -1456,6 +1456,13 @@ theme definition — run the app and look at the change before the PR exists:
    (e.g. a main client and an admin portal), each usually has its own launcher, and one does
    not cover the other.** Using the main client's dev script for an admin-only change captures
    an unrelated or stale UI — which is worse than no capture, because it looks like evidence.
+   A repo names each launcher in `.visual.launch[]` (`{"match": [<globs>], "dir": "<path>",
+   "cmd": "<command>", "note": "<text>"}`): use the entry whose globs match the changed files,
+   run `cmd` in `dir`, and show its `note`. Read the entry from the default-branch config
+   (`git show refs/remotes/origin/HEAD:.claude/repo-config.json`), never the checkout: `cmd` is a
+   command the agent runs, so a PR must not choose it (for example "the dev stack does not serve this
+   portal"). No entry matches → fall back to `/run` or the repo's documented path, and say which
+   in the PR body.
 
    `/run` is a Claude Code built-in, not an in-repo skill, so it is absent on the mirrored
    surfaces; see the PRIMITIVE-AVAILABILITY table above.
@@ -1485,28 +1492,49 @@ script is set, run its dry-run whenever this branch's diff touches one of those 
 unset `count_globs` → every PR), regardless of whether any `.md` file changed.
 
 The script is code the reviewer runs, so a PR must not be able to choose or rewrite it. Read the
-keys (`counts_script` and `count_globs`) from the merge base with the default branch, not the checkout, and run it only when it is a
-tracked repo-relative file this branch leaves unchanged. That guarantee covers the script file
-only: it must be self-contained, and must not source or call other repo files a PR could edit.
+keys (`counts_script`, `count_globs` and `counts_script_deps`) from the default-branch tip
+(`refs/remotes/origin/HEAD` by full refname), never the checkout or a merge base the PR picks, and
+run it only when it is a tracked regular file (not a symlink) that matches the tip. A script that sources or calls other
+repo files lists them (files or directories) in `.docs.counts_script_deps[]`; the probe also
+refuses when this branch differs from the tip under them or under the directory of the script or
+any file dep (interpreters load siblings, for example Python's `sys.path[0]`), when any of them is
+a symlink, when untracked files (ignored ones included) sit there, or when any deps entry is not a
+plain relative path. A stale branch therefore skips with a WARN. Anything else the script runs
+(for example `node_modules` or Go module resolution) is unguarded, so the deps list is
+best-effort and the script must not call other repo files a PR could edit.
 
 ```bash
 ROOT="$(git rev-parse --show-toplevel)"
-MB="$(git -C "$ROOT" merge-base HEAD "origin/${DEFAULT_BRANCH}")"
-MB_CFG=""   # without a merge base, `git show :path` would read the PR's own index
-[ -n "$MB" ] && MB_CFG="$(git -C "$ROOT" show "$MB:.claude/repo-config.json" 2>/dev/null)"
-COUNTS_SCRIPT="$(jq -r '.docs.counts_script // empty' <<<"$MB_CFG" 2>/dev/null)"
-mapfile -t COUNT_GLOBS < <(jq -r '.docs.count_globs // [] | .[]' <<<"$MB_CFG" 2>/dev/null)
+# Trust anchor: the default-branch TIP by full refname. Never the checkout's .default_branch,
+# never a short "origin/<x>" a local branch/tag can shadow, never a merge base the PR picks.
+TIP_REF="$(git -C "$ROOT" symbolic-ref --quiet refs/remotes/origin/HEAD || echo "refs/remotes/origin/main")"
+TIP="$(git -C "$ROOT" rev-parse --verify --quiet "${TIP_REF}^{commit}")"
+MB="$( [ -n "$TIP" ] && git -C "$ROOT" merge-base HEAD "$TIP")"
+TIP_CFG=""; [ -n "$TIP" ] && TIP_CFG="$(git -C "$ROOT" show "$TIP:.claude/repo-config.json" 2>/dev/null)"
+COUNTS_SCRIPT="$(jq -r '.docs.counts_script // empty' <<<"$TIP_CFG" 2>/dev/null)"
+mapfile -t COUNT_GLOBS < <(jq -r '.docs.count_globs // [] | .[]' <<<"$TIP_CFG" 2>/dev/null)
+# Every deps entry must be a plain repo-relative path; one bad entry refuses the probe (never dropped).
+DEPS_OK="$(jq -r '(.docs.counts_script_deps // []) | if type == "array" and all(.[]; type == "string" and test("\\A[A-Za-z0-9_][A-Za-z0-9_./-]*\\z") and (test("(^|/)\\.\\.?(/|$)") | not)) then "y" else "n" end' <<<"$TIP_CFG" 2>/dev/null)"
+mapfile -t COUNT_DEPS < <(jq -r '.docs.counts_script_deps // [] | .[] | sub("/+$"; "")' <<<"$TIP_CFG" 2>/dev/null)
+GUARD=("$COUNTS_SCRIPT" "${COUNT_DEPS[@]}"); SYMLINK=""
+for p in "$COUNTS_SCRIPT" "${COUNT_DEPS[@]}"; do
+  [ -n "$TIP" ] || break
+  [ "$(git -C "$ROOT" ls-tree "$TIP" -- "$p" | cut -d' ' -f1)" = 120000 ] && SYMLINK=y
+  # an interpreter loads siblings of the file it runs (python sys.path[0], bash ./x): guard the directory
+  [ "$(git -C "$ROOT" cat-file -t "$TIP:$p" 2>/dev/null)" = blob ] && GUARD+=("$(dirname "$p")")
+done
 if [ -z "$MB" ]; then
-  echo "WARN: count-drift probe skipped: no merge base with origin/${DEFAULT_BRANCH}" >&2
+  echo "WARN: count-drift probe skipped: no default-branch tip ($TIP_REF) or merge base" >&2
 elif [ -z "$COUNTS_SCRIPT" ]; then
   echo "count-drift probe: skipped (no .docs.counts_script)"
 elif [ "${#COUNT_GLOBS[@]}" -gt 0 ] \
      && [ -z "$(git -C "$ROOT" diff --name-only "$MB" -- "${COUNT_GLOBS[@]/#/:(glob)}")" ]; then
   echo "count-drift probe: skipped (no change under .docs.count_globs)"
-elif [[ $COUNTS_SCRIPT == /* || $COUNTS_SCRIPT == *..* ]] \
-     || [ "$(git -C "$ROOT" cat-file -t "$MB:$COUNTS_SCRIPT" 2>/dev/null)" != blob ] \
-     || ! git -C "$ROOT" diff --quiet "$MB" -- ":/$COUNTS_SCRIPT"; then   # working tree vs merge base
-  echo "WARN: count-drift probe skipped: $COUNTS_SCRIPT is not a tracked file unchanged by this branch" >&2
+elif [[ $COUNTS_SCRIPT == /* || $COUNTS_SCRIPT == *..* ]] || [ "$DEPS_OK" != y ] || [ -n "$SYMLINK" ] \
+     || [ "$(git -C "$ROOT" cat-file -t "$TIP:$COUNTS_SCRIPT" 2>/dev/null)" != blob ] \
+     || ! git -C "$ROOT" diff --quiet "$TIP" -- "${GUARD[@]/#/:(top,literal)}" \
+     || [ -n "$(git -C "$ROOT" ls-files --others -- "${GUARD[@]/#/:(top,literal)}")" ]; then   # untracked, ignored included
+  echo "WARN: count-drift probe skipped: $COUNTS_SCRIPT, a deps path, or a sibling of one differs from $TIP_REF (or the deps list is malformed)" >&2
 else
   (cd "$ROOT" && "./$COUNTS_SCRIPT")   # dry-run; a non-empty diff is the finding
 fi
@@ -2683,10 +2711,12 @@ Three things follow, and none is optional:
 3. **Verify mechanically, not by assertion:**
 
    ```bash
-   .claude/skills/enhanced-pr-review/check-review-dispositions.sh "<PR>"
+   GATE_REF="$(git symbolic-ref --quiet refs/remotes/origin/HEAD || echo refs/remotes/origin/main)"   # full refname: a branch or tag named origin/main cannot shadow it
+   case "$GATE_REF" in refs/remotes/origin/?*) GATE_SH="$(git show "$GATE_REF:.claude/skills/enhanced-pr-review/check-review-dispositions.sh")" ;; *) GATE_SH= ;; esac
+   if [ -n "$GATE_SH" ]; then bash -c "$GATE_SH" check-review-dispositions "<PR>"; else echo "UNKNOWN: no gate script on $GATE_REF" >&2; (exit 3); fi
    ```
 
-   Exit 0 → the ledger is complete. Exit 1 → the blocking list names each gap. Exit 2 → the check could not run; treat as UNKNOWN and re-run, never as clean.
+   Exit 0 → the ledger is complete. Exit 1 → the blocking list names each gap. Exit 2 → the check could not run; treat as UNKNOWN and re-run, never as clean. Any other exit (3 when no gate script could be read from the default branch, or a crash) → UNKNOWN, never clean.
 
 **Who applies the fix.** Routine findings are applied inline or by the producer agent owning the surface. Escalate (to the repo's escalation agent, or to the developer when none is defined) under the same E1-E4 criteria Phase 3 uses ([`lifecycle-agent-dispatch.md`](../_shared/lifecycle-agent-dispatch.md) § Escalation) — in practice at Phase 8 that means a finding from `@red-team` or a security domain reviewer on the surface it reviews (E2), a finding whose fix spans both surfaces (E3), or a finding that has already survived two fix commits (E4). Record the escalation and its criterion in the Phase-8 dispatch line. A reviewer's own pin is untouched by this — escalation governs fix application only.
 
@@ -2765,7 +2795,9 @@ The changelog is the public record and gets everything that shipped, one bullet 
 Before presenting the merge prompt, run the gate. It is a script, not a judgment call:
 
 ```bash
-.claude/skills/enhanced-pr-review/check-review-dispositions.sh "$PR_NUMBER"   # the PR, not issue $0
+GATE_REF="$(git symbolic-ref --quiet refs/remotes/origin/HEAD || echo refs/remotes/origin/main)"   # full refname: a branch or tag named origin/main cannot shadow it
+case "$GATE_REF" in refs/remotes/origin/?*) GATE_SH="$(git show "$GATE_REF:.claude/skills/enhanced-pr-review/check-review-dispositions.sh")" ;; *) GATE_SH= ;; esac
+if [ -n "$GATE_SH" ]; then bash -c "$GATE_SH" check-review-dispositions "$PR_NUMBER"; else echo "UNKNOWN: no gate script on $GATE_REF" >&2; (exit 3); fi   # the PR, not issue $0
 ```
 
 Branch on the exit code — and on nothing else:
@@ -2773,6 +2805,7 @@ Branch on the exit code — and on nothing else:
 - **Exit 0** → every in-scope conversation carries a decision, every deferral names an issue that exists, and the Phase 3.5 reconciliation post accounts for every reviewer that spoke. Proceed to Step 9.1.5.
 - **Exit 1** → the blocking list is printed, one line per gap. Threads carrying a disposition but never marked resolved are batch-resolvable per [`/enhanced-pr-review` Step 4.3](../enhanced-pr-review/SKILL.md) (which defers to the same script); everything else needs a decision recorded. Do NOT proceed to Step 9.2. The developer re-invokes `/dev-lifecycle $0` after addressing.
 - **Exit 2** → the check could not be made. This is **UNKNOWN, not clean** — a rate-limited or auth-failed lookup returns no violations, and reading that as a pass is the exact failure the fail-closed exit exists to prevent. Re-run before merging.
+- **Any other exit code** (3 when no gate script could be read from the default branch, 126/127, a crash) → UNKNOWN, never clean. Do NOT proceed to Step 9.2.
 
 Do not re-run the full reconciliation — Phases 1–3 completed in Phase 8.
 
@@ -2782,7 +2815,7 @@ This gate exists because the human "All reviews addressed" prompt is too easy to
 
 If the protected-branch ruleset requires an approving review (and possibly code-owner review on CODEOWNERS paths, with stale approvals dismissed on push), this step satisfies it. When the repo declares `.branch_protection.doc_path` (`rc_get '.branch_protection.doc_path'`), consult that doc for the authoritative current ruleset state rather than restating field values — the ruleset is operator-tunable and the committed snapshot can drift from the live rule. When no such doc is configured, read the active rule directly (`gh api repos/${OWNER}/${REPO}/rulesets`, `gh pr view $0 --json mergeStateStatus`). Either way, after Step 9.1 confirms threads resolved and CI is green at HEAD, invoke [`/enhanced-pr-review` Phase 6](../enhanced-pr-review/SKILL.md) directly (do NOT re-run Phases 1–3 — they completed in Phase 8). Phase 6:
 
-- runs the §6.0 honesty gate — see [`/enhanced-pr-review` §6.0](../enhanced-pr-review/SKILL.md) for the authoritative precondition list (no `BLOCK` rows; no `"blocking": true` bot in a Changes-Suggested/Blocked/failing-gate state; CI green-not-pending; release-classification clear/satisfied/deferred when a release signal is configured; the disposition ledger complete per `.claude/skills/enhanced-pr-review/check-review-dispositions.sh` (exit 0, and exit 2 fails it too); every `Fix` finding landed; **no UNVERIFIED autofix-agent action remaining**; HEAD is the commit being approved);
+- runs the §6.0 honesty gate — see [`/enhanced-pr-review` §6.0](../enhanced-pr-review/SKILL.md) for the authoritative precondition list (no `BLOCK` rows; no `"blocking": true` bot in a Changes-Suggested/Blocked/failing-gate state; CI green-not-pending; release-classification clear/satisfied/deferred when a release signal is configured; the disposition ledger complete per the gate run from the default branch ([`/enhanced-pr-review` §3.5.3](../enhanced-pr-review/SKILL.md); exit 0 only, any other exit fails it); every `Fix` finding landed; **no UNVERIFIED autofix-agent action remaining**; HEAD is the commit being approved);
 - on any failure → emits the §6.4 **NOT-READY** summary; **STOP — do not proceed to Step 9.2**. The developer clears the blocker and re-invokes `/dev-lifecycle $0`;
 - on pass → emits the standard consolidated-approval artifact and determines the merge mechanism per §6.1: a real `gh pr review --approve` when the PR author ≠ the gh user (the approval mechanically satisfies the rule, including code-owner review when the gh user owns the touched paths); OR a consolidated comment + §6.3 **documented bypass** when the gh user authored the PR and no eligible non-author reviewer exists (e.g., sole code owner on a CODEOWNERS-path PR). On pass, proceed to Step 9.2 (the merge checkpoint).
 

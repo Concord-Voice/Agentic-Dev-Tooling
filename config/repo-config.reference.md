@@ -10,7 +10,8 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 |---|---|---|---|
 | `default_branch` | string | `gh repo view --json defaultBranchRef` → else `main` | release-notes. dev-lifecycle, verify-quality-gate and pr-creation ignore it and use the GitHub API, then `refs/remotes/origin/HEAD`, then `main`, because a PR can edit this key. |
 | `docs.spec_dir` / `docs.plan_dir` | string | `docs/superpowers/specs/` / `…/plans/` | dev-lifecycle |
-| `docs.counts_script` | string | unset → count-drift probe skipped | dev-lifecycle Phase 4, enhanced-pr-review §2.5.0: repo-relative script that dry-runs (no args) or applies (`--apply`) a metric-count refresh. Read from the default-branch merge base; it runs only if tracked there and unchanged by the PR. |
+| `docs.counts_script` | string | unset → count-drift probe skipped | dev-lifecycle Phase 4, enhanced-pr-review §2.5.0: repo-relative script that dry-runs (no args) or applies (`--apply`) a metric-count refresh. Read from the default-branch tip (`refs/remotes/origin/HEAD`), never the checkout; it runs only if it is a regular tracked file there (not a symlink) and the branch matches the tip at it and its directory. |
+| `docs.counts_script_deps[]` | string[] | `[]` → the script must call no other repo file | dev-lifecycle Phase 4, enhanced-pr-review §2.5.0: repo-relative files or directories the counts script sources or calls. Read from the default-branch tip. Entries must be plain relative paths (one bad entry skips the probe). The probe is skipped with a WARN when the branch differs from the tip under any of them or the directory of a file dep, when one is a symlink, or when untracked files (ignored ones included) sit there. |
 | `docs.count_globs[]` | string[] | `[]` → run the probe on every PR when `counts_script` is set | dev-lifecycle Phase 4: paths whose change can make a count stale, as git `:(glob)` pathspecs from the repo root (`*` stays within a directory, `**` crosses them) |
 | `project` | object\|null | null → all project-board ops skipped | issue-creation, pr-creation, dev-lifecycle |
 | `project.id` | string | — | board mutations (`PVT_…` node id) |
@@ -25,6 +26,7 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 | `migrations.dir` | string | `migrations/` | migration-reviewer, create-migration, protect-applied-migrations.sh |
 | `paths.electron_dir` | string | `.` (repo root) | ipc-channel-audit, pr-review-agent-dispatch |
 | `agents.escalation` | string | unset → no escalation agent; an E1-E4 hit is surfaced to the developer | dev-lifecycle, reproduce-then-fix, weekly-deps (`lifecycle-agent-dispatch.md` § Escalation) |
+| `agents.design_rows[]` | array of `{agent, match?: [globs], with?: agent}` | `[]` → the shared Phase-2 panel alone | lifecycle-agent-dispatch Phase 2: extra stage-1 design seats, hand-dispatch only (the `design-panel` Workflow does not read it yet). A row fires when a `match` glob is in scope or the `with` agent is dispatched. |
 | `agents.producer_rows[]` | array of `{match: [globs], agent}` | `[]` → the shared Phase-3 producer table alone | dev-lifecycle Phase 3 (`lifecycle-agent-dispatch.md` § producer table); checked after shared rows 1–2 (tests, migrations) and before row 3; first match wins; `agent` matches `\A[a-z0-9][a-z0-9-]*\z`; a non-array value or malformed row is skipped and named; repo-row matches are E1–E4 eligible unless the agent is one § Escalation lists as ineligible |
 | `red_team.critical_agent` | string | unset → no T3 tier; read from the merge base | enhanced-pr-review (`pr-review-agent-dispatch.md` § risk tiers) |
 | `red_team.critical_paths[]` | string[] | `[]` | globs whose change forces T3; ignored unless `critical_agent` is set |
@@ -52,6 +54,7 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 | `epic_linkage.epic_title_pattern` / `.epic_label` | string | `Epic: v{version} release` / `type: epic` | epic linkage |
 | `epic_linkage.version_epics` | bool | `true`; `false` → feature epics only, no missing-version-epic flag | phase-status |
 | `agents.escalation_surfaces` | string[] | `[]` | reproduce-then-fix E2 only: extra surfaces (for example a concurrency fence) that count as escalation-worthy in its debugging loop; dev-lifecycle's E2 list is fixed in `_shared/lifecycle-agent-dispatch.md` |
+| `visual.launch[]` | array of `{match: [globs], dir, cmd, note?}` | `[]` → `/run` or the repo's documented path | dev-lifecycle Phase 4 visual verification: the launcher for each UI surface, picked by the changed files. |
 | `feedback_triage.public` / `.tracker` | string (`owner/repo`) | unset → Phase 0 stops | feedback-triage: public intake repo and private tracker |
 | `feedback_triage.sentinel_prefix` | string | `feedback-triage` | feedback-triage: HTML-comment marker prefix (`<!-- {prefix}:status v1 -->`) |
 | `release.frontend_dir` / `.backend_dir` | string | `frontend` / `backend` | release-checklist |
