@@ -67,7 +67,8 @@ RC_SRC="$(git show "$RC_OID:scripts/repo-config.sh")" || { echo "FATAL: could no
 eval "$RC_SRC"   # the commit that was checked; the checkout's copy is never sourced
 RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json" 2>/dev/null)"   # default-branch config, for keys that pick commands or reviewers
 DEFAULT_BRANCH="${RC_REF#refs/remotes/origin/}"
-RC_FILE="$(mktemp)"; printf '%s' "$RC_TRUSTED_CFG" > "$RC_FILE"   # rc_get now reads the default branch's config
+RC_FILE="$(mktemp)"   # rc_get now reads the default branch's config
+if [ -n "$RC_TRUSTED_CFG" ]; then printf '%s' "$RC_TRUSTED_CFG" > "$RC_FILE"; else rm -f "$RC_FILE"; fi   # absent config: rc_get's [ -f ] guard returns the defaults
 QG_ENABLED="$(rc_get '.quality_gate.enabled' false)"
 COVERAGE_MIN="$(rc_get '.quality_gate.coverage_min' 80)"
 BLOCKERS_MAX="$(rc_get '.quality_gate.blockers_max' 0)"
