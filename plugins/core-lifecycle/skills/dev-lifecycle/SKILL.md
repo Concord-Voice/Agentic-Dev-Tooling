@@ -41,7 +41,7 @@ When a phase says "Run `/skill-name`", you MUST invoke it via the Skill tool. Do
 
 > **Structure is generic; the repo-specific knobs are data.** The 9-phase flow, the mode-to-gate matrix, the dispatch gate, and the never-`--admin`-bypass discipline are fixed. Everything that varies per repo — artifact directories, the bot roster waited on at Phase 7.5, the reviewer roster at Phase 8, the quality gate, parent-epic linkage, version-bump, and branch-protection prose — is read from the OPTIONAL per-repo `.claude/repo-config.json` via the shared helper `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has '<jq-filter>'`). With an absent file, or any absent/`null` key, the affected step **degrades gracefully** — it is skipped, never errored. The bot roster in particular lives in `.bots[]` as the **single source of truth** shared with `/enhanced-pr-review`, so the two can never drift on which bots are online/offline or blocking. See `config/repo-config.reference.md` for the full schema.
 >
-> Load the helper once at the top of any phase that reads config, and resolve the default branch up front (used throughout in place of a hard-coded `main`). **Load the helper from the default branch, never from this checkout:** on a PR branch, `scripts/repo-config.sh` is the PR's code, and sourcing it runs that code before any review gate does. The block below loads the default branch's helper (the branch comes from the GitHub API, then `origin/HEAD`, then `main`), takes `DEFAULT_BRANCH` from that ref rather than the PR-editable `.default_branch` key, and puts the default branch's config in `RC_TRUSTED_CFG`. Each Bash call starts a fresh shell, so run this block again in any call that uses `rc_get` or `RC_TRUSTED_CFG`. `rc_get` still reads the checkout's `.claude/repo-config.json`, so treat it as PR-controlled. These steps read the default branch's config instead, because their keys pick commands or reviewers: the Phase 4 count-drift probe, the Phase 7.5 bot roster, `/verify-quality-gate`, and the review floor and disposition gate in `/review-pr` and `/enhanced-pr-review`. `/pr-creation` and every other skill that uses the helper load it the same way. Every other `rc_get` key in this skill only shapes paths, prose or board fields, and a PR may change those.
+> Load the helper once at the top of any phase that reads config, and resolve the default branch up front (used throughout in place of a hard-coded `main`). **Load the helper from the default branch, never from this checkout:** on a PR branch, `scripts/repo-config.sh` is the PR's code, and sourcing it executes that code before any review gate does. The block below loads the default branch's helper (the branch comes from the GitHub API, then `origin/HEAD`, then `main`), takes `DEFAULT_BRANCH` from that ref rather than the PR-editable `.default_branch` key, and puts the default branch's config in `RC_TRUSTED_CFG`. Each Bash call starts a fresh shell, so repeat this block in any call that uses `rc_get` or `RC_TRUSTED_CFG`. `rc_get` still reads the checkout's `.claude/repo-config.json`, so treat it as PR-controlled. These steps read the default branch's config instead, because their keys pick commands or reviewers: the Phase 4 count-drift probe, the Phase 7.5 bot roster, `/verify-quality-gate`, and the review floor and disposition gate in `/review-pr` and `/enhanced-pr-review`. `/pr-creation` and every other skill that uses the helper load it the same way. Every other `rc_get` key in this skill only shapes paths, prose or board fields, and a PR may change those.
 >
 > ```bash
 > RC_REF="refs/remotes/origin/$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null)"   # the API is the authority; origin/HEAD goes stale after a rename
@@ -54,7 +54,18 @@ When a phase says "Run `/skill-name`", you MUST invoke it via the Skill tool. Do
 > esac
 > RC_SRC="$(git show "$RC_OID:scripts/repo-config.sh")" || { echo "FATAL: could not read the default-branch helper" >&2; return 1 2>/dev/null || exit 1; }
 > eval "$RC_SRC"   # the commit that was checked; the checkout's copy is never sourced
-> RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json" 2>/dev/null)"   # default-branch config, for keys that pick commands or reviewers
+> unset RC_TRUSTED_STATE RC_TRUSTED_CFG   # nothing carries over from an earlier run in this shell
+> # Presence comes from the tree, not from a read: a blob that is listed but cannot be read is an
+> # error, never "absent". RC_TRUSTED_STATE: absent = no config on the default branch; present = read.
+> RC_ENT="$(git ls-tree "$RC_OID" -- .claude/repo-config.json)" || { echo "FATAL: could not list the default-branch tree" >&2; return 1 2>/dev/null || exit 1; }
+> case "${RC_ENT%% *}" in
+>   "") RC_TRUSTED_STATE=absent ;;
+>   100644|100755)
+>     RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json")" && [ -n "$RC_TRUSTED_CFG" ] \
+>       || { echo "FATAL: could not read the default-branch .claude/repo-config.json" >&2; return 1 2>/dev/null || exit 1; }
+>     RC_TRUSTED_STATE=present ;;
+>   *) echo "FATAL: the default-branch .claude/repo-config.json is not a regular file" >&2; return 1 2>/dev/null || exit 1 ;;
+> esac
 > DEFAULT_BRANCH="${RC_REF#refs/remotes/origin/}"
 > SPEC_DIR="$(rc_get '.docs.spec_dir' 'docs/superpowers/specs/')"
 > PLAN_DIR="$(rc_get '.docs.plan_dir' 'docs/superpowers/plans/')"
@@ -1458,11 +1469,13 @@ theme definition — run the app and look at the change before the PR exists:
    an unrelated or stale UI — which is worse than no capture, because it looks like evidence.
    A repo names each launcher in `.visual.launch[]` (`{"match": [<globs>], "dir": "<path>",
    "cmd": "<command>", "note": "<text>"}`): use the entry whose globs match the changed files,
-   run `cmd` in `dir`, and show its `note`. Read the entry from the default-branch config
-   (`git show refs/remotes/origin/HEAD:.claude/repo-config.json`), never the checkout: `cmd` is a
-   command the agent runs, so a PR must not choose it (for example "the dev stack does not serve this
-   portal"). No entry matches → fall back to `/run` or the repo's documented path, and say which
-   in the PR body.
+   run `cmd` in `dir`, and show its `note` (for example "the dev stack does not serve this
+   portal"). Read the entries from the default-branch config, never the checkout: run the config
+   loader at the top of this skill in the same call, then `jq -c '.visual.launch // []' <<<"$RC_TRUSTED_CFG"`
+   (`RC_TRUSTED_STATE=absent` gives no entries). `cmd` is a command the agent runs, so a PR must not choose it. Pinning
+   `cmd` does not pin what it starts: a dev script runs the PR's own package scripts and build
+   config, so launch only a branch you would run anyway (your own work, or a sandbox). No entry
+   matches → fall back to `/run` or the repo's documented path, and say which in the PR body.
 
    `/run` is a Claude Code built-in, not an in-repo skill, so it is absent on the mirrored
    surfaces; see the PRIMITIVE-AVAILABILITY table above.
@@ -2058,7 +2071,13 @@ files=$(gh pr diff <PR> --name-only 2>/dev/null) \
 # Only the middle case is an error. An empty result that was correctly COMPUTED is an answer.
 # Run the config loader from the top of this skill in this same shell first: the roster is the
 # default branch's (RC_TRUSTED_CFG), never the checkout's, so a PR cannot drop a blocking bot.
-CFG="$(mktemp)"; if [ -n "$RC_TRUSTED_CFG" ]; then printf '%s' "$RC_TRUSTED_CFG" > "$CFG"; else rm -f "$CFG"; fi
+# RC_TRUSTED_STATE tells "the default branch has no config" (a real no-op) apart from "the
+# loader never ran in this shell" (unknown). Treating the second as the first skips a blocking bot.
+case "${RC_TRUSTED_STATE:-}" in
+  present) CFG="$(mktemp)"; printf '%s' "$RC_TRUSTED_CFG" > "$CFG" ;;
+  absent)  CFG="$(mktemp)"; rm -f "$CFG" ;;
+  *) echo "UNKNOWN: the config loader did not run in this shell (RC_TRUSTED_STATE unset) — cannot tell an absent roster from an unread one"; exit 2 ;;
+esac
 # A no-op completion is still a COMPLETION and must leave the same evidence as the two success
 # exits below. Step 7 of phase detection reads PHASE75_DONE to decide a ready PR has cleared the
 # wait, so a no-op that records nothing leaves detection at REVIEW_WAIT=unknown, which routes

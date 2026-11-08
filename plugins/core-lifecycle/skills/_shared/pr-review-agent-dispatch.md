@@ -195,7 +195,7 @@ exactly as review-pr matches `.review_agents.patterns[].glob`: a bash pattern ma
 changed path from the repo root, where `*` also matches `/`). Read both keys from the **merge
 base**, never the head: a PR must not be able to lower its own tier by editing them. Use the merge base of the head with the repo's **default branch**, not with the
 PR's own base: the author picks the base, so an unreviewed branch or a stacked PR could carry a
-weaker value. Resolve it with `git merge-base "origin/$DEFAULT_REF" "$HEAD_SHA"` (review-pr's
+weaker value. Resolve it with `git merge-base "refs/remotes/origin/$DEFAULT_REF" "$HEAD_SHA"` (the full refname, so a branch or tag named `origin/<default>` cannot stand in; review-pr's
 floor guard does the same through the API), then read
 `git show "$MERGE_BASE_SHA:.claude/repo-config.json" | jq '.red_team'`. If the merge base or that
 file cannot be read, treat the PR as T3 (fail closed). A PR that changes either key, or the critical
