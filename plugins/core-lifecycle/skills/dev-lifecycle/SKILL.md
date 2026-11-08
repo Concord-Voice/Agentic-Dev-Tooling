@@ -55,6 +55,11 @@ When a phase says "Run `/skill-name`", you MUST invoke it via the Skill tool. Do
 > RC_SRC="$(git show "$RC_OID:scripts/repo-config.sh")" || { echo "FATAL: could not read the default-branch helper" >&2; return 1 2>/dev/null || exit 1; }
 > eval "$RC_SRC"   # the commit that was checked; the checkout's copy is never sourced
 > RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json" 2>/dev/null)"   # default-branch config, for keys that pick commands or reviewers
+> # absent = the default branch ships no config; present = read. Unset means this block did not run in this shell.
+> if git cat-file -e "$RC_OID:.claude/repo-config.json" 2>/dev/null; then
+>   [ -n "$RC_TRUSTED_CFG" ] || { echo "FATAL: could not read the default-branch .claude/repo-config.json" >&2; return 1 2>/dev/null || exit 1; }
+>   RC_TRUSTED_STATE=present
+> else RC_TRUSTED_STATE=absent; fi
 > DEFAULT_BRANCH="${RC_REF#refs/remotes/origin/}"
 > SPEC_DIR="$(rc_get '.docs.spec_dir' 'docs/superpowers/specs/')"
 > PLAN_DIR="$(rc_get '.docs.plan_dir' 'docs/superpowers/plans/')"
@@ -1458,11 +1463,12 @@ theme definition — run the app and look at the change before the PR exists:
    an unrelated or stale UI — which is worse than no capture, because it looks like evidence.
    A repo names each launcher in `.visual.launch[]` (`{"match": [<globs>], "dir": "<path>",
    "cmd": "<command>", "note": "<text>"}`): use the entry whose globs match the changed files,
-   run `cmd` in `dir`, and show its `note`. Read the entry from the default-branch config
-   (`git show refs/remotes/origin/HEAD:.claude/repo-config.json`), never the checkout: `cmd` is a
-   command the agent runs, so a PR must not choose it (for example "the dev stack does not serve this
-   portal"). No entry matches → fall back to `/run` or the repo's documented path, and say which
-   in the PR body.
+   run `cmd` in `dir`, and show its `note` (for example "the dev stack does not serve this
+   portal"). Read the entry from `RC_TRUSTED_CFG` (the config loader at the top of this skill),
+   never the checkout: `cmd` is a command the agent runs, so a PR must not choose it. Pinning
+   `cmd` does not pin what it starts: a dev script runs the PR's own package scripts and build
+   config, so launch only a branch you would run anyway (your own work, or a sandbox). No entry
+   matches → fall back to `/run` or the repo's documented path, and say which in the PR body.
 
    `/run` is a Claude Code built-in, not an in-repo skill, so it is absent on the mirrored
    surfaces; see the PRIMITIVE-AVAILABILITY table above.
@@ -2058,7 +2064,13 @@ files=$(gh pr diff <PR> --name-only 2>/dev/null) \
 # Only the middle case is an error. An empty result that was correctly COMPUTED is an answer.
 # Run the config loader from the top of this skill in this same shell first: the roster is the
 # default branch's (RC_TRUSTED_CFG), never the checkout's, so a PR cannot drop a blocking bot.
-CFG="$(mktemp)"; if [ -n "$RC_TRUSTED_CFG" ]; then printf '%s' "$RC_TRUSTED_CFG" > "$CFG"; else rm -f "$CFG"; fi
+# RC_TRUSTED_STATE tells "the default branch has no config" (a real no-op) apart from "the
+# loader never ran in this shell" (unknown). Treating the second as the first skips a blocking bot.
+case "${RC_TRUSTED_STATE:-}" in
+  present) CFG="$(mktemp)"; printf '%s' "$RC_TRUSTED_CFG" > "$CFG" ;;
+  absent)  CFG="$(mktemp)"; rm -f "$CFG" ;;
+  *) echo "UNKNOWN: the config loader did not run in this shell (RC_TRUSTED_STATE unset) — cannot tell an absent roster from an unread one"; exit 2 ;;
+esac
 # A no-op completion is still a COMPLETION and must leave the same evidence as the two success
 # exits below. Step 7 of phase detection reads PHASE75_DONE to decide a ready PR has cleared the
 # wait, so a no-op that records nothing leaves detection at REVIEW_WAIT=unknown, which routes
