@@ -4,7 +4,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BLOCK="$(mktemp)"; trap 'rm -f "$BLOCK"' EXIT
-awk '/^PR_BASE=/{f=1} f{print} f&&/^MB_CFG_SHA=/{g=1} g&&/^fi$/{exit}' \
+awk '/^PR_BASE=/{f=1} f{print} f&&/^MB_CFG_SHA=/{g=1} g&&/^fi$/{h=1} h&&/^done$/{exit}' \
   "$ROOT/plugins/core-lifecycle/skills/review-pr/SKILL.md" > "$BLOCK"
 [[ -s "$BLOCK" ]] || { echo "FAIL: floor block not found in review-pr SKILL.md"; exit 1; }
 
@@ -18,7 +18,8 @@ gh() {  # stub: PR base, repo default branch, or the config blob
   esac
 }
 DEFAULT='security-reviewer code-reviewer docs-reviewer'
-T='{"tree":[{"path":".claude/repo-config.json","type":"blob","mode":"100644","sha":"abc"}]}'
+AG='{"path":".claude/agents/security-reviewer.md","type":"blob","mode":"100644"},{"path":".claude/agents/code-reviewer.md","type":"blob","mode":"100644"},{"path":".claude/agents/docs-reviewer.md","type":"blob","mode":"100644"},{"path":".claude/agents/red-team.md","type":"blob","mode":"100644"}'
+T='{"tree":[{"path":".claude/repo-config.json","type":"blob","mode":"100644","sha":"abc"},'"$AG"']}'
 PASS=0; FAIL=0
 check() {  # name want-floor|STOP cfg tree
   local name="$1" want="$2" cfg="$3" tree="$4" got
@@ -29,7 +30,9 @@ check() {  # name want-floor|STOP cfg tree
 check "key set replaces the floor" "red-team code-reviewer docs-reviewer" \
   '{"review_agents":{"mandatory":["red-team","code-reviewer","docs-reviewer"]}}' "$T"
 check "key absent keeps the default" "$DEFAULT" '{"review_agents":{"base":["x"]}}' "$T"
-check "no config at merge base keeps the default" "$DEFAULT" '{"review_agents":{"mandatory":["x"]}}' '{"tree":[]}'
+check "no config at merge base keeps the default" "$DEFAULT" '{"review_agents":{"mandatory":["x"]}}' '{"tree":['"$AG"']}'
+check "floor agent missing at merge base stops" STOP '{"review_agents":{"mandatory":["red-team","ghost-reviewer"]}}' "$T"
+check "default floor agent missing stops" STOP '{"review_agents":{"base":["x"]}}' '{"tree":[{"path":".claude/repo-config.json","type":"blob","mode":"100644","sha":"abc"}]}'
 check "empty array stops" STOP '{"review_agents":{"mandatory":[]}}' "$T"
 check "bad agent name stops" STOP '{"review_agents":{"mandatory":["Bad Name"]}}' "$T"
 check "non-string entry stops" STOP '{"review_agents":{"mandatory":[1]}}' "$T"
@@ -38,8 +41,8 @@ GH_FAIL=1 check "failed blob fetch stops" STOP '{}' "$T"
 KEY='{"review_agents":{"mandatory":["docs-reviewer"]}}'
 # Non-default base: the config comes from the merge base with the default branch,
 # so a weak key at the PR's own merge base is ignored.
-PR_BASE_REF=staging DEFAULT_TREE='{"truncated":false,"tree":[]}' check "non-default base ignores the PR merge-base key" "$DEFAULT" "$KEY" "$T"
-PR_BASE_REF=staging DEFAULT_TREE='{"truncated":false,"tree":[{"path":".claude/repo-config.json","type":"blob","mode":"100644","sha":"abc"}]}' \
+PR_BASE_REF=staging DEFAULT_TREE='{"truncated":false,"tree":['"$AG"']}' check "non-default base ignores the PR merge-base key" "$DEFAULT" "$KEY" "$T"
+PR_BASE_REF=staging DEFAULT_TREE='{"truncated":false,"tree":[{"path":".claude/repo-config.json","type":"blob","mode":"100644","sha":"abc"},'"$AG"']}' \
   check "non-default base reads the default-branch merge base" "docs-reviewer" "$KEY" "$T"
 PR_BASE_REF=staging MB_DEFAULT_TREE_SHA=bad check "non-default base with no usable merge base stops" STOP "$KEY" "$T"
 PR_BASE_SHA=moved check "base moved stops" STOP "$KEY" "$T"
@@ -47,5 +50,6 @@ check "non-object review_agents stops" STOP '{"review_agents":"x"}' "$T"
 check "non-object config stops" STOP '[1]' "$T"
 check "config path is a tree stops" STOP "$KEY" '{"tree":[{"path":".claude/repo-config.json","type":"tree","mode":"040000","sha":"abc"}]}'
 check "config path is a symlink stops" STOP "$KEY" '{"tree":[{"path":".claude/repo-config.json","type":"blob","mode":"120000","sha":"abc"}]}'
+check "symlinked floor agent stops" STOP '{"review_agents":{"mandatory":["red-team"]}}' '{"tree":[{"path":".claude/repo-config.json","type":"blob","mode":"100644","sha":"abc"},{"path":".claude/agents/red-team.md","type":"blob","mode":"120000"}]}'
 echo "passed: $PASS   failed: $FAIL"
 [[ "$FAIL" -eq 0 ]]
