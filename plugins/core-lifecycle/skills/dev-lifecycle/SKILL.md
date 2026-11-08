@@ -54,12 +54,18 @@ When a phase says "Run `/skill-name`", you MUST invoke it via the Skill tool. Do
 > esac
 > RC_SRC="$(git show "$RC_OID:scripts/repo-config.sh")" || { echo "FATAL: could not read the default-branch helper" >&2; return 1 2>/dev/null || exit 1; }
 > eval "$RC_SRC"   # the commit that was checked; the checkout's copy is never sourced
-> RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json" 2>/dev/null)"   # default-branch config, for keys that pick commands or reviewers
-> # absent = the default branch ships no config; present = read. Unset means this block did not run in this shell.
-> if git cat-file -e "$RC_OID:.claude/repo-config.json" 2>/dev/null; then
->   [ -n "$RC_TRUSTED_CFG" ] || { echo "FATAL: could not read the default-branch .claude/repo-config.json" >&2; return 1 2>/dev/null || exit 1; }
->   RC_TRUSTED_STATE=present
-> else RC_TRUSTED_STATE=absent; fi
+> unset RC_TRUSTED_STATE RC_TRUSTED_CFG   # nothing carries over from an earlier run in this shell
+> # Presence comes from the tree, not from a read: a blob that is listed but cannot be read is an
+> # error, never "absent". RC_TRUSTED_STATE: absent = no config on the default branch; present = read.
+> RC_ENT="$(git ls-tree "$RC_OID" -- .claude/repo-config.json)" || { echo "FATAL: could not list the default-branch tree" >&2; return 1 2>/dev/null || exit 1; }
+> case "${RC_ENT%% *}" in
+>   "") RC_TRUSTED_STATE=absent ;;
+>   100644|100755)
+>     RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json")" && [ -n "$RC_TRUSTED_CFG" ] \
+>       || { echo "FATAL: could not read the default-branch .claude/repo-config.json" >&2; return 1 2>/dev/null || exit 1; }
+>     RC_TRUSTED_STATE=present ;;
+>   *) echo "FATAL: the default-branch .claude/repo-config.json is not a regular file" >&2; return 1 2>/dev/null || exit 1 ;;
+> esac
 > DEFAULT_BRANCH="${RC_REF#refs/remotes/origin/}"
 > SPEC_DIR="$(rc_get '.docs.spec_dir' 'docs/superpowers/specs/')"
 > PLAN_DIR="$(rc_get '.docs.plan_dir' 'docs/superpowers/plans/')"
@@ -1464,8 +1470,9 @@ theme definition — run the app and look at the change before the PR exists:
    A repo names each launcher in `.visual.launch[]` (`{"match": [<globs>], "dir": "<path>",
    "cmd": "<command>", "note": "<text>"}`): use the entry whose globs match the changed files,
    run `cmd` in `dir`, and show its `note` (for example "the dev stack does not serve this
-   portal"). Read the entry from `RC_TRUSTED_CFG` (the config loader at the top of this skill),
-   never the checkout: `cmd` is a command the agent runs, so a PR must not choose it. Pinning
+   portal"). Read the entries from the default-branch config, never the checkout: run the config
+   loader at the top of this skill in the same call, then `jq -c '.visual.launch // []' <<<"$RC_TRUSTED_CFG"`
+   (`RC_TRUSTED_STATE=absent` gives no entries). `cmd` is a command the agent runs, so a PR must not choose it. Pinning
    `cmd` does not pin what it starts: a dev script runs the PR's own package scripts and build
    config, so launch only a branch you would run anyway (your own work, or a sandbox). No entry
    matches → fall back to `/run` or the repo's documented path, and say which in the PR body.

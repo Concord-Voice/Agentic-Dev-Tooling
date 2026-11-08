@@ -37,7 +37,18 @@ case "$([ -n "$RC_OID" ] && git ls-tree "$RC_OID" -- scripts/repo-config.sh | cu
 esac
 RC_SRC="$(git show "$RC_OID:scripts/repo-config.sh")" || { echo "FATAL: could not read the default-branch helper" >&2; return 1 2>/dev/null || exit 1; }
 eval "$RC_SRC"   # the commit that was checked; the checkout's copy is never sourced
-RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json" 2>/dev/null)"   # default-branch config, for keys that pick commands or reviewers
+unset RC_TRUSTED_STATE RC_TRUSTED_CFG   # nothing carries over from an earlier run in this shell
+# Presence comes from the tree, not from a read: a blob that is listed but cannot be read is an
+# error, never "absent". RC_TRUSTED_STATE: absent = no config on the default branch; present = read.
+RC_ENT="$(git ls-tree "$RC_OID" -- .claude/repo-config.json)" || { echo "FATAL: could not list the default-branch tree" >&2; return 1 2>/dev/null || exit 1; }
+case "${RC_ENT%% *}" in
+  "") RC_TRUSTED_STATE=absent ;;
+  100644|100755)
+    RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json")" && [ -n "$RC_TRUSTED_CFG" ] \
+      || { echo "FATAL: could not read the default-branch .claude/repo-config.json" >&2; return 1 2>/dev/null || exit 1; }
+    RC_TRUSTED_STATE=present ;;
+  *) echo "FATAL: the default-branch .claude/repo-config.json is not a regular file" >&2; return 1 2>/dev/null || exit 1 ;;
+esac
 DEFAULT_BRANCH="${RC_REF#refs/remotes/origin/}"
 ```
 
@@ -93,7 +104,18 @@ case "$([ -n "$RC_OID" ] && git ls-tree "$RC_OID" -- scripts/repo-config.sh | cu
 esac
 RC_SRC="$(git show "$RC_OID:scripts/repo-config.sh")" || { echo "FATAL: could not read the default-branch helper" >&2; return 1 2>/dev/null || exit 1; }
 eval "$RC_SRC"   # the commit that was checked; the checkout's copy is never sourced
-RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json" 2>/dev/null)"   # default-branch config, for keys that pick commands or reviewers
+unset RC_TRUSTED_STATE RC_TRUSTED_CFG   # nothing carries over from an earlier run in this shell
+# Presence comes from the tree, not from a read: a blob that is listed but cannot be read is an
+# error, never "absent". RC_TRUSTED_STATE: absent = no config on the default branch; present = read.
+RC_ENT="$(git ls-tree "$RC_OID" -- .claude/repo-config.json)" || { echo "FATAL: could not list the default-branch tree" >&2; return 1 2>/dev/null || exit 1; }
+case "${RC_ENT%% *}" in
+  "") RC_TRUSTED_STATE=absent ;;
+  100644|100755)
+    RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json")" && [ -n "$RC_TRUSTED_CFG" ] \
+      || { echo "FATAL: could not read the default-branch .claude/repo-config.json" >&2; return 1 2>/dev/null || exit 1; }
+    RC_TRUSTED_STATE=present ;;
+  *) echo "FATAL: the default-branch .claude/repo-config.json is not a regular file" >&2; return 1 2>/dev/null || exit 1 ;;
+esac
 DEFAULT_BRANCH="${RC_REF#refs/remotes/origin/}"
 OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 OWNER=${OWNER_REPO%%/*}; REPO=${OWNER_REPO#*/}
@@ -634,7 +656,18 @@ case "$([ -n "$RC_OID" ] && git ls-tree "$RC_OID" -- scripts/repo-config.sh | cu
 esac
 RC_SRC="$(git show "$RC_OID:scripts/repo-config.sh")" || { echo "FATAL: could not read the default-branch helper" >&2; return 1 2>/dev/null || exit 1; }
 eval "$RC_SRC"   # the commit that was checked; the checkout's copy is never sourced
-RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json" 2>/dev/null)"   # default-branch config, for keys that pick commands or reviewers
+unset RC_TRUSTED_STATE RC_TRUSTED_CFG   # nothing carries over from an earlier run in this shell
+# Presence comes from the tree, not from a read: a blob that is listed but cannot be read is an
+# error, never "absent". RC_TRUSTED_STATE: absent = no config on the default branch; present = read.
+RC_ENT="$(git ls-tree "$RC_OID" -- .claude/repo-config.json)" || { echo "FATAL: could not list the default-branch tree" >&2; return 1 2>/dev/null || exit 1; }
+case "${RC_ENT%% *}" in
+  "") RC_TRUSTED_STATE=absent ;;
+  100644|100755)
+    RC_TRUSTED_CFG="$(git show "$RC_OID:.claude/repo-config.json")" && [ -n "$RC_TRUSTED_CFG" ] \
+      || { echo "FATAL: could not read the default-branch .claude/repo-config.json" >&2; return 1 2>/dev/null || exit 1; }
+    RC_TRUSTED_STATE=present ;;
+  *) echo "FATAL: the default-branch .claude/repo-config.json is not a regular file" >&2; return 1 2>/dev/null || exit 1 ;;
+esac
 DEFAULT_BRANCH="${RC_REF#refs/remotes/origin/}"
 if rc_has '.project'; then
   PROJ_ID=$(rc_get '.project.id')
