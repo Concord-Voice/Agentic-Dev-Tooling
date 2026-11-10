@@ -40,15 +40,7 @@ def digest(path: Path) -> str:
     return h.hexdigest()
 
 
-def main() -> None:
-    if len(sys.argv) != 3:
-        fail('usage: sync-shared-safe.py MASTER CONSUMER')
-    master, repo = (Path(p).resolve(strict=True) for p in sys.argv[1:])
-    if not (repo / '.git').exists():
-        fail(f'not a git repo: {repo}')
-    claude = repo / '.claude'
-    if claude.is_symlink():
-        fail(f'refusing linked consumer configuration: {claude}')
+def load_manifest(master: Path) -> list[tuple[str, str, Path]]:
     # An Internal checkout may also mirror the public config/ manifest. Its
     # root manifest describes the Internal overrides and takes precedence.
     manifest_path = master / 'shared-manifest.json'
@@ -73,6 +65,10 @@ def main() -> None:
             suffix = '' if category == 'skills' else '.md'
             source = master / (name + suffix if '/' in name else f'{category}/{name}{suffix}')
             items.append((category, Path(name).name + suffix, source))
+    return items
+
+
+def load_ledger(repo: Path, claude: Path) -> dict:
     ledger_path = claude / '.shared-tooling.lock.json'
     if ledger_path.is_symlink():
         fail('refusing symlinked provenance ledger')
@@ -90,6 +86,10 @@ def main() -> None:
     previous = ledger['items']
     if not all(isinstance(k, str) and isinstance(v, str) and re.fullmatch(r'[0-9a-f]{64}', v) for k,v in previous.items()):
         fail('invalid provenance entries')
+    return ledger
+
+
+def load_protected(claude: Path) -> list[str]:
     protected_path = claude / 'agentic-protected-paths.json'
     if protected_path.is_symlink():
         fail('refusing symlinked protected paths')
@@ -102,12 +102,47 @@ def main() -> None:
             if not isinstance(path, str) or not path or path.startswith('/') or any(x in ('', '.', '..') for x in path.split('/')):
                 fail('invalid protected path')
             protected.append(path)
+    return protected
+
+
+def validate_categories(claude: Path) -> None:
     for category in ('skills', 'agents'):
         parent = claude / category
         if parent.is_symlink():
             fail(f'category symlink requires manual migration: {parent}')
         elif parent.exists() and not parent.is_dir():
             fail(f'category is not a directory: {parent}')
+
+
+def validate_source(master: Path, category: str, name: str, src: Path) -> None:
+    override_lock = master / '.github/skill-overrides.lock.json'
+    if category == 'skills' and override_lock.exists():
+        resolver = master / 'scripts/resolve-skill-source.py'
+        if not resolver.is_file():
+            fail('Internal skill resolver is missing')
+        resolved = subprocess.run(
+            [sys.executable, str(resolver), name, '--internal', str(master)],
+            text=True, capture_output=True, check=False,
+        )
+        if resolved.returncode or Path(resolved.stdout.strip()) != src.resolve():
+            fail(f'Internal skill {name} requires reconciliation: {resolved.stderr.strip()}')
+    if not src.exists() or src.is_symlink():
+        fail(f'missing or linked source: {src}')
+    if not src.resolve().is_relative_to(master):
+        fail(f'source escapes Master: {src}')
+
+
+def validate_destination(dst: Path, src: Path, new_hash: str, previous_hash: str | None) -> None:
+    if dst.is_symlink():
+        if dst.resolve() != src.resolve():
+            fail(f'foreign item symlink: {dst}')
+    elif dst.exists():
+        current = digest(dst)
+        if current != new_hash and current != previous_hash:
+            fail(f'local or untracked customization; not overwriting: {dst}')
+
+
+def preflight(master: Path, claude: Path, items: list, previous: dict, protected: list) -> list:
     plan = []
     for category, name, src in items:
         key = f'{category}/{name}'
@@ -115,31 +150,15 @@ def main() -> None:
         if any(relative == path or relative.startswith(path + '/') or path.startswith(relative + '/') for path in protected):
             print(f'  protected {key}; left unchanged')
             continue
-        override_lock = master / '.github/skill-overrides.lock.json'
-        if category == 'skills' and override_lock.exists():
-            resolver = master / 'scripts/resolve-skill-source.py'
-            if not resolver.is_file():
-                fail('Internal skill resolver is missing')
-            resolved = subprocess.run(
-                [sys.executable, str(resolver), name, '--internal', str(master)],
-                text=True, capture_output=True, check=False,
-            )
-            if resolved.returncode or Path(resolved.stdout.strip()) != src.resolve():
-                fail(f'Internal skill {name} requires reconciliation: {resolved.stderr.strip()}')
+        validate_source(master, category, name, src)
         dst = claude / category / name
-        if not src.exists() or src.is_symlink():
-            fail(f'missing or linked source: {src}')
-        if not src.resolve().is_relative_to(master):
-            fail(f'source escapes Master: {src}')
         new_hash = digest(src)
-        if dst.is_symlink():
-            if dst.resolve() != src.resolve():
-                fail(f'foreign item symlink: {dst}')
-        elif dst.exists():
-            current = digest(dst)
-            if current != new_hash and current != previous.get(key):
-                fail(f'local or untracked customization; not overwriting: {dst}')
+        validate_destination(dst, src, new_hash, previous.get(key))
         plan.append((key, src, dst, new_hash))
+    return plan
+
+
+def apply_plan(claude: Path, plan: list, previous: dict) -> None:
     # Every collision is checked before touching any consumer item.
     claude.mkdir(parents=True, exist_ok=True)
     for key, src, dst, new_hash in plan:
@@ -164,12 +183,34 @@ def main() -> None:
                 raise
         previous[key] = new_hash
         print(f'  synced {key}')
+
+
+def write_ledger(claude: Path, ledger: dict) -> None:
+    ledger_path = claude / '.shared-tooling.lock.json'
     with tempfile.NamedTemporaryFile(mode='w', prefix='.shared-tooling-lock-', dir=claude, delete=False) as f:
         tmp_lock = f.name
         json.dump(ledger, f, indent=2, sort_keys=True)
         f.write('\n')
     os.replace(tmp_lock, ledger_path)
     print('sync-shared: done')
+
+
+def main() -> None:
+    if len(sys.argv) != 3:
+        fail('usage: sync-shared-safe.py MASTER CONSUMER')
+    master, repo = (Path(p).resolve(strict=True) for p in sys.argv[1:])
+    if not (repo / '.git').exists():
+        fail(f'not a git repo: {repo}')
+    claude = repo / '.claude'
+    if claude.is_symlink():
+        fail(f'refusing linked consumer configuration: {claude}')
+    items = load_manifest(master)
+    ledger = load_ledger(repo, claude)
+    protected = load_protected(claude)
+    validate_categories(claude)
+    plan = preflight(master, claude, items, ledger['items'], protected)
+    apply_plan(claude, plan, ledger['items'])
+    write_ledger(claude, ledger)
 
 
 if __name__ == '__main__':

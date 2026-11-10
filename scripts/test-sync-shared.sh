@@ -43,7 +43,7 @@ SHARED_MASTER="$TMP/master" "$SCRIPT" "$TMP/consumer" >/dev/null || fail "Intern
 # Local edits must not be mistaken for stale managed copies.
 echo "DRIFTED" > "$TMP/consumer/.claude/skills/ci-status/SKILL.md"
 if SHARED_MASTER="$TMP/master" "$SCRIPT" "$TMP/consumer" >/dev/null 2>&1; then fail "local customization should block synchronization"; fi
-[ "$(cat "$TMP/consumer/.claude/skills/ci-status/SKILL.md")" = "DRIFTED" ] || fail "local customization was overwritten"
+[[ "$(cat "$TMP/consumer/.claude/skills/ci-status/SKILL.md")" = "DRIFTED" ]] || fail "local customization was overwritten"
 # A verified managed copy can adopt a newer Master revision automatically.
 echo "SHARED-ci" > "$TMP/consumer/.claude/skills/ci-status/SKILL.md"
 echo "SHARED-ci-v2" > "$TMP/master/skills/ci-status/SKILL.md"
@@ -54,8 +54,8 @@ SHARED_MASTER="$TMP/master" "$SCRIPT" "$TMP/consumer" >/dev/null
 rm -rf "$TMP/consumer/.claude/skills"
 ln -s "../../master/skills" "$TMP/consumer/.claude/skills"
 if SHARED_MASTER="$TMP/master" "$SCRIPT" "$TMP/consumer" >/dev/null 2>&1; then fail "whole-directory link requires migration"; fi
-[ -d "$TMP/master/skills/ci-status" ] && [ "$(cat "$TMP/master/skills/ci-status/SKILL.md")" = "SHARED-ci-v2" ] || fail "Master skills/ci-status destroyed via whole-dir symlink"
-[ -L "$TMP/consumer/.claude/skills" ] && [ -d "$TMP/consumer/.claude/skills/dev-lifecycle" ] || fail "whole-directory link or its extra skills were removed"
+[[ -d "$TMP/master/skills/ci-status" ]] && [[ "$(cat "$TMP/master/skills/ci-status/SKILL.md")" = "SHARED-ci-v2" ]] || fail "Master skills/ci-status destroyed via whole-dir symlink"
+[[ -L "$TMP/consumer/.claude/skills" ]] && [[ -d "$TMP/consumer/.claude/skills/dev-lifecycle" ]] || fail "whole-directory link or its extra skills were removed"
 rm "$TMP/consumer/.claude/skills"
 mkdir "$TMP/consumer/.claude/skills"
 SHARED_MASTER="$TMP/master" "$SCRIPT" "$TMP/consumer" >/dev/null
@@ -64,7 +64,7 @@ SHARED_MASTER="$TMP/master" "$SCRIPT" "$TMP/consumer" >/dev/null
 printf '{"paths":[".claude/skills/ci-status/SKILL.md"]}\n' > "$TMP/consumer/.claude/agentic-protected-paths.json"
 echo "CUSTOM" > "$TMP/consumer/.claude/skills/ci-status/SKILL.md"
 SHARED_MASTER="$TMP/master" "$SCRIPT" "$TMP/consumer" >/dev/null
-[ "$(cat "$TMP/consumer/.claude/skills/ci-status/SKILL.md")" = CUSTOM ] || fail "protected descendant was overwritten"
+[[ "$(cat "$TMP/consumer/.claude/skills/ci-status/SKILL.md")" = CUSTOM ]] || fail "protected descendant was overwritten"
 rm "$TMP/consumer/.claude/agentic-protected-paths.json"
 
 # Unowned links must survive; no later item may be changed on a failed preflight.
@@ -73,14 +73,14 @@ mkdir -p "$TMP/foreign"; echo foreign > "$TMP/foreign/SKILL.md"
 ln -s "$TMP/foreign" "$TMP/consumer/.claude/skills/ci-status"
 echo "new agent" > "$TMP/master/agents/code-reviewer.md"
 if SHARED_MASTER="$TMP/master" "$SCRIPT" "$TMP/consumer" >/dev/null 2>&1; then fail "foreign symlink should block synchronization"; fi
-[ -L "$TMP/consumer/.claude/skills/ci-status" ] && [ "$(cat "$TMP/foreign/SKILL.md")" = foreign ] || fail "foreign symlink was changed"
-[ "$(cat "$TMP/consumer/.claude/agents/code-reviewer.md")" = SHARED-cr ] || fail "preflight did not prevent partial update"
+[[ -L "$TMP/consumer/.claude/skills/ci-status" ]] && [[ "$(cat "$TMP/foreign/SKILL.md")" = foreign ]] || fail "foreign symlink was changed"
+[[ "$(cat "$TMP/consumer/.claude/agents/code-reviewer.md")" = SHARED-cr ]] || fail "preflight did not prevent partial update"
 
 # A ledger that Git will ignore cannot protect the next clone or CI checkout.
 ignored="$TMP/ignored"; mkdir -p "$ignored"; git -C "$ignored" init -q
 printf '.claude/*\n' > "$ignored/.gitignore"
 if SHARED_MASTER="$TMP/master" "$SCRIPT" "$ignored" >/dev/null 2>&1; then fail "ignored provenance ledger should block synchronization"; fi
-[ ! -e "$ignored/.claude/skills/ci-status" ] || fail "ignored ledger led to a partial sync"
+[[ ! -e "$ignored/.claude/skills/ci-status" ]] || fail "ignored ledger led to a partial sync"
 
 # Malformed manifest → fail loudly (no silent success).
 badm="$TMP/badm"; mkdir -p "$badm/skills/ci-status"; echo "x" > "$badm/skills/ci-status/SKILL.md"
@@ -138,9 +138,9 @@ if "$SCRIPT" "$real" >"$TMP/real-output" 2>&1; then
   [ -f "$real/.claude/agents/code-reviewer.md" ] || fail "real manifest did not deliver agents/code-reviewer.md"
 else
   # An Internal mirror being reconciled must refuse the whole copy, not ship stale overrides.
-  [ -f "$HERE/../.github/skill-overrides.lock.json" ] || fail "the repo's own shared-manifest.json failed to sync"
+  [[ -f "$HERE/../.github/skill-overrides.lock.json" ]] || fail "the repo's own shared-manifest.json failed to sync"
   grep -q 'requires reconciliation' "$TMP/real-output" || fail "real sync failed for a reason other than pending reconciliation"
-  [ ! -e "$real/.claude/skills/ci-status" ] || fail "stale override caused a partial real sync"
+  [[ ! -e "$real/.claude/skills/ci-status" ]] || fail "stale override caused a partial real sync"
 fi
 
 echo "ALL PASS"

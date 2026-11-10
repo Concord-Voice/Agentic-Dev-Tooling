@@ -97,7 +97,7 @@ canonicalize_path() {
         [[ -e "$parent" || -L "$parent" ]] && return 1
         next_parent=$(dirname "$parent")
         [[ "$next_parent" != "$parent" ]] || return 1
-        case "$(basename "$parent")" in .|..) return 1 ;; esac
+        case "$(basename "$parent")" in .|..) return 1 ;; *) : ;; esac
         base="$(basename "$parent")/$base"
         parent=$next_parent
     done

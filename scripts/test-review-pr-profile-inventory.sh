@@ -6,7 +6,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 BLOCK="$TMP/inventory.sh"
 awk '/^for profile_dir in / {copy=1} /^# Nothing moved while we looked/ {copy=0} copy {print}' \
   "$ROOT/plugins/core-lifecycle/skills/review-pr/SKILL.md" > "$BLOCK"
-[ -s "$BLOCK" ] || { echo 'FAIL: inventory loop missing' >&2; exit 1; }
+[[ -s "$BLOCK" ]] || { echo 'FAIL: inventory loop missing' >&2; exit 1; }
 REPO_ROOT="$TMP/repo"; mkdir -p "$REPO_ROOT/.claude/agents"
 git -C "$REPO_ROOT" init -q
 printf '%s\n' 'trusted profile' > "$REPO_ROOT/.claude/agents/reviewer.md"

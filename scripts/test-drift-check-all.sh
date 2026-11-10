@@ -27,7 +27,7 @@ if SHARED_MASTER="$TMP/org/master" "$SCRIPT" >/dev/null 2>&1; then fail "drifted
 
 # A divergent copy needs review; a bulk sync must not overwrite it.
 if SHARED_MASTER="$TMP/org/master" "$SYNCALL" >/dev/null 2>&1; then fail "bulk sync should refuse a locally changed skill"; fi
-[ "$(cat "$TMP/org/c2/.claude/skills/ci-status/SKILL.md")" = DRIFTED ] || fail "bulk sync overwrote the local edit"
+[[ "$(cat "$TMP/org/c2/.claude/skills/ci-status/SKILL.md")" = DRIFTED ]] || fail "bulk sync overwrote the local edit"
 # After review, restore the known managed copy and sync normally.
 echo "M" > "$TMP/org/c2/.claude/skills/ci-status/SKILL.md"
 SHARED_MASTER="$TMP/org/master" "$SYNCALL" >/dev/null

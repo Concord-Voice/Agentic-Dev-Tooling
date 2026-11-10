@@ -24,7 +24,7 @@ need() { command -v "$1" >/dev/null || { echo "missing prerequisite: $1" >&2; ex
 init_protected() {
   PROTECT_ROOT="$1"
   PROTECT_FILE="$PROTECT_ROOT/.claude/agentic-protected-paths.json"
-  [ -f "$PROTECT_FILE" ] || return 0
+  [[ -f "$PROTECT_FILE" ]] || return 0
   need jq
   jq -e 'type == "object" and (.paths | type == "array") and
     ([.paths[] | type == "string" and length > 0 and
@@ -35,7 +35,7 @@ init_protected() {
 
 protected() { # true when the copied item overlaps a protected path, even under --force
   local dst=$1 rel
-  [ -n "${PROTECT_FILE:-}" ] && [ -f "$PROTECT_FILE" ] || return 1
+  [[ -n "${PROTECT_FILE:-}" ]] && [[ -f "$PROTECT_FILE" ]] || return 1
   rel="${dst#"$PROTECT_ROOT"/}"
   jq -e --arg p "$rel" '.paths | any(. as $entry | $entry == $p or ($p | startswith($entry + "/")) or ($entry | startswith($p + "/")))' "$PROTECT_FILE" >/dev/null
 }

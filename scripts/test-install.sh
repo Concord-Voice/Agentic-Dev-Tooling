@@ -36,7 +36,7 @@ SH
 chmod +x "$tmp/fake-bin/npx"
 RULESYNC_TRACE="$tmp/rulesync-trace" PATH="$tmp/fake-bin:$PATH" \
   "$HERE/install.sh" codex --project "$tmp/offline-target" >/dev/null
-[ "$(cat "$tmp/rulesync-trace")" = "$(printf 'import\ngenerate')" ] || fail "rulesync lifecycle policy not applied to both calls"
+[[ "$(cat "$tmp/rulesync-trace")" = "$(printf 'import\ngenerate')" ]] || fail "rulesync lifecycle policy not applied to both calls"
 
 "$HERE/install.sh" claude --project "$tmp"
 
@@ -68,11 +68,11 @@ jq -n '{paths:[".claude/skills/ci-status/SKILL.md", ".claude/settings.json"]}' >
 settings_before="$(cat "$proj/.claude/settings.json")"
 "$up/install.sh" claude --project "$proj" --force >/dev/null
 grep -q LOCAL-EDIT "$proj/.claude/skills/ci-status/SKILL.md" || fail "force replaced a protected customization"
-[ "$(cat "$proj/.claude/settings.json")" = "$settings_before" ] || fail "force changed protected settings"
+[[ "$(cat "$proj/.claude/settings.json")" = "$settings_before" ]] || fail "force changed protected settings"
 bad_protection="$tmp/bad-protection"; mkdir -p "$bad_protection/.claude"
 printf '{"paths":["../outside"]}\n' > "$bad_protection/.claude/agentic-protected-paths.json"
 if "$up/install.sh" claude --project "$bad_protection" >/dev/null 2>&1; then fail "invalid protected path accepted"; fi
-[ ! -d "$bad_protection/.claude/skills" ] || fail "invalid protection mutated destination"
+[[ ! -d "$bad_protection/.claude/skills" ]] || fail "invalid protection mutated destination"
 rm "$proj/.claude/agentic-protected-paths.json"
 # A symlink the adopter added is a local change too, so the next update must not delete it.
 ln -s SKILL.md "$proj/.claude/skills/pr-creation/local-notes"

@@ -16,8 +16,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  sync-coverage:
+    name: Shared sync coverage
+    # PR-controlled tests run in a separate job without the Sonar secret.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Measure integration coverage
+        run: |
+          python3 -m venv "$RUNNER_TEMP/sync-coverage-venv"
+          "$RUNNER_TEMP/sync-coverage-venv/bin/python" -m pip install --no-deps 'coverage @ https://files.pythonhosted.org/packages/ec/16/114df1c291c22cac3b0c127a73e0af5c12ed7bbb6558d310429a0ae24023/coverage-7.10.7-py3-none-any.whl#sha256=f7941f6f2fe6dd6807a1208737b8a0cbcf1cc6d7b07d24998ad2d63590868260'
+          SYNC_COVERAGE_PYTHON="$RUNNER_TEMP/sync-coverage-venv/bin/python" bash scripts/measure-sync-coverage.sh "$RUNNER_TEMP/sync-coverage.xml"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sync-coverage
+          path: ${{ runner.temp }}/sync-coverage.xml
+          if-no-files-found: error
+
   sonarcloud:
     name: SonarCloud
+    needs: sync-coverage
     # Fork PRs get no secrets, so only same-repository PRs and main are scanned.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
@@ -30,7 +54,13 @@ jobs:
         with:
           fetch-depth: 0 # full history for new-code detection and blame
           persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sync-coverage
+          path: ${{ runner.temp }}/sync-coverage
       - name: SonarCloud scan
         uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        with:
+          args: -Dsonar.python.coverage.reportPaths=${{ runner.temp }}/sync-coverage/sync-coverage.xml
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
