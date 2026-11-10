@@ -48,6 +48,19 @@ def valid_manifest_name(name: object) -> bool:
     )
 
 
+def manifest_entries(master: Path, category: str, key: str, names: object) -> list:
+    if not isinstance(names, list) or not all(valid_manifest_name(x) for x in names):
+        fail(f'invalid {key} manifest')
+    if len({Path(x).name for x in names}) != len(names):
+        fail(f'duplicate {key} entries')
+    items = []
+    suffix = '' if category == 'skills' else '.md'
+    for name in names:
+        source = master / (name + suffix if '/' in name else f'{category}/{name}{suffix}')
+        items.append((category, Path(name).name + suffix, source))
+    return items
+
+
 def load_manifest(master: Path) -> list[tuple[str, str, Path]]:
     # An Internal checkout may also mirror the public config/ manifest. Its
     # root manifest describes the Internal overrides and takes precedence.
@@ -59,15 +72,7 @@ def load_manifest(master: Path) -> list[tuple[str, str, Path]]:
         fail('manifest must be an object')
     items = []
     for category, key in [('skills', 'shared_skills'), ('agents', 'shared_agents')]:
-        names = manifest.get(key, [])
-        if not isinstance(names, list) or not all(valid_manifest_name(x) for x in names):
-            fail(f'invalid {key} manifest')
-        if len({Path(x).name for x in names}) != len(names):
-            fail(f'duplicate {key} entries')
-        for name in names:
-            suffix = '' if category == 'skills' else '.md'
-            source = master / (name + suffix if '/' in name else f'{category}/{name}{suffix}')
-            items.append((category, Path(name).name + suffix, source))
+        items.extend(manifest_entries(master, category, key, manifest.get(key, [])))
     return items
 
 
