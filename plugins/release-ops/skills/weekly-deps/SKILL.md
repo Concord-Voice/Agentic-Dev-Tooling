@@ -783,7 +783,12 @@ Tier C deserves the most care. For each Tier C PR:
    ```bash
    # Per-directory override (preferred). $DIR is the PR's manifest directory and comes
    # from the PR, so pass it as data (--arg), never into the jq program text.
-   LOCAL_CMDS="$(jq -r --arg d "$DIR" '.weekly_deps.local_test_cmds[$d] // [] | join("\n")' "$RC_FILE" 2>/dev/null)"
+   if [ "$RC_TRUSTED_STATE" = absent ]; then
+     LOCAL_CMDS=""
+   else
+     LOCAL_CMDS="$(printf '%s' "$RC_TRUSTED_CFG" | jq -r --arg d "$DIR" '.weekly_deps.local_test_cmds[$d] // [] | join("\n")')" \
+       || { echo "FATAL: could not parse trusted local test commands" >&2; exit 1; }
+   fi
    ```
 
    | Ecosystem | Default local-test commands (run from the manifest dir) |
@@ -966,7 +971,7 @@ After processing completes, report results and surface follow-ups.
 Merged this run:           N PRs
   Tier A (HIGH):  N (#NN, #NN, ...)
   Tier B:         N (#NN, #NN, ...)
-  Tier C:         N (#NN <pkg> — reviewed, local test passed)
+  Tier C:         N (#NN <pkg> — reviewed, local test: PASS | FAIL | NOT RUN)
                      engine probes: clean after real run | BROKEN: … | PARTIAL: … |
                                     NOT RUN | n/a — not a bundled-engine bump
   Tier D:         N (#NN security-data refresh)
@@ -1013,7 +1018,11 @@ Run it whenever any merged PR touched a **production** dependency of a shipped
 artifact. Dev-only bumps (`@types/*`, eslint, vitest, tsx) do not affect it — the
 attribution file records the production bundles only. If the script reads
 installed packages rather than lockfiles (license-checker style), install every
-workspace it covers first (`npm ci` in each), then run it. Expect the same
+workspace it covers first (`npm ci` in each), then run it. Both installation and
+regeneration execute dependency or project code: use the verified ephemeral sandbox
+and credential, filesystem and network restrictions from Phase 4.C. A merged dependency
+is not automatically safe. If that isolation is unavailable, report regeneration
+**NOT RUN** and hold the follow-up rather than running it on the host. Expect the same
 dry-run-by-default / `--apply`-to-write contract as 6.2, but follow the script's
 own docs.
 
