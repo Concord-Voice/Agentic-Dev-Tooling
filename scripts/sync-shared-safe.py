@@ -40,6 +40,14 @@ def digest(path: Path) -> str:
     return h.hexdigest()
 
 
+def valid_manifest_name(name: object) -> bool:
+    return bool(
+        isinstance(name, str)
+        and re.fullmatch(r'[A-Za-z0-9._/-]+', name)
+        and all(segment not in ('', '.', '..') for segment in name.split('/'))
+    )
+
+
 def load_manifest(master: Path) -> list[tuple[str, str, Path]]:
     # An Internal checkout may also mirror the public config/ manifest. Its
     # root manifest describes the Internal overrides and takes precedence.
@@ -52,12 +60,7 @@ def load_manifest(master: Path) -> list[tuple[str, str, Path]]:
     items = []
     for category, key in [('skills', 'shared_skills'), ('agents', 'shared_agents')]:
         names = manifest.get(key, [])
-        if not isinstance(names, list) or not all(
-            isinstance(x, str)
-            and re.fullmatch(r'[A-Za-z0-9._/-]+', x)
-            and all(segment not in ('', '.', '..') for segment in x.split('/'))
-            for x in names
-        ):
+        if not isinstance(names, list) or not all(valid_manifest_name(x) for x in names):
             fail(f'invalid {key} manifest')
         if len({Path(x).name for x in names}) != len(names):
             fail(f'duplicate {key} entries')
@@ -158,6 +161,24 @@ def preflight(master: Path, claude: Path, items: list, previous: dict, protected
     return plan
 
 
+def replace_item(src: Path, dst: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix='.sync-shared-', dir=dst.parent) as tmp:
+        stage = Path(tmp) / 'new'
+        backup = Path(tmp) / 'old'
+        if src.is_dir():
+            shutil.copytree(src, stage)
+        else:
+            shutil.copy2(src, stage)
+        if dst.exists() or dst.is_symlink():
+            os.replace(dst, backup)
+        try:
+            os.replace(stage, dst)
+        except BaseException:
+            if backup.exists() or backup.is_symlink():
+                os.replace(backup, dst)
+            raise
+
+
 def apply_plan(claude: Path, plan: list, previous: dict) -> None:
     # Every collision is checked before touching any consumer item.
     claude.mkdir(parents=True, exist_ok=True)
@@ -166,21 +187,7 @@ def apply_plan(claude: Path, plan: list, previous: dict) -> None:
         if dst.exists() and not dst.is_symlink() and digest(dst) == new_hash:
             previous[key] = new_hash
             continue
-        with tempfile.TemporaryDirectory(prefix='.sync-shared-', dir=dst.parent) as tmp:
-            stage = Path(tmp) / 'new'
-            backup = Path(tmp) / 'old'
-            if src.is_dir():
-                shutil.copytree(src, stage)
-            else:
-                shutil.copy2(src, stage)
-            if dst.exists() or dst.is_symlink():
-                os.replace(dst, backup)
-            try:
-                os.replace(stage, dst)
-            except BaseException:
-                if backup.exists() or backup.is_symlink():
-                    os.replace(backup, dst)
-                raise
+        replace_item(src, dst)
         previous[key] = new_hash
         print(f'  synced {key}')
 
