@@ -57,6 +57,14 @@ printf '%s\n' "$out" | grep -q "skip (local changes, use --force):.*AGENTS.md" \
 grep -qF "$marker" "$tmp_antigravity/AGENTS.md" \
   && { echo "FAIL: --force did not restore generated AGENTS.md content"; exit 1; }
 
+# A reserved higher-priority rule and a nested skill file survive --force too.
+jq -n '{paths:["AGENTS.md", ".agents/skills/dev-lifecycle/SKILL.md"]}' > "$tmp_antigravity/.claude/agentic-protected-paths.json"
+printf '%s\n' "$marker" >> "$tmp_antigravity/AGENTS.md"
+printf '%s\n' "$marker" >> "$tmp_antigravity/.agents/skills/dev-lifecycle/SKILL.md"
+./install.sh antigravity --project "$tmp_antigravity" --force >/dev/null
+grep -qF "$marker" "$tmp_antigravity/AGENTS.md" || { echo "FAIL: protected AGENTS.md changed"; exit 1; }
+grep -qF "$marker" "$tmp_antigravity/.agents/skills/dev-lifecycle/SKILL.md" || { echo "FAIL: protected skill changed"; exit 1; }
+
 # Every hook a converted config runs must exist in the target, or the hook just errors.
 for t in "$tmp_codex" "$tmp_copilot" "$tmp_antigravity"; do
   while IFS= read -r h; do
