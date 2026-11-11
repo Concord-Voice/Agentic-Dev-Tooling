@@ -104,6 +104,10 @@ if [[ ! $PUBLIC =~ $nwo || ! $TRACKER =~ $nwo || ${PUBLIC,,} == "${TRACKER,,}" ]
   echo "FATAL: set .feedback_triage.public and .tracker (owner/repo, different repos) in .claude/repo-config.json, or pass --public/--tracker" >&2
   return 1 2>/dev/null || exit 1
 fi
+# Optional owning-repo map (.feedback_triage.routing.<surface> -> owner/repo) for multi-repo orgs;
+# falls back to $TRACKER when unset. Exclude $PUBLIC defensively so a misconfigured key never leaks there.
+ROUTING_REPOS="$(rc_get '.feedback_triage.routing // {} | [.[] | strings] | unique | join(" ")' '')"
+CANDIDATE_TRACKERS="$(printf '%s\n' "$TRACKER" $ROUTING_REPOS | awk -v pub="${PUBLIC,,}" 'NF && tolower($0) != pub && !seen[tolower($0)]++')"
 # Sentinel prefix for every routine marker. Keep the prefix a repo already has on
 # its public issues: a renamed prefix orphans the existing status comments and the
 # pinned Known Issues issue, and the next run would duplicate them.
@@ -189,19 +193,22 @@ Respect the closure cap; overflow → digest.
 
 ---
 
-## Phase 4 — Sync survivors into the tracker repo (mode-gated)
+## Phase 4 — Sync survivors into the tracker repo(s) (mode-gated)
 
 For each **surviving, non-human-touched** issue that represents real work and whose marker has no `alpha:` ref:
 
-1. **Idempotency guard (belt-and-suspenders).** Before creating, search the tracker for an existing back-reference (covers a prior run that created the issue but failed to write the marker). GitHub search **tokenizes** a raw URL (splitting on `/` and `.`), so a bare-URL query matches noise — any tracker issue mentioning the bare number `$N` would falsely hit. Quote the URL as a **phrase** AND post-filter on literal containment (the search is best-effort; the filter is authoritative):
+1. **Determine the owning tracker repo (`TARGET_REPO`).** Read `.feedback_triage.routing` (see [`references/alpha-sync.md`](references/alpha-sync.md) § Owning-repo routing & multi-repo epics): route to the repo that owns the feedback/fix by surface and root cause, falling back to `$TRACKER` when `.feedback_triage.routing` is unset or ambiguous. Never route into `$PUBLIC`.
+2. **Idempotency guard (belt-and-suspenders).** Before creating, search **every candidate tracker repo** (`$CANDIDATE_TRACKERS`: `$TRACKER` plus configured `.feedback_triage.routing` targets) for an existing back-reference (covers a prior run that created the issue in any owning repo but failed to write the marker). GitHub search **tokenizes** a raw URL (splitting on `/` and `.`), so a bare-URL query matches noise — any tracker issue mentioning the bare number `$N` would falsely hit. Quote the URL as a **phrase** AND post-filter on literal containment (the search is best-effort; the filter is authoritative):
    ```bash
    PUB_URL="https://github.com/$PUBLIC/issues/$N"
-   gh search issues --repo "$TRACKER" "\"$PUB_URL\"" --json number,body \
-     --jq "[.[] | select(.body | contains(\"$PUB_URL\")) | .number]"
+   for repo in $CANDIDATE_TRACKERS; do
+     gh search issues --repo "$repo" "\"$PUB_URL\"" --json number,body \
+       --jq "[.[] | select(.body | contains(\"$PUB_URL\")) | \"$repo#\(.number)\"]"
+   done
    ```
-   A **confirmed** hit (body literally contains `$PUB_URL`) ⇒ reuse it; skip creation; jump to recording the ref. No confirmed hit ⇒ create. The marker's `alpha:` field stays the primary record; this search is only the crash-recovery fallback.
-2. **Dispatch `/issue-creation`** on the tracker with a tracking-request payload (topic, kind→labels, the public body, `reports=N` as the demand signal, and the public URL as a `Refs` back-reference). The dispatch contract — including how `/issue-creation`'s human checkpoints are answered in auto mode, the label/domain/release mapping, and the demand-signal→Priority mapping — lives in [`references/alpha-sync.md`](references/alpha-sync.md). Created tracking issues land at board **Status = Triage/Backlog**, never `Ready`: a human still vets scope before work starts.
-3. Capture the new (or reused) `example-repo-private#NNN` and its **`release:` label** (the shipping stream) → the **release window** (`v0.2.0-Beta`, `v1.0.0`, … or `a future release`). The window derives from the ship stream, NOT the milestone (a complete-by deadline). Derivation in [`references/alpha-sync.md`](references/alpha-sync.md).
+   A **confirmed** hit (body literally contains `$PUB_URL`) ⇒ reuse that `owner/repo#N`; skip creation; jump to recording the ref. No confirmed hit ⇒ create in `$TARGET_REPO`. The marker's `alpha:` field stays the primary record; this search is only the crash-recovery fallback.
+3. **Dispatch `/issue-creation`** in `$TARGET_REPO` with a tracking-request payload (target repo, topic, kind→labels, the public body, `reports=N` as the demand signal, and the public URL as a `Refs` back-reference). If the fix spans **multiple repositories**, create the **epic-style parent** (`type: epic`) in `$TARGET_REPO` (the main repo owning the fix), create child tasking issues in each sibling repo that owns an individual tasking, and link every cross-repo child via GitHub's native sub-issues API (`POST repos/{owner}/{repo}/issues/{parent_num}/sub_issues` with `sub_issue_id`). The dispatch contract — including how `/issue-creation`'s human checkpoints are answered in auto mode, routing rules, label/domain/release mapping, and demand-signal→Priority mapping — lives in [`references/alpha-sync.md`](references/alpha-sync.md). Created tracking issues land at board **Status = Triage/Backlog**, never `Ready`: a human still vets scope before work starts.
+4. Capture the full new (or reused) `<owner/repo>#NNN` ref (the parent epic when multi-repo) and its **`release:` label** (the shipping stream) → the **release window** (`v0.2.0-Beta`, `v1.0.0`, … or `a future release`). The window derives from the ship stream, NOT the milestone (a complete-by deadline). Derivation in [`references/alpha-sync.md`](references/alpha-sync.md).
 
 ---
 
@@ -219,7 +226,7 @@ Update the survivor's **managed status comment** so a public reader sees it's tr
 
 ## Phase 6 — Reverse sync: shipped fix → close/annotate public (mode-gated)
 
-For every public issue whose marker carries an `alpha:` ref, read the tracker issue's current state and post **only on a transition** (full state machine in [`references/idempotency.md`](references/idempotency.md)):
+For every public issue whose marker carries an `alpha:` ref, resolve the target `ALPHA_REPO` and `ALPHA_NUM` directly from the `alpha:` value (`owner/repo#N` → repo `owner/repo`, issue `N`; falling back to `$TRACKER` only for legacy bare `#N` refs), read that tracker issue's current state, and post **only on a transition** (full state machine in [`references/idempotency.md`](references/idempotency.md)):
 
 | Tracker state | Public action | Marker → |
 |---|---|---|
