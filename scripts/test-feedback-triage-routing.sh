@@ -6,9 +6,22 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SKILL_MD="$ROOT/plugins/release-ops/skills/feedback-triage/SKILL.md"
 ALPHA_SYNC_MD="$ROOT/plugins/release-ops/skills/feedback-triage/references/alpha-sync.md"
 
+readonly PUBLIC_REPO="example-org/public-feedback"
+readonly TRACKER_REPO="example-org/tracker-main"
+readonly CLIENT_REPO="example-org/app-client"
+readonly OPS_REPO="example-org/ops-repo"
+readonly PUB_ISSUE_URL="https://github.com/${PUBLIC_REPO}/issues/91"
+
 fail() {
   echo "FAIL: $*" >&2
   exit 1
+}
+
+assert_eq() {
+  local actual="$1" expected="$2" msg="$3"
+  if [[ "$actual" != "$expected" ]]; then
+    fail "$msg: got '$actual', expected '$expected'"
+  fi
 }
 
 extract_block_starting_with() {
@@ -21,10 +34,10 @@ extract_block_starting_with() {
 }
 
 PHASE0_CODE="$(extract_block_starting_with '# Optional owning-repo map')"
-[ -n "$PHASE0_CODE" ] || fail "could not extract Phase 0 routing block from $SKILL_MD"
+[[ -n "$PHASE0_CODE" ]] || fail "could not extract Phase 0 routing block from $SKILL_MD"
 
 PHASE6_CODE="$(extract_block_starting_with 'resolve_alpha_ref() {')"
-[ -n "$PHASE6_CODE" ] || fail "could not extract resolve_alpha_ref from $SKILL_MD"
+[[ -n "$PHASE6_CODE" ]] || fail "could not extract resolve_alpha_ref from $SKILL_MD"
 
 # shellcheck disable=SC1090
 eval "$PHASE6_CODE"
@@ -51,73 +64,71 @@ run_phase0() {
   )
 }
 
+assert_phase0_fails() {
+  local cfg_json="$1" desc="$2"
+  if run_phase0 "$cfg_json" "$TRACKER_REPO" "$PUBLIC_REPO" >/dev/null 2>&1; then
+    fail "expected Phase 0 to fail when $desc"
+  fi
+}
+
 # 1. Happy path: unset routing falls back to $TRACKER only
-out="$(run_phase0 '{}' 'example-org/tracker-main' 'example-org/public-feedback')"
-expected=$'example-org/tracker-main'
-[ "$out" = "$expected" ] || fail "unset routing mismatch: got '$out', expected '$expected'"
+out="$(run_phase0 '{}' "$TRACKER_REPO" "$PUBLIC_REPO")"
+assert_eq "$out" "$TRACKER_REPO" "unset routing mismatch"
 
 # 2. Happy path: multi-repo routing strips .git and deduplicates case-insensitively
 out="$(run_phase0 \
-  '{"feedback_triage":{"routing":{"core":"Example-Org/Tracker-Main.git","client":"example-org/app-client","ops":"example-org/ops-repo.git","dup":"EXAMPLE-ORG/APP-CLIENT"}}}' \
-  'example-org/tracker-main' \
-  'example-org/public-feedback')"
-expected=$'example-org/tracker-main\nexample-org/app-client\nexample-org/ops-repo'
-[ "$out" = "$expected" ] || fail "dedup routing mismatch: got '$out', expected '$expected'"
+  "{\"feedback_triage\":{\"routing\":{\"core\":\"Example-Org/Tracker-Main.git\",\"client\":\"$CLIENT_REPO\",\"ops\":\"${OPS_REPO}.git\",\"dup\":\"EXAMPLE-ORG/APP-CLIENT\"}}}" \
+  "$TRACKER_REPO" \
+  "$PUBLIC_REPO")"
+expected="$(printf '%s\n%s\n%s' "$TRACKER_REPO" "$CLIENT_REPO" "$OPS_REPO")"
+assert_eq "$out" "$expected" "dedup routing mismatch"
 
 # 3. Fail-closed: routing entry equal to $PUBLIC (case-insensitive / .git) must error
-if run_phase0 '{"feedback_triage":{"routing":{"leak":"EXAMPLE-ORG/PUBLIC-FEEDBACK.git"}}}' 'example-org/tracker-main' 'example-org/public-feedback' >/dev/null 2>&1; then
-  fail "expected Phase 0 to fail when routing points to PUBLIC"
-fi
+assert_phase0_fails '{"feedback_triage":{"routing":{"leak":"EXAMPLE-ORG/PUBLIC-FEEDBACK.git"}}}' "routing points to PUBLIC"
 
 # 4. Fail-closed: malformed repo slug (space or missing owner) must error
-if run_phase0 '{"feedback_triage":{"routing":{"bad":"not valid/repo"}}}' 'example-org/tracker-main' 'example-org/public-feedback' >/dev/null 2>&1; then
-  fail "expected Phase 0 to fail on malformed repo slug"
-fi
+assert_phase0_fails '{"feedback_triage":{"routing":{"bad":"not valid/repo"}}}' "routing contains malformed repo slug"
 
 # 5. Fail-closed: non-string routing value or non-object routing must error
-if run_phase0 '{"feedback_triage":{"routing":{"bad":123}}}' 'example-org/tracker-main' 'example-org/public-feedback' >/dev/null 2>&1; then
-  fail "expected Phase 0 to fail on non-string routing value"
-fi
-if run_phase0 '{"feedback_triage":{"routing":["example-org/app-client"]}}' 'example-org/tracker-main' 'example-org/public-feedback' >/dev/null 2>&1; then
-  fail "expected Phase 0 to fail on non-object routing config"
-fi
+assert_phase0_fails '{"feedback_triage":{"routing":{"bad":123}}}' "routing contains non-string value"
+assert_phase0_fails "{\"feedback_triage\":{\"routing\":[\"$CLIENT_REPO\"]}}" "routing is non-object JSON"
 
 # 6. Phase 6 resolve_alpha_ref: owner/repo#N, repo#N, #N, and bare N
-CANDS=$'example-org/tracker-main\nexample-org/app-client\nexample-org/ops-repo'
+CANDS="$(printf '%s\n%s\n%s' "$TRACKER_REPO" "$CLIENT_REPO" "$OPS_REPO")"
 
-resolve_alpha_ref 'example-org/app-client#45' 'example-org/tracker-main' "$CANDS" 'example-org/public-feedback'
-[ "$ALPHA_REPO" = 'example-org/app-client' ] && [ "$ALPHA_NUM" = '45' ] || fail "owner/repo#N resolution failed: $ALPHA_REPO#$ALPHA_NUM"
+resolve_alpha_ref "${CLIENT_REPO}#45" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO"
+assert_eq "${ALPHA_REPO}#${ALPHA_NUM}" "${CLIENT_REPO}#45" "owner/repo#N resolution failed"
 
-resolve_alpha_ref 'app-client#89' 'example-org/tracker-main' "$CANDS" 'example-org/public-feedback'
-[ "$ALPHA_REPO" = 'example-org/app-client' ] && [ "$ALPHA_NUM" = '89' ] || fail "repo#N resolution failed: $ALPHA_REPO#$ALPHA_NUM"
+resolve_alpha_ref 'app-client#89' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO"
+assert_eq "${ALPHA_REPO}#${ALPHA_NUM}" "${CLIENT_REPO}#89" "repo#N resolution failed"
 
-resolve_alpha_ref '#3692' 'example-org/tracker-main' "$CANDS" 'example-org/public-feedback'
-[ "$ALPHA_REPO" = 'example-org/tracker-main' ] && [ "$ALPHA_NUM" = '3692' ] || fail "#N resolution failed: $ALPHA_REPO#$ALPHA_NUM"
+resolve_alpha_ref '#3692' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO"
+assert_eq "${ALPHA_REPO}#${ALPHA_NUM}" "${TRACKER_REPO}#3692" "#N resolution failed"
 
-resolve_alpha_ref '4123' 'example-org/tracker-main' "$CANDS" 'example-org/public-feedback'
-[ "$ALPHA_REPO" = 'example-org/tracker-main' ] && [ "$ALPHA_NUM" = '4123' ] || fail "bare N resolution failed: $ALPHA_REPO#$ALPHA_NUM"
+resolve_alpha_ref '4123' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO"
+assert_eq "${ALPHA_REPO}#${ALPHA_NUM}" "${TRACKER_REPO}#4123" "bare N resolution failed"
 
 # 7. Phase 6 resolve_alpha_ref fail-closed cases: $PUBLIC target, ambiguous basename, malformed ref
-if resolve_alpha_ref 'example-org/public-feedback#9' 'example-org/tracker-main' "$CANDS" 'example-org/public-feedback'; then
+if resolve_alpha_ref "${PUBLIC_REPO}#9" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO"; then
   fail "expected resolve_alpha_ref to reject PUBLIC repo"
 fi
 
-AMBIG_CANDS=$'example-org/tracker-main\nexample-org/app-client\nother-org/app-client'
-if resolve_alpha_ref 'app-client#10' 'example-org/tracker-main' "$AMBIG_CANDS" 'example-org/public-feedback'; then
+AMBIG_CANDS="$(printf '%s\n%s\n%s' "$TRACKER_REPO" "$CLIENT_REPO" "other-org/app-client")"
+if resolve_alpha_ref 'app-client#10' "$TRACKER_REPO" "$AMBIG_CANDS" "$PUBLIC_REPO"; then
   fail "expected resolve_alpha_ref to reject ambiguous repo#N basename across orgs"
 fi
 
-if resolve_alpha_ref 'example-org/app-client#abc' 'example-org/tracker-main' "$CANDS" 'example-org/public-feedback'; then
+if resolve_alpha_ref "${CLIENT_REPO}#abc" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO"; then
   fail "expected resolve_alpha_ref to reject non-numeric issue number"
 fi
 
 # 8. Crash-recovery jq filter syntax & epic label extraction check
 JQ_FILTER="$(awk '/select\(\(\.body \/\/ ""\) \| contains\(\$pub_url\)\)/{gsub(/^ *'\''|'\'' *$/, ""); print; exit}' "$SKILL_MD")"
-[ -n "$JQ_FILTER" ] || fail "could not extract crash-recovery jq filter from $SKILL_MD"
-jq_out="$(printf '%s' '[{"number":4370,"body":"Refs https://github.com/example-org/public-feedback/issues/91","labels":[{"name":"type: epic"}]},{"number":999,"body":"unrelated #91","labels":[]}]' \
-  | jq -r --arg repo "example-org/tracker-main" --arg pub_url "https://github.com/example-org/public-feedback/issues/91" "$JQ_FILTER")"
-expected_jq=$'example-org/tracker-main#4370\ttrue'
-[ "$jq_out" = "$expected_jq" ] || fail "crash-recovery jq filter mismatch: got '$jq_out', expected '$expected_jq'"
+[[ -n "$JQ_FILTER" ]] || fail "could not extract crash-recovery jq filter from $SKILL_MD"
+jq_out="$(printf '%s' "[{\"number\":4370,\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[{\"name\":\"type: epic\"}]},{\"number\":999,\"body\":\"unrelated #91\",\"labels\":[]}]" \
+  | jq -r --arg repo "$TRACKER_REPO" --arg pub_url "$PUB_ISSUE_URL" "$JQ_FILTER")"
+expected_jq="$(printf '%s#4370\ttrue' "$TRACKER_REPO")"
+assert_eq "$jq_out" "$expected_jq" "crash-recovery jq filter mismatch"
 
 # 9. Regression guard: sub-issue linking must never force replace_parent
 if grep -q -- 'replace_parent' "$ALPHA_SYNC_MD"; then
