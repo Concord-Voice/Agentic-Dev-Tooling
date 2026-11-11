@@ -7,13 +7,15 @@ How Phase 4 turns a surviving public feedback issue into a tracked item in the o
 When `.claude/repo-config.json` defines `.feedback_triage.routing` (`surface -> owner/repo`), route each surviving feedback item to the repository that actually owns the fix or feature rather than piling unrelated work into a single central tracker:
 
 - **Single-repo ownership:** choose the matching target from `.feedback_triage.routing` (for example desktop shell/UI → desktop repo, mobile clients → mobile repo, self-hosted server/installer → self-hosted repo, cloud backend/operations → hosted repo), falling back to `$TRACKER` (`.feedback_triage.tracker`) if `.routing` is unset or the item's owner is unclear. Record the full `owner/repo#NNN` ref in the public `alpha:` marker.
-- **Multi-repo / epic-style ownership:** if the fix spans multiple repositories, place the **epic-style parent** (`type: epic`) in the **main repo owning the fix**, create focused **child tasking sub-issues** in each sibling repo that owns an individual tasking, and link each cross-repo child to the parent via GitHub's native REST sub-issues endpoint:
+- **Multi-repo / epic-style ownership:** if the fix spans multiple repositories, place the **epic-style parent** (`type: epic`) in the **main repo owning the fix**, create focused **child tasking sub-issues** in each sibling repo that owns an individual tasking, and link each cross-repo child to the parent via GitHub's native REST sub-issues endpoint (without forcing parent replacement, so existing parent links are never silently overwritten):
   ```bash
   CHILD_ID=$(gh api "repos/$SIBLING_REPO/issues/$CHILD_NUM" --jq .id)
-  gh api --method POST "repos/$PARENT_REPO/issues/$PARENT_NUM/sub_issues" \
-    -F "sub_issue_id=$CHILD_ID" -F replace_parent=true
+  if ! gh api --method POST "repos/$PARENT_REPO/issues/$PARENT_NUM/sub_issues" \
+    -F "sub_issue_id=$CHILD_ID"; then
+    echo "digest: failed to link $SIBLING_REPO#$CHILD_NUM under $PARENT_REPO#$PARENT_NUM (check for existing parent or permissions)"
+  fi
   ```
-  Record the parent epic's `owner/repo#NNN` ref in the public `alpha:` field, and include `Refs https://github.com/$PUBLIC/issues/<N>` on the parent epic (with each sub-issue linking its parent or `Refs` as context — never cross-repo `Closes`).
+  Record the parent epic's `owner/repo#NNN` ref in the public `alpha:` field, and include `Refs https://github.com/$PUBLIC/issues/<N>` on the parent epic only. Child sub-issues reference the parent (`Parent: $PARENT_REPO#$PARENT_NUM`) rather than repeating the bare public `Refs` URL so crash-recovery searches remain unambiguous (and never use cross-repo `Closes`).
 
 ## Dispatch contract
 
