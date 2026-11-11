@@ -80,7 +80,7 @@ The two-step pattern (server-side ecosystem+date filter, then client-side packag
 For grouped PRs (`chore: bump the X group ...`), extract package names from the PR body's bullet list first:
 
 ```bash
-gh pr view $PR --json body --jq '.body' | \
+gh pr view $PR -R "$OWNER_REPO" --json body --jq '.body' | \
   grep -oE '(Updates? `[^`]+` from|Bumps `[^`]+` from)' | \
   grep -oE '`[^`]+`' | tr -d '`' | sort -u
 ```
@@ -101,7 +101,7 @@ For each extracted package, run the advisory query.
 The dependabot PR body already contains the release notes for the new version. Scan that body ONLY for unambiguous yank / advisory markers. Generic version keywords ("major version", "deprecated", "BREAKING CHANGE in some other version") produce too many false positives because dependabot release-note summaries routinely include phrases like "if you have a major version requirement..." or "this fixes a regression that was introduced in 1.x".
 
 ```bash
-gh pr view $PR --json body --jq '.body' > /tmp/pr-body.txt
+gh pr view $PR -R "$OWNER_REPO" --json body --jq '.body' > /tmp/pr-body.txt
 
 # Strong negative signals (any match → LOW confidence)
 # Must be unambiguous: explicit yank, do-not-use, or reverted-in-version markers.

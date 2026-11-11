@@ -114,12 +114,13 @@ gh search prs --owner "$ORG" --author app/github-actions --state open --limit 10
 
 Group the union by `.repository.nameWithOwner`. Search returns only the fields listed above; read everything else per PR in the later phases. A result count equal to `--limit` means the list is truncated: say so and do not report the batch as complete. PRs that a repository's own App-authenticated workflow opens are found per repository with the label query in Phase 1.
 
-**2. Every command names its repository.** Run Phases 1.5 to 6 once per repository, with `OWNER_REPO`, `OWNER` and `REPO` set to that repository. Add `-R "$OWNER_REPO"` to every `gh pr`, `gh issue` and `gh run` command in this skill; the `gh api "repos/$OWNER/$REPO/…"` calls already name it. A command without `-R` reads the repository of the current directory, which is the wrong one for all repositories but one.
+**2. Every command names its repository.** Run Phases 1.5 to 6 once per repository, with `OWNER_REPO`, `OWNER` and `REPO` set to that repository. Every `gh pr`, `gh issue` and `gh run` command in this skill and its references already carries `-R "$OWNER_REPO"`, and Phase 0 sets `OWNER_REPO` in single-repo mode too, so copy the commands as written. Set `OWNER`, `REPO` and `OWNER_REPO` together; the `gh api "repos/$OWNER/$REPO/…"` calls read the first two. A command without `-R` reads the repository of the current directory, which is the wrong one for all repositories but one.
 
 **3. Config is loaded per repository, from its default branch.** The helper (`rc_get`, `rc_has`) is loaded once, as above, from the current repository. Each repository's config comes from the API, which serves the default branch, so a PR branch cannot supply it:
 
 ```bash
 RC_FILE="$(mktemp)"   # rc_get reads $RC_FILE; one file per repository
+CONFIG_STATE=ok       # reset for every repository; only the lines below may change it
 if ! ERR="$(gh api "repos/$OWNER_REPO/contents/.claude/repo-config.json" -H 'Accept: application/vnd.github.raw' 2>&1 >"$RC_FILE")"; then
   case "$ERR" in
     *'HTTP 404'*) echo '{}' >"$RC_FILE" ;;                # no config: the safe defaults apply
@@ -131,13 +132,15 @@ jq -e 'type == "object"' "$RC_FILE" >/dev/null 2>&1 || { echo '{}' >"$RC_FILE"; 
 
 Then run the `rc_get` lines of Phase 0 again for this repository. Only a 404 means "no config". For any other failure, or for content that is not a JSON object, set `CONFIG_STATE=unreadable`: every PR of that repository is Tier C with confidence UNKNOWN, and the repository's table says the config could not be read. Never apply one repository's tier data to another repository.
 
-**4. Tables, contention and follow-ups are per repository.** Show one categorization table per repository, with the repository name in its header, then one combined summary. Lockfile contention is counted per repository and manifest directory: two PRs contend only when the repository, the directory and the lockfile are all the same, so PRs in different repositories never wait for each other. Steps that need a working tree (the local tests of Phase 4.C step 4 and 4b, and Phases 6.2, 6.3 and 6.5) run only for a repository that has a local checkout. Without a checkout, record `NOT RUN (no local checkout)`. This is never a pass.
+**4. Tables, contention and follow-ups are per repository.** Show one categorization table per repository, with the repository name in its header, then one combined summary. Lockfile contention is counted per repository and manifest directory: two PRs contend only when the repository, the directory and the lockfile are all the same, so PRs in different repositories never wait for each other. A PR that changes several directories contends in each of them. Steps that need a working tree (the local tests of Phase 4.C step 4 and 4b, and Phases 6.2, 6.3 and 6.5) run only for a repository that has a local checkout. Without a checkout, record `NOT RUN (no local checkout)`. This is never a pass.
 
 `--org` is interactive only. `--mode=prep` and `--mode=triage` stay per repository, because each repository has its own pinned digest issue and its own cron.
 
 ### Reading PR state when the token is limited
 
-Some tokens cannot read every field this skill needs. A fine-grained token can lack access to the GraphQL `statusCheckRollup` field (then `gh pr list --json statusCheckRollup` and `gh pr checks` both fail), can get `403` from the REST check-runs and commit-status endpoints, and can fail on `gh pr view --json reviewRequests` when a team is a requested reviewer. Each of these failures is silent if the command's output is used without a check. Use the two helpers below wherever a phase needs CI state or the reviewer list. In both, a read that fails gives `unknown`. It never gives `green`, `0` or "none".
+Some tokens cannot read every field this skill needs. A fine-grained token can lack access to the GraphQL `statusCheckRollup` field (then `gh pr list -R "$OWNER_REPO" --json statusCheckRollup` and `gh pr checks` both fail), can get `403` from the REST check-runs and commit-status endpoints, and can fail on `gh pr view --json reviewRequests` when a team is a requested reviewer. Each of these failures is silent if the command's output is used without a check. Use the two helpers below wherever a phase needs CI state or the reviewer list. In both, a read that fails gives `unknown`. It never gives `green`, `0` or "none".
+
+**Shell state does not carry between tool calls.** Each Bash call an agent makes can start a fresh shell, so the Phase 0 variables, `rc_get` and these two functions are gone in the next call. Run the Phase 0 block, then this block, at the top of every Bash call that uses any of them, in the same call. A helper that is not defined prints nothing, and that is why neither helper ever uses empty output as an answer: `pr_ci` always prints a status word and a `source:` line, and `pr_requested` always prints at least one line. **Empty output from either helper means it did not run: treat it as `unknown`.**
 
 ```bash
 # pr_ci <pr> → green | red | pending | missing | unknown, then the source that answered.
@@ -154,15 +157,22 @@ pr_ci() {
   fi
   sha="$(gh api "repos/$OWNER_REPO/pulls/$pr" --jq .head.sha 2>/dev/null)" || sha=""
   [ -n "$sha" ] || { echo unknown; echo "source: none (head SHA unreadable)"; return 0; }
-  # 2. REST check-runs: check runs of every App, without the GraphQL field.
+  # 2. REST check-runs plus the combined commit status. Source 1 covers both kinds; here
+  #    they are two endpoints, and both must be read: CI that reports through the status
+  #    API (many non-Actions CI services) is invisible to check-runs.
   if out="$(gh api --paginate --slurp "repos/$OWNER_REPO/commits/$sha/check-runs?per_page=100" 2>/dev/null)"; then
-    jq -r --arg wf "$wf" '[.[].check_runs[]] as $c
-      | if ($c | length) == 0 then "missing"
+    local st; st="$(gh api "repos/$OWNER_REPO/commits/$sha/status" --jq '"\(.state) \(.total_count)"' 2>/dev/null)" || st="unreadable"
+    jq -r --arg wf "$wf" --arg st "$st" '[.[].check_runs[]] as $c
+      | ($st | split(" ")) as [$state, $n]
+      | if ($state == "failure" or $state == "error") then "red"
         elif ($c | any(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled" or .conclusion == "action_required" or .conclusion == "startup_failure")) then "red"
         elif ($c | any(.status != "completed")) then "pending"
+        elif ($state == "pending" and ($n // "0") != "0") then "pending"
+        elif ($c | length) == 0 and ($n // "0") == "0" then (if $state == "unreadable" then "unknown" else "missing" end)
+        elif $state == "unreadable" then "unknown"
         elif ($c | all(.conclusion == "success" or .conclusion == "skipped" or .conclusion == "neutral")) then (if $wf == "" then "green" else "green-unconfirmed" end)
         else "pending" end' <<<"$out"
-    echo "source: check-runs"; return 0
+    echo "source: check-runs+status"; return 0
   fi
   # 3. Actions workflow runs for the head SHA: works where 1 and 2 are refused, but it
   #    sees GitHub Actions only. Checks that other Apps report are invisible here.
@@ -179,19 +189,26 @@ pr_ci() {
 }
 
 # pr_requested <pr> → one requested reviewer per line (users, then teams as team:<slug>),
-# or the single word "unknown" when neither read worked. An empty result means "none requested".
+# or "none" when the list was read and is empty, then a last line "source: graphql" or
+# "source: rest". When neither read worked it prints the single word "unknown".
+# Empty output never means "none": it means the function did not run.
 pr_requested() {
-  local pr="$1"
-  gh pr view "$pr" -R "$OWNER_REPO" --json reviewRequests --jq '.reviewRequests[] | (.login // ("team:" + (.slug // .name // "")))' 2>/dev/null && return 0
-  gh api "repos/$OWNER_REPO/pulls/$pr/requested_reviewers" --jq '(.users[].login), (.teams[] | "team:" + .slug)' 2>/dev/null && return 0
+  local pr="$1" out
+  if out="$(gh pr view "$pr" -R "$OWNER_REPO" --json reviewRequests --jq '.reviewRequests[] | (.login // ("team:" + (.slug // .name // "")))' 2>/dev/null)"; then
+    printf '%s\n' "${out:-none}"; echo "source: graphql"; return 0
+  fi
+  if out="$(gh api "repos/$OWNER_REPO/pulls/$pr/requested_reviewers" --jq '(.users[].login), (.teams[] | "team:" + .slug)' 2>/dev/null)"; then
+    printf '%s\n' "${out:-none}"; echo "source: rest"; return 0
+  fi
   echo unknown
 }
 ```
 
 How to read the result of `pr_ci`:
 
+- `source: rest` from `pr_requested` can miss a requested bot reviewer such as Copilot, because the REST endpoint does not handle bots the way GraphQL does. A REST result can show that Copilot **is** requested; it can never show that Copilot is **not** requested. Treat "Copilot absent, source: rest" as unknown.
 - `green-unconfirmed` (source 2 with `weekly_deps.ci_workflow` set) means all check runs passed, but a check run does not carry its workflow name, so the required workflow is not confirmed. Confirm it with source 3 (a completed, successful run whose `name` equals the configured workflow). If that read fails, the result is `unknown`.
-- `green` from `actions-runs` covers GitHub Actions only. Print the source beside the status (`green (actions-runs)`) so the reader knows that checks from other Apps were not seen. If `gh api "repos/$OWNER_REPO/pulls/$PR" --jq .mergeable_state` returns `unstable`, a check that this source cannot see is failing or pending: the result is `unknown`.
+- `green` from `actions-runs` covers GitHub Actions only. Print the source beside the status (`green (actions-runs)`) so the reader knows that checks from other Apps were not seen. Keep that green only if `gh api "repos/$OWNER_REPO/pulls/$PR" --jq .mergeable_state` reads successfully as `clean`, `behind` or `has_hooks`. Any other value (`unstable`, `blocked`, `dirty`, `unknown`, `draft`), empty output, or a failed read means a check this source cannot see may be failing or pending: the result is `unknown`.
 - Several runs can exist for one head SHA. A failed run stays in the list after a new run passes, so this source can say `red` for a PR that is now green. That error is in the safe direction. Do not filter failed runs out to get a green result.
 - `unknown` is not `missing`. `missing` means a read worked and found no checks. `unknown` means no read worked. Both skip the PR, and both are reported with their own word.
 
@@ -260,20 +277,20 @@ Enumerate open bot-authored PRs. Don't trust the user's pasted list — re-fetch
 
 ```bash
 # Dependabot PRs (all ecosystems dependabot manages for this repo)
-gh pr list \
+gh pr list -R "$OWNER_REPO" \
   --search "author:app/dependabot is:open" \
   --json number,title,labels,headRefName,mergeable,mergeStateStatus,files,isDraft,createdAt,updatedAt \
   --limit 50
 
 # Other bot-authored PRs (github-actions for security-data refreshes etc.)
-gh pr list \
+gh pr list -R "$OWNER_REPO" \
   --search "author:app/github-actions is:open" \
   --json number,title,labels,headRefName,mergeable,mergeStateStatus,files,isDraft,createdAt,updatedAt \
   --limit 20
 
 # Workflow-opened PRs authored by a GitHub App (OPTIONAL — only if the repo has such a
 # routine). The author queries above miss them; query by the label the workflow applies.
-gh pr list \
+gh pr list -R "$OWNER_REPO" \
   --search 'label:"<routine-label>" is:open' \
   --json number,title,labels,headRefName,mergeable,mergeStateStatus,files,isDraft,createdAt,updatedAt \
   --limit 5
@@ -289,7 +306,7 @@ In `--org` mode the list comes from the owner-wide search (§ Multi-repo mode); 
 
 The second `gh pr list` call (the `author:app/github-actions` query) also catches PRs opened by repo workflows via PR-creation actions (e.g. `peter-evans/create-pull-request`) using the default `GITHUB_TOKEN` — including any label-driven reclassification extension a repo adds (see "Choosing the right workflow" above). A workflow that authenticates as its own GitHub App instead (so PR CI runs on its PRs without a manual re-trigger) is **not** `app/github-actions`, so only the third, label-based call catches its PRs. Phase 2 applies any such repo-defined label rule.
 
-If the user passed `$0` as a specific PR number, narrow to just that PR via `gh pr view $0 --json ...` and skip directly to Phase 2 for that one PR.
+If the user passed `$0` as a specific PR number, narrow to just that PR via `gh pr view $0 -R "$OWNER_REPO" --json ...` and skip directly to Phase 2 for that one PR.
 
 If zero open bot PRs: report "No open bot-authored PRs. Nothing to triage." and exit.
 
@@ -301,7 +318,7 @@ Derive the active ecosystem set from the **live PR diffs**, not from a hardcoded
 
 ```bash
 # For each PR number from Phase 1:
-gh pr diff $PR --name-only
+gh pr diff $PR -R "$OWNER_REPO" --name-only
 ```
 
 Map each touched manifest path to an ecosystem (basename-based, directory-agnostic):
@@ -360,7 +377,7 @@ The four tiers are a fixed *concept*; the package→group→tier *data* is per-r
 | `ungrouped` | bool | `true`: the PR bumps one package and has no Dependabot group. A one-update PR that names a group is grouped, not ungrouped |
 | `packages` | glob[] | **every** bumped package matches a glob. One member outside the list means no match |
 | `ecosystems` | string[] | the PR's detected ecosystem (Phase 1.5) is in the list |
-| `directories` | glob[] | the PR's manifest directory matches a glob |
+| `directories` | glob[] | **every** manifest directory the PR changes matches a glob. A Dependabot group with `directories:` can change several (`… across 3 directories`) |
 | `dependency_type` | `development` \| `production` | every bumped package is of that type in the manifest the PR changes (for npm, the changed line is under `devDependencies` for `development`, and under `dependencies` or `optionalDependencies` for `production`). If the type cannot be read from the diff, or the ecosystem has no such split, the rule does not match |
 | `max_bump` | `patch` \| `minor` | no bumped package moves more than this. Default `minor`. A tier C rule ignores it. No value admits a major bump |
 
@@ -376,19 +393,27 @@ The group name and the package list are separate tests on purpose. A group can h
 
 > **Any major-version bump (`X.Y.Z → X+1.0.0`) → Tier C**, regardless of which group the package belongs to. The dependabot group label / config group is a *starting* signal, not the final answer. Always check the version shape before final tier assignment.
 
-For grouped PRs (`chore: bump the X group ...`), extract the individual package names from the PR body bullet list (`gh pr view $PR --json body --jq '.body'`) and classify each; the **highest-risk** member determines the PR's tier (any Tier C member → whole PR Tier C; any major bump in the group → Tier C).
+For grouped PRs (`chore: bump the X group ...`), extract the individual package names and versions from the PR body bullet list (`gh pr view "$PR" -R "$OWNER_REPO" --json body --jq '.body'`). Match the tier rules **once, against the whole PR**: `groups`, `ungrouped`, `ecosystems` and `directories` are properties of the PR, and `packages`, `dependency_type` and `max_bump` are tested against every member as their rows say. Do not classify members one at a time against `groups`, because a single member is not a grouped PR and would match nothing. The per-member reads feed the member-level checks: any major bump in the group → Tier C, any bundled-engine member → Tier C, any security-sensitive member → LOW confidence.
 
-A version that the PR does not state in a form that can be compared (a commit SHA, a date tag, a `0.x` version where a minor can break) has an unparseable bump shape: do not count it as patch or minor. The PR is Tier C with confidence UNKNOWN.
+How to read the bump shape of each member:
+
+- `X.Y.Z` with `X ≥ 1`: a change in `X` is major, in `Y` minor, in `Z` patch.
+- `0.Y.Z`: a change in `Y` is **major** and a change in `Z` is **minor**. Below 1.0, semver lets a minor break, so this shifts every 0.x change up one step. `0.0.Z` to `0.0.Z'` is major.
+- A pre-release version (`-rc.1`, `-beta`) on either side is major.
+- A GitHub Actions bump pinned by commit SHA is parseable only from the version Dependabot states for it (the `# vX.Y.Z` comment in the diff, or "from vA to vB" in the body), and only once Phase 3.3b confirms that the SHA resolves to that tag. Until then, or if 3.3b fails, the shape is unparseable.
+- Anything else (a date tag, a branch name, a bare SHA with no stated version, a Docker tag that is not a version) is unparseable: do not count it as patch or minor. The PR is Tier C with confidence UNKNOWN.
 
 ### Label rules
 
 `.weekly_deps.label_rules` (loaded as `LABEL_RULES`) reclassifies PRs by label. This is for PRs that a repo routine opens, such as a transitive-dependency refresh that moves many modules at once and so does not fit a per-package rule.
 
 ```json
-[ { "label": "<routine-label>", "tier": "C", "demote_to": "B", "demote_max_packages": 4 } ]
+[ { "label": "<routine-label>", "tier": "C", "demote_to": "B", "demote_max_packages": 4, "authors": ["<your-ci-app>[bot]"] } ]
 ```
 
-A PR that carries `label` starts in `tier`, whatever the tier rules say. If the rule has `demote_to`, the PR moves to that tier only when all of these hold: the diff changes at most `demote_max_packages` packages or modules, no change is a major bump, and no changed package matches the security-sensitive list (Phase 3.5). A label rule never moves a PR below the tier that an override gives it. If the PR body has a self-review checklist, say so in the table and read it before any subagent review.
+A label rule applies only when the PR carries `label` **and** its author is a bot or GitHub App: the author login ends in `[bot]`, or is listed in the rule's optional `authors` array. Read the author per PR (`gh pr view "$PR" -R "$OWNER_REPO" --json author --jq .author.login`); if it cannot be read, the rule does not apply. A label is a weak signal on its own, because anyone with triage rights can add one to any PR, so a labelled PR from any other author is classified as if it had no label.
+
+When a label rule applies, its tier takes part in the normal comparison: the PR's tier is the highest-risk tier among the label rule and every tier rule that matches. The "no rule matches → Tier C" fall-through does not apply, because the label rule is a match. `demote_to` lowers only the label rule's own tier, and only when all of these hold: the diff changes at most `demote_max_packages` packages or modules, no change is a major bump, and no changed package matches the security-sensitive list (Phase 3.5). So a matching tier C rule still wins over a demoted label rule, and no label rule moves a PR below the tier that an override gives it. If the PR body has a self-review checklist, say so in the table and read it before any subagent review.
 
 ### Lockstep sets: packages that must move together
 
@@ -439,7 +464,7 @@ prints it; nothing in the routine asks anyone to read it. In the digest, report 
 line, not just the package line:
 
 ```bash
-gh pr view "$PR" --json body --jq .body \
+gh pr view "$PR" -R "$OWNER_REPO" --json body --jq .body \
   | grep -oiE 'Updated (Chromium|Node\.js) to [0-9][0-9.]*' | sort -u
 ```
 
@@ -604,7 +629,7 @@ Do not call `gh pr checks` directly here: with a token that cannot read `statusC
 ### 3.2 Mergeable status
 
 ```bash
-gh pr view $PR --json mergeable,mergeStateStatus --jq '{mergeable, mergeStateStatus}' \
+gh pr view $PR -R "$OWNER_REPO" --json mergeable,mergeStateStatus --jq '{mergeable, mergeStateStatus}' \
   || gh api "repos/$OWNER_REPO/pulls/$PR" --jq '{mergeable, mergeable_state}'   # REST: true/false/null and clean/behind/dirty/blocked/unstable
 ```
 
@@ -617,7 +642,7 @@ If both reads fail, or `mergeable` is `null` or `UNKNOWN` (GitHub has not comput
 ### 3.3 No surprise diff
 
 ```bash
-gh pr diff $PR --name-only
+gh pr diff $PR -R "$OWNER_REPO" --name-only
 ```
 
 Expected file footprint per PR type — derived from the PR's detected ecosystem (Phase 1.5), confined to a single manifest directory:
@@ -742,7 +767,7 @@ Confidence is biased toward false-positives. The cost of an unnecessary Copilot 
 SECURITY_EXTRA="$(rc_get '.weekly_deps.security_sensitive_extra | join(" ")' '')"
 ```
 
-Glob-match each bumped package name against the union. For grouped PRs (`chore: bump the X group ...`), extract individual package names from the PR body bullet list via `gh pr view $PR --json body --jq '.body'`. A match on ANY package in the group elevates the whole PR to LOW.
+Glob-match each bumped package name against the union. For grouped PRs (`chore: bump the X group ...`), extract individual package names from the PR body bullet list via `gh pr view $PR -R "$OWNER_REPO" --json body --jq '.body'`. A match on ANY package in the group elevates the whole PR to LOW.
 
 Annotate each PR with its label and append to the categorization table from Phase 2 — the developer should see confidence alongside tier when deciding what to do.
 
@@ -753,14 +778,20 @@ Annotate each PR with its label and append to the categorization table from Phas
 > **So verify, do not assume — in both directions.** Before running this phase, confirm the request actually took:
 >
 > ```bash
-> gh pr edit "$PR" --add-reviewer "@copilot" >/dev/null 2>&1
-> pr_requested "$PR" | grep -ciE '^(copilot|copilot-pull-request-reviewer(\[bot\])?)$'
-> pr_requested "$PR" | grep -cx unknown
+> gh pr edit "$PR" -R "$OWNER_REPO" --add-reviewer "@copilot" >/dev/null 2>&1
+> REQ="$(pr_requested "$PR")"            # read once; two reads can disagree
+> if [ -z "$REQ" ] || [ "$REQ" = unknown ]; then echo "probe: no result"
+> elif grep -qiE '^(copilot|copilot-pull-request-reviewer(\[bot\])?)$' <<<"$REQ"; then echo "probe: copilot requested"
+> elif grep -qx 'source: graphql' <<<"$REQ"; then echo "probe: copilot off"
+> else echo "probe: no result"            # REST cannot prove a bot is absent
+> fi
 > ```
 >
-> Use `pr_requested` (§ Reading PR state when the token is limited), not `gh pr view --json reviewRequests` alone: that call fails when a team is a requested reviewer, and a failed call is not a count of zero. If the second line prints `1`, the reviewer list could not be read: the probe has no result. Do not conclude that Copilot is off and do not report the review as requested; try the probe on another PR, and if no PR gives a result, treat Copilot's state as unknown for the run and take the direct specialist dispatch path for Tier C.
+> Use `pr_requested` (§ Reading PR state when the token is limited), not `gh pr view --json reviewRequests` alone: that call fails when a team is a requested reviewer, and a failed call is not a count of zero. Read the list **once** into a variable and test that: two separate reads can disagree after a transient error.
 >
-> A first line of `0` (with a readable list) means Copilot is off. Skip the phase for the whole run, log one line — `INFO: Copilot Code Review unavailable; skipping 3.6 and treating its signal as absent` — and **do not** escalate, retry, or surface it as a finding: its absence is a settled decision, not an incident. Then carry that into Phase 4: a Tier C PR that got no Copilot review takes the **direct specialist dispatch** path described in 4.C step 3, not the reconcile-Copilot path.
+> `probe: no result` means the probe proved nothing. Do not conclude that Copilot is off and do not report the review as requested; try the probe on another PR, and if no PR gives a result, treat Copilot's state as unknown for the run and take the direct specialist dispatch path for Tier C.
+>
+> `probe: copilot off` means Copilot is off.
 >
 > Equally, do not hardcode "Copilot is off" — it returns when billing is re-enabled. The probe above is the source of truth; this note is not.
 
@@ -773,17 +804,18 @@ This phase closes that gap — **when Copilot is available** — by explicitly r
 **Step 3.6.1 — Idempotency check.** For each LOW / UNKNOWN PR, check whether Copilot is already requested or has already reviewed:
 
 ```bash
-# Already requested? (prints "unknown" when the list cannot be read)
-pr_requested "$PR" | grep -iE '^(copilot|copilot-pull-request-reviewer(\[bot\])?|unknown)$'
+# Already requested? Read once; "unknown", empty output, or a REST-only list that lacks
+# Copilot all count as "cannot rule out".
+REQ="$(pr_requested "$PR")"
 
 # Already reviewed?
-gh pr view $PR --json reviews --jq '[.reviews[] | select(.author.login == "copilot-pull-request-reviewer")] | length' \
+gh pr view $PR -R "$OWNER_REPO" --json reviews --jq '[.reviews[] | select(.author.login == "copilot-pull-request-reviewer")] | length' \
   || gh api --paginate "repos/$OWNER_REPO/pulls/$PR/reviews" --jq '[.[] | select(.user.login | test("^copilot-pull-request-reviewer"))] | length'
 ```
 
-If the first command prints `unknown`, or both review reads fail, do not send a new request for this PR in this run: a second request cannot be ruled out. List the PR as "Copilot state unknown".
+If `REQ` is empty or `unknown`, or lacks Copilot with `source: rest`, or both review reads fail, do not send a new request for this PR in this run: a second request cannot be ruled out. List the PR as "Copilot state unknown".
 
-If Copilot is in the requested list, or the review count is > 0, skip this PR (Copilot is either still working on it or done; the next re-invocation will pick up the review in Phase 4.0).
+If Copilot is in `REQ`, or the review count is > 0, skip this PR (Copilot is either still working on it or done; the next re-invocation will pick up the review in Phase 4.0).
 
 **Step 3.6.2 — Batch confirmation.** Show the developer the list of PRs that need a fresh Copilot review request, grouped by tier with the reason each one was flagged:
 
@@ -801,7 +833,7 @@ Security-sensitive package match:
   #NN <pkg> <from> → <to>                     [matches security-sensitive list]
 
 Each will get @copilot added as a reviewer via:
-  gh pr edit <PR> --add-reviewer "@copilot"
+  gh pr edit <PR> -R "$OWNER_REPO" --add-reviewer "@copilot"
 
 Proceed? [yes — request all] [pick subset] [skip — review yourself]
 ```
@@ -810,7 +842,7 @@ Proceed? [yes — request all] [pick subset] [skip — review yourself]
 
 ```bash
 for PR in $LOW_PRS; do
-  gh pr edit $PR --add-reviewer "@copilot"
+  gh pr edit $PR -R "$OWNER_REPO" --add-reviewer "@copilot"
 done
 ```
 
@@ -845,7 +877,7 @@ Work through tiers in the proposed order. Within each tier, walk PRs sequentiall
 **Re-entrant detection.** Before processing any PR, check whether it has a Copilot review present (set in Phase 3.6 of a previous invocation, now completed):
 
 ```bash
-gh pr view $PR --json reviews --jq '[.reviews[] | select(.author.login == "copilot-pull-request-reviewer")] | map({state, submittedAt, body: (.body // "" | .[0:200])})'
+gh pr view $PR -R "$OWNER_REPO" --json reviews --jq '[.reviews[] | select(.author.login == "copilot-pull-request-reviewer")] | map({state, submittedAt, body: (.body // "" | .[0:200])})'
 ```
 
 If a Copilot review exists → route through Phase 4.0 (Copilot review triage) before per-tier processing. If no review yet but Copilot is in the output of `pr_requested "$PR"`, surface the still-pending state to the developer and skip this PR for this run.
@@ -857,7 +889,7 @@ For each PR with a Copilot review present, triage the findings before deciding o
 **Tier A / B → inline lighter triage.** Fetch the review summary and inline comments:
 
 ```bash
-gh pr view $PR --json reviews --jq '.reviews[] | select(.author.login == "copilot-pull-request-reviewer") | {state, body}'
+gh pr view $PR -R "$OWNER_REPO" --json reviews --jq '.reviews[] | select(.author.login == "copilot-pull-request-reviewer") | {state, body}'
 gh api "repos/$OWNER/$REPO/pulls/$PR/comments" --jq '.[] | select(.user.login | test("copilot"; "i")) | {path, line, body: (.body | .[0:300])}'
 ```
 
@@ -915,16 +947,16 @@ If `yes — merge all`:
 1. **Pick the first PR per directory** to merge first (one per manifest directory, and in `--org` mode one per repository and directory). These cannot conflict with each other. Leave out every PR with a lockstep hold.
 2. For each:
    ```bash
-   gh pr merge $PR --squash --delete-branch
+   gh pr merge $PR -R "$OWNER_REPO" --squash --delete-branch
    # Worktree quirk: --delete-branch may exit non-zero on local cleanup;
    # server-side merge already succeeded. Verify with:
-   gh pr view $PR --json state --jq .state
+   gh pr view $PR -R "$OWNER_REPO" --json state --jq .state
    # Expect: "MERGED"
    ```
 3. **Do not trust the exit code** of `gh pr merge` in worktree context — always verify with `gh pr view`.
 4. After each merge, comment `@dependabot rebase` on the next PR in that same directory's queue (the lockfile changed; subsequent PRs need a refresh):
    ```bash
-   gh pr comment $NEXT_PR --body "@dependabot rebase"
+   gh pr comment $NEXT_PR -R "$OWNER_REPO" --body "@dependabot rebase"
    ```
 5. Wait briefly for the rebase + CI re-run before merging the next in that directory's queue. In practice the developer should run `/weekly-deps` again after ~10–20 minutes to pick up the rebased PRs.
 
@@ -936,7 +968,7 @@ For each Tier B PR in turn:
 
 1. Show the PR title, the bump shape (e.g., `8.18.0 → 8.20.0`, minor), and the changelog excerpt:
    ```bash
-   gh pr view $PR --json body --jq '.body' | head -80
+   gh pr view $PR -R "$OWNER_REPO" --json body --jq '.body' | head -80
    ```
 2. Skim for breaking-change keywords: `BREAKING`, `MAJOR`, `deprecate`, `remove`, `behavior change`, `default changed`.
 3. If clean: prompt the developer:
@@ -949,7 +981,7 @@ For each Tier B PR in turn:
    Merge? [yes / view full diff / view full release notes / skip]
    ```
 4. On `yes`, run the merge command from 4.A step 2 and verify via `gh pr view`.
-5. On `view full diff`: `gh pr diff $PR | head -200` and re-prompt.
+5. On `view full diff`: `gh pr diff $PR -R "$OWNER_REPO" | head -200` and re-prompt.
 
 ### 4.C — Tier C processing (deep review)
 
@@ -1115,8 +1147,8 @@ Tier C deserves the most care. For each Tier C PR:
 
 For each Tier D PR:
 
-1. **Verify the diff is data-only.** `gh pr diff $PR --name-only` should show only the data file(s) declared in the matching `.weekly_deps.tier_d_sources` descriptor, no code.
-2. **Inspect the data delta.** `gh pr diff $PR | head -200` — look for the additions/removals. A normal refresh adds new entries and may remove expired ones; an abnormal refresh would remove a large fraction of entries or add entries with unusual structure.
+1. **Verify the diff is data-only.** `gh pr diff $PR -R "$OWNER_REPO" --name-only` should show only the data file(s) declared in the matching `.weekly_deps.tier_d_sources` descriptor, no code.
+2. **Inspect the data delta.** `gh pr diff $PR -R "$OWNER_REPO" | head -200` — look for the additions/removals. A normal refresh adds new entries and may remove expired ones; an abnormal refresh would remove a large fraction of entries or add entries with unusual structure.
 3. **Verify the upstream source.** The bot's PR body should reference the same upstream feed URL as the previous refresh. If the source URL has changed without an explanatory commit, flag for developer review.
 4. Prompt:
    ```
@@ -1127,7 +1159,7 @@ For each Tier D PR:
 
    Merge? [yes / view full delta / skip]
    ```
-5. On `yes`, merge with `gh pr merge $PR --squash --delete-branch` and verify.
+5. On `yes`, merge with `gh pr merge $PR -R "$OWNER_REPO" --squash --delete-branch` and verify.
 
 ---
 
@@ -1142,7 +1174,7 @@ After a round of merges (or in `--mode=prep` autonomous runs, where any PR is al
 For each conflicting PR:
 
 ```bash
-gh pr comment $PR --body "@dependabot rebase"
+gh pr comment $PR -R "$OWNER_REPO" --body "@dependabot rebase"
 ```
 
 The rebase typically takes a few minutes plus a full CI run. Don't sit and poll — tell the developer:
@@ -1324,7 +1356,7 @@ Suggest `--force` only if the removal refuses over build output the agent instal
 - Does **not** modify a repo's rules docs based on dependency bumps — flags for developer review only.
 - Does **not** merge Tier C PRs without dispatching the configured deep-review skill (or a direct specialist-suite dispatch as fallback if Copilot review was explicitly skipped or unavailable) first.
 - Does **not** request Copilot review on HIGH-confidence PRs — that's noise for both the bot's queue and the developer's inbox. Copilot is reserved for LOW/UNKNOWN signal.
-- Does **not** request Copilot review on PRs that already have one in `reviews` or `reviewRequests` — Step 3.6.1 idempotency check prevents double-requesting.
+- Does **not** request Copilot review on PRs that already have one requested or submitted, or whose reviewer list cannot be read — Step 3.6.1 idempotency check prevents double-requesting.
 - Does **not** poll inside the same invocation while waiting for Copilot to finish a review — the developer re-invokes after ~5–10 minutes, the same re-entrant cadence as `@dependabot rebase`.
 - Does **not** use the bare `requested_reviewers` REST endpoint with `reviewers: ["copilot-pull-request-reviewer"]` — that returns an error because Copilot is a bot, not a user. Always use `gh pr edit --add-reviewer "@copilot"` or the GraphQL `botIds` path.
 - Does **not** auto-dismiss Copilot findings that mention specific behavioral changes, deprecations affecting shipped code, breaking-change call-outs, or supply-chain anomalies — those always surface to the developer regardless of tier.
