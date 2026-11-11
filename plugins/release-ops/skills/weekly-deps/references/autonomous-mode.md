@@ -52,10 +52,11 @@ Run Phase 3.6 for every LOW / UNKNOWN PR. In autonomous mode there's no develope
 
 ```bash
 for PR in $LOW_PRS; do
-  ALREADY_REQUESTED=$(gh pr view $PR --json reviewRequests \
-    --jq '[.reviewRequests[] | select(.login == "Copilot" or .login == "copilot-pull-request-reviewer")] | length')
+  # pr_requested is defined in SKILL.md § Reading PR state when the token is limited. It prints
+  # "unknown" when the reviewer list cannot be read; a failed read is not a count of zero.
+  ALREADY_REQUESTED=$(pr_requested "$PR" | grep -ciE '^(copilot|copilot-pull-request-reviewer(\[bot\])?|unknown)$')
   ALREADY_REVIEWED=$(gh pr view $PR --json reviews \
-    --jq '[.reviews[] | select(.author.login == "copilot-pull-request-reviewer")] | length')
+    --jq '[.reviews[] | select(.author.login == "copilot-pull-request-reviewer")] | length' 2>/dev/null || echo unknown)
   if [ "$ALREADY_REQUESTED" = "0" ] && [ "$ALREADY_REVIEWED" = "0" ]; then
     gh pr edit $PR --add-reviewer "@copilot" && echo "Requested: #$PR" || echo "Failed: #$PR"
   else

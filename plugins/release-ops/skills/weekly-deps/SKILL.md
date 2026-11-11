@@ -1,13 +1,14 @@
 ---
 name: weekly-deps
-description: "Triage the weekly batch of bot-authored dependency PRs (Dependabot plus github-actions updates) by risk and confidence, extract the embedded engine delta on bundled-engine bumps (e.g. Electron/Chromium, Node/V8), request Copilot reviews when Copilot is actually available, route higher-risk items through the repo's configured deep-review skill, and process safer bumps first to reduce lockfile conflicts. Active ecosystems are auto-detected from the live PR diffs (optionally pinned via `.claude/repo-config.json` `.ecosystems`); tier package→group data and the security-sensitive overlay come from `.weekly_deps.*` in the same config. Supports interactive triage/merge plus --mode=prep and --mode=triage for autonomous, non-merge weekly routines."
-argument-hint: [pr-number | all | --mode=prep | --mode=triage]
+description: "Triage the weekly batch of bot-authored dependency PRs (Dependabot plus github-actions updates) by risk and confidence, extract the embedded engine delta on bundled-engine bumps (e.g. Electron/Chromium, Node/V8), request Copilot reviews when Copilot is actually available, route higher-risk items through the repo's configured deep-review skill, and process safer bumps first to reduce lockfile conflicts. Active ecosystems are auto-detected from the live PR diffs (optionally pinned via `.claude/repo-config.json` `.ecosystems`); tier package→group data and the security-sensitive overlay come from `.weekly_deps.*` in the same config. Supports interactive triage/merge for one repository or, with --org, for every repository of an owner, plus --mode=prep and --mode=triage for autonomous, non-merge weekly routines."
+argument-hint: [pr-number | all | --org[=<owner>] | --mode=prep | --mode=triage]
 allowed-tools:
   - Bash(gh pr *)
   - Bash(gh api *)
   - Bash(gh run *)
   - Bash(gh issue *)
   - Bash(gh repo *)
+  - Bash(gh search *)
   - Bash(git log *)
   - Bash(git diff *)
   - Bash(git rev-parse *)
@@ -33,6 +34,7 @@ Triage and merge the weekly batch of bot-authored dependency PRs (dependabot + g
 
 - **No arg** (or `all`) → discover and process all open bot PRs (interactive).
 - **PR number** (`$0`) → run pre-flight + processing on just that one PR through its tier's workflow (interactive).
+- **`--org`** (or `--org=<owner>`) → discover open bot PRs in every repository of the owner and process them repository by repository (interactive). Read § Multi-repo mode before Phase 0.
 - **`--mode=prep`** → autonomous prep run intended for a scheduled cron. Discovers, categorizes, runs community-signal lookup, requests Copilot reviews, sends `@dependabot rebase` on conflicts, writes a digest to the pinned issue, then exits. Does NOT merge anything. Does NOT schedule the triage run — triage has its own independent cron (see Schematic below). Read `references/autonomous-mode.md` before proceeding.
 - **`--mode=triage`** → autonomous follow-up running on an independent cron. Picks up Copilot reviews that have landed since prep, auto-dismisses style nits, surfaces real findings into the same pinned-issue comment. Does NOT merge anything. Read `references/autonomous-mode.md` before proceeding.
 
@@ -89,9 +91,111 @@ TIER_D_SOURCES="$(rc_get '.weekly_deps.tier_d_sources' '[]')"
 
 # Pinned-issue digest title (OPTIONAL).
 DIGEST_ISSUE_TITLE="$(rc_get '.weekly_deps.digest_issue_title' 'Weekly Dependency Triage — Routine Output')"
+
+# Label → tier rules, bundled-engine additions, lockstep sets (all OPTIONAL, all default empty).
+LABEL_RULES="$(rc_get '.weekly_deps.label_rules' '[]')"
+BUNDLED_ENGINES_EXTRA="$(rc_get '.weekly_deps.bundled_engines' '[]')"
+LOCKSTEP_SETS="$(rc_get '.weekly_deps.lockstep_sets' '[]')"
 ```
 
 The security-sensitive package set and the local-test commands are loaded on demand in the phases that need them (Phase 3.5 and Phase 4.C respectively) — see those phases.
+
+### Multi-repo mode (`--org`)
+
+Without `--org`, the skill works on one repository: the one `gh repo view` resolves in the current directory. With `--org`, it works on every repository of one owner that has open bot PRs. The engine is the same; four things change.
+
+**1. Discovery is owner-wide.** `gh pr list` reads one repository, so use search. The two authors need separate calls (same AND-not-OR reason as Phase 1):
+
+```bash
+ORG="${ORG:-$OWNER}"   # --org=<owner>, else the owner of the current repository
+gh search prs --owner "$ORG" --author app/dependabot     --state open --limit 1000 --json repository,number,title,labels,isDraft,url
+gh search prs --owner "$ORG" --author app/github-actions --state open --limit 1000 --json repository,number,title,labels,isDraft,url
+```
+
+Group the union by `.repository.nameWithOwner`. Search returns only the fields listed above; read everything else per PR in the later phases. A result count equal to `--limit` means the list is truncated: say so and do not report the batch as complete. PRs that a repository's own App-authenticated workflow opens are found per repository with the label query in Phase 1.
+
+**2. Every command names its repository.** Run Phases 1.5 to 6 once per repository, with `OWNER_REPO`, `OWNER` and `REPO` set to that repository. Add `-R "$OWNER_REPO"` to every `gh pr`, `gh issue` and `gh run` command in this skill; the `gh api "repos/$OWNER/$REPO/…"` calls already name it. A command without `-R` reads the repository of the current directory, which is the wrong one for all repositories but one.
+
+**3. Config is loaded per repository, from its default branch.** The helper (`rc_get`, `rc_has`) is loaded once, as above, from the current repository. Each repository's config comes from the API, which serves the default branch, so a PR branch cannot supply it:
+
+```bash
+RC_FILE="$(mktemp)"   # rc_get reads $RC_FILE; one file per repository
+if ! ERR="$(gh api "repos/$OWNER_REPO/contents/.claude/repo-config.json" -H 'Accept: application/vnd.github.raw' 2>&1 >"$RC_FILE")"; then
+  case "$ERR" in
+    *'HTTP 404'*) echo '{}' >"$RC_FILE" ;;                # no config: the safe defaults apply
+    *) echo "CONFIG UNREADABLE for $OWNER_REPO: $ERR" >&2; echo '{}' >"$RC_FILE"; CONFIG_STATE=unreadable ;;
+  esac
+fi
+jq -e 'type == "object"' "$RC_FILE" >/dev/null 2>&1 || { echo '{}' >"$RC_FILE"; CONFIG_STATE=unreadable; }
+```
+
+Then run the `rc_get` lines of Phase 0 again for this repository. Only a 404 means "no config". For any other failure, or for content that is not a JSON object, set `CONFIG_STATE=unreadable`: every PR of that repository is Tier C with confidence UNKNOWN, and the repository's table says the config could not be read. Never apply one repository's tier data to another repository.
+
+**4. Tables, contention and follow-ups are per repository.** Show one categorization table per repository, with the repository name in its header, then one combined summary. Lockfile contention is counted per repository and manifest directory: two PRs contend only when the repository, the directory and the lockfile are all the same, so PRs in different repositories never wait for each other. Steps that need a working tree (the local tests of Phase 4.C step 4 and 4b, and Phases 6.2, 6.3 and 6.5) run only for a repository that has a local checkout. Without a checkout, record `NOT RUN (no local checkout)`. This is never a pass.
+
+`--org` is interactive only. `--mode=prep` and `--mode=triage` stay per repository, because each repository has its own pinned digest issue and its own cron.
+
+### Reading PR state when the token is limited
+
+Some tokens cannot read every field this skill needs. A fine-grained token can lack access to the GraphQL `statusCheckRollup` field (then `gh pr list --json statusCheckRollup` and `gh pr checks` both fail), can get `403` from the REST check-runs and commit-status endpoints, and can fail on `gh pr view --json reviewRequests` when a team is a requested reviewer. Each of these failures is silent if the command's output is used without a check. Use the two helpers below wherever a phase needs CI state or the reviewer list. In both, a read that fails gives `unknown`. It never gives `green`, `0` or "none".
+
+```bash
+# pr_ci <pr> → green | red | pending | missing | unknown, then the source that answered.
+# Three sources, tried in order. A source that errors is skipped, never read as "no checks".
+pr_ci() {
+  local pr="$1" wf out sha
+  wf="$(rc_get '.weekly_deps.ci_workflow' '')"   # empty → no presence check
+  # 1. gh pr checks (GraphQL statusCheckRollup): every check on the head commit.
+  if out="$(gh pr checks "$pr" -R "$OWNER_REPO" --json bucket,workflow 2>/dev/null)" && jq -e 'type == "array" and length > 0' <<<"$out" >/dev/null 2>&1; then
+    jq -r --arg wf "$wf" 'if ($wf != "" and ([.[] | select(.workflow == $wf)] | length) == 0) then "missing"
+      elif ([.[].bucket] | any(. == "fail" or . == "cancel")) then "red"
+      elif ([.[].bucket] | all(. == "pass" or . == "skipping")) then "green" else "pending" end' <<<"$out"
+    echo "source: pr-checks"; return 0
+  fi
+  sha="$(gh api "repos/$OWNER_REPO/pulls/$pr" --jq .head.sha 2>/dev/null)" || sha=""
+  [ -n "$sha" ] || { echo unknown; echo "source: none (head SHA unreadable)"; return 0; }
+  # 2. REST check-runs: check runs of every App, without the GraphQL field.
+  if out="$(gh api --paginate --slurp "repos/$OWNER_REPO/commits/$sha/check-runs?per_page=100" 2>/dev/null)"; then
+    jq -r --arg wf "$wf" '[.[].check_runs[]] as $c
+      | if ($c | length) == 0 then "missing"
+        elif ($c | any(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled" or .conclusion == "action_required" or .conclusion == "startup_failure")) then "red"
+        elif ($c | any(.status != "completed")) then "pending"
+        elif ($c | all(.conclusion == "success" or .conclusion == "skipped" or .conclusion == "neutral")) then (if $wf == "" then "green" else "green-unconfirmed" end)
+        else "pending" end' <<<"$out"
+    echo "source: check-runs"; return 0
+  fi
+  # 3. Actions workflow runs for the head SHA: works where 1 and 2 are refused, but it
+  #    sees GitHub Actions only. Checks that other Apps report are invisible here.
+  if out="$(gh api --paginate --slurp "repos/$OWNER_REPO/actions/runs?head_sha=$sha&per_page=100" 2>/dev/null)"; then
+    jq -r --arg wf "$wf" '[.[].workflow_runs[]] as $r
+      | if ($r | length) == 0 then "missing"
+        elif ($wf != "" and ([$r[] | select(.name == $wf)] | length) == 0) then "missing"
+        elif ($r | any(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled" or .conclusion == "action_required" or .conclusion == "startup_failure")) then "red"
+        elif ($r | any(.status != "completed")) then "pending"
+        elif ($r | any(.conclusion == "success")) then "green" else "missing" end' <<<"$out"
+    echo "source: actions-runs"; return 0
+  fi
+  echo unknown; echo "source: none (all three reads failed)"
+}
+
+# pr_requested <pr> → one requested reviewer per line (users, then teams as team:<slug>),
+# or the single word "unknown" when neither read worked. An empty result means "none requested".
+pr_requested() {
+  local pr="$1"
+  gh pr view "$pr" -R "$OWNER_REPO" --json reviewRequests --jq '.reviewRequests[] | (.login // ("team:" + (.slug // .name // "")))' 2>/dev/null && return 0
+  gh api "repos/$OWNER_REPO/pulls/$pr/requested_reviewers" --jq '(.users[].login), (.teams[] | "team:" + .slug)' 2>/dev/null && return 0
+  echo unknown
+}
+```
+
+How to read the result of `pr_ci`:
+
+- `green-unconfirmed` (source 2 with `weekly_deps.ci_workflow` set) means all check runs passed, but a check run does not carry its workflow name, so the required workflow is not confirmed. Confirm it with source 3 (a completed, successful run whose `name` equals the configured workflow). If that read fails, the result is `unknown`.
+- `green` from `actions-runs` covers GitHub Actions only. Print the source beside the status (`green (actions-runs)`) so the reader knows that checks from other Apps were not seen. If `gh api "repos/$OWNER_REPO/pulls/$PR" --jq .mergeable_state` returns `unstable`, a check that this source cannot see is failing or pending: the result is `unknown`.
+- Several runs can exist for one head SHA. A failed run stays in the list after a new run passes, so this source can say `red` for a PR that is now green. That error is in the safe direction. Do not filter failed runs out to get a green result.
+- `unknown` is not `missing`. `missing` means a read worked and found no checks. `unknown` means no read worked. Both skip the PR, and both are reported with their own word.
+
+The same rule applies to every other read in this skill: when a command exits non-zero or returns something that does not parse, the value is unknown. Do not replace it with an empty list or a zero.
 
 ---
 
@@ -107,7 +211,7 @@ Use the repo's feature/refactor lifecycle skill for issue-tied, single-author wo
 
 Use `/review-pr` standalone only as a fallback when Phase 3.6's Copilot request was declined for a specific PR and that PR is still Tier C — without a Copilot review present, `/enhanced-pr-review` has less to reconcile and a direct `/review-pr` is more efficient.
 
-> **Extension point — label-based reclassification.** A repo may file dependency PRs that warrant a non-default tier based on a label (for example, a routine that opens transitive-dependency-hygiene PRs and tags them). Reclassifying such PRs by label is a supported extension point: add a rule in Phase 2 that maps the label to a tier (and, if conservative-bump heuristics apply, a demotion condition). The shared skill ships no repo-specific label rules.
+> **Extension point — label-based reclassification.** A repo may file dependency PRs that warrant a non-default tier based on a label (for example, a routine that opens transitive-dependency-hygiene PRs and tags them). Reclassifying such PRs by label is a supported extension point: declare the rule as data in `.weekly_deps.label_rules` (Phase 2 § Label rules), which maps the label to a tier and, if conservative-bump heuristics apply, to a demotion condition. The shared skill ships no repo-specific label rules.
 
 ---
 
@@ -158,26 +262,30 @@ Enumerate open bot-authored PRs. Don't trust the user's pasted list — re-fetch
 # Dependabot PRs (all ecosystems dependabot manages for this repo)
 gh pr list \
   --search "author:app/dependabot is:open" \
-  --json number,title,labels,headRefName,mergeable,mergeStateStatus,statusCheckRollup,files,reviews,reviewRequests,isDraft,createdAt,updatedAt \
+  --json number,title,labels,headRefName,mergeable,mergeStateStatus,files,isDraft,createdAt,updatedAt \
   --limit 50
 
 # Other bot-authored PRs (github-actions for security-data refreshes etc.)
 gh pr list \
   --search "author:app/github-actions is:open" \
-  --json number,title,labels,headRefName,mergeable,mergeStateStatus,statusCheckRollup,files,reviews,reviewRequests,isDraft,createdAt,updatedAt \
+  --json number,title,labels,headRefName,mergeable,mergeStateStatus,files,isDraft,createdAt,updatedAt \
   --limit 20
 
 # Workflow-opened PRs authored by a GitHub App (OPTIONAL — only if the repo has such a
 # routine). The author queries above miss them; query by the label the workflow applies.
 gh pr list \
   --search 'label:"<routine-label>" is:open' \
-  --json number,title,labels,headRefName,mergeable,mergeStateStatus,statusCheckRollup,files,reviews,reviewRequests,isDraft,createdAt,updatedAt \
+  --json number,title,labels,headRefName,mergeable,mergeStateStatus,files,isDraft,createdAt,updatedAt \
   --limit 5
 ```
 
 **Note on the search query:** the calls cannot be combined into `author:app/dependabot author:app/github-actions` — GitHub treats multiple `author:` qualifiers as AND, not OR, which returns empty. Always use separate calls and union the results.
 
-The `reviews` and `reviewRequests` fields are load-bearing for re-entrant detection: if Copilot has already been requested (Phase 3.6) or already reviewed (Phase 4.0), the second invocation of the skill picks that up and routes accordingly.
+**These calls do not ask for `statusCheckRollup`, `reviews` or `reviewRequests`.** One PR that the token cannot read those fields for makes the whole list call fail, and then no PR is discovered. CI state and requested reviewers are read per PR with `pr_ci` and `pr_requested` (§ Reading PR state when the token is limited); reviews are read per PR in Phases 3.6 and 4. If a list call still fails, drop `mergeable,mergeStateStatus,files` too and read them per PR; do not continue with a partial list.
+
+Re-entrant detection still depends on reviewers and reviews: if Copilot has already been requested (Phase 3.6) or has already reviewed (Phase 4.0), the second invocation of the skill picks that up from the per-PR reads and routes accordingly.
+
+In `--org` mode the list comes from the owner-wide search (§ Multi-repo mode); run the label query below per repository only where a repository has such a routine.
 
 The second `gh pr list` call (the `author:app/github-actions` query) also catches PRs opened by repo workflows via PR-creation actions (e.g. `peter-evans/create-pull-request`) using the default `GITHUB_TOKEN` — including any label-driven reclassification extension a repo adds (see "Choosing the right workflow" above). A workflow that authenticates as its own GitHub App instead (so PR CI runs on its PRs without a manual re-trigger) is **not** `app/github-actions`, so only the third, label-based call catches its PRs. Phase 2 applies any such repo-defined label rule.
 
@@ -203,10 +311,12 @@ Map each touched manifest path to an ecosystem (basename-based, directory-agnost
 | `package.json` / `package-lock.json` / `npm-shrinkwrap.json` / `yarn.lock` / `pnpm-lock.yaml` | `npm` |
 | `go.mod` / `go.sum` | `gomod` (advisory ecosystem `go`) |
 | `.github/workflows/*.yml` (action refs) | `github-actions` (advisory ecosystem `actions`) |
-| `requirements*.txt` / `Pipfile*` / `pyproject.toml` / `poetry.lock` | `pip` |
+| `requirements*.txt` / `Pipfile*` / `pyproject.toml` / `poetry.lock` / `uv.lock` | `pip` |
 | `Cargo.toml` / `Cargo.lock` | `cargo` |
-| `Gemfile` / `Gemfile.lock` | `rubygems` |
+| `Gemfile` / `Gemfile.lock` | `rubygems` (Dependabot name `bundler`) |
 | `composer.json` / `composer.lock` | `composer` |
+| `build.gradle` / `build.gradle.kts` / `settings.gradle*` / `gradle/libs.versions.toml` / `gradle/wrapper/gradle-wrapper.properties` | `gradle` (advisory ecosystem `maven`) |
+| `Dockerfile*` / `*.dockerfile` / `docker-compose*.yml` / `compose*.yml` (image tags and digests) | `docker` (Dependabot names `docker` and `docker-compose`; no advisory ecosystem) |
 
 The union of mapped ecosystems is `DETECTED_ECOSYSTEMS`. **If `.ecosystems` is set in repo-config** (`ECOSYSTEMS_PIN` from Phase 0 is non-empty), use it as the authoritative set instead (a pin/override — useful for repos that want to scope the routine to a subset, or assert the expected set for sanity-checking). Otherwise use the detected set.
 
@@ -225,7 +335,40 @@ Bucket each PR into one of four risk tiers using the rules below, then present t
 
 ### The tier concept (generic) + the data (config)
 
-The four tiers are a fixed *concept*; the package→group→tier *data* is per-repo and lives in `.weekly_deps.tiers` (loaded as `TIERS_JSON` in Phase 0). Each entry maps a tier letter to named groups, and each group lists the packages (glob patterns) and the bump shape that qualifies. To classify a PR's bumped package(s): glob-match each package name against the groups in `TIERS_JSON`; the matched group's tier is the starting tier.
+The four tiers are a fixed *concept*; the package→group→tier *data* is per-repo and lives in `.weekly_deps.tiers` (loaded as `TIERS_JSON` in Phase 0). Each tier letter (`A`, `B`, `C`) maps rule names to rules. The rule name is a label for the table; the fields decide the match:
+
+```json
+{
+  "A": {
+    "lint and format": { "groups": ["lint"], "dependency_type": "development", "max_bump": "minor" },
+    "type stubs only": { "groups": ["ui-framework"], "packages": ["@types/*"], "max_bump": "minor" },
+    "dev singles":     { "ungrouped": true, "dependency_type": "development", "max_bump": "minor" }
+  },
+  "B": {
+    "runtime libs":    { "groups": ["runtime"], "max_bump": "minor" },
+    "ci actions":      { "ecosystems": ["github-actions"], "groups": ["actions"], "max_bump": "minor" }
+  },
+  "C": {
+    "build and signing": { "groups": ["packaging"] }
+  }
+}
+```
+
+| Field | Type | A rule matches a PR only when |
+|---|---|---|
+| `groups` | string[] | the PR's Dependabot group name is in the list. Read the name from the title: `the <group> group` appears in both forms, `bump the <group> group … with N updates` and `bump <pkg> from X to Y … in the <group> group` (a group that had one update). A PR whose title has neither form has no group |
+| `ungrouped` | bool | `true`: the PR bumps one package and has no Dependabot group. A one-update PR that names a group is grouped, not ungrouped |
+| `packages` | glob[] | **every** bumped package matches a glob. One member outside the list means no match |
+| `ecosystems` | string[] | the PR's detected ecosystem (Phase 1.5) is in the list |
+| `directories` | glob[] | the PR's manifest directory matches a glob |
+| `dependency_type` | `development` \| `production` | every bumped package is of that type in the manifest the PR changes (for npm, the changed line is under `devDependencies` for `development`, and under `dependencies` or `optionalDependencies` for `production`). If the type cannot be read from the diff, or the ecosystem has no such split, the rule does not match |
+| `max_bump` | `patch` \| `minor` | no bumped package moves more than this. Default `minor`. A tier C rule ignores it. No value admits a major bump |
+
+All fields that a rule gives must hold. A rule in tier A or B that gives none of `groups`, `ungrouped` and `packages` is ignored, because it would match every PR. An unknown field makes the rule not match; do not guess its meaning.
+
+To classify a PR: test it against every rule. If rules of more than one tier match, the higher-risk tier wins (C, then B, then A). If no rule matches, the PR is Tier C. Then apply the overrides below, which no tier data can switch off. Show the matched rule name in the table, or `no rule` for the fall-through, so the developer can see why a PR is in its tier.
+
+The group name and the package list are separate tests on purpose. A group can hold members of different risk: a rule with `groups` and `packages` together admits the group only while all its members are in the low-risk list, and the same group with one other member falls through to Tier C.
 
 **With `.weekly_deps.tiers == {}` (the safe default), no package matches any group, so every bump falls through to Tier C (manual deep review).** This is intentional: a repo that hasn't declared its tier data gets conservative, never-fast-merged behavior rather than an unsafe fast-track.
 
@@ -234,6 +377,40 @@ The four tiers are a fixed *concept*; the package→group→tier *data* is per-r
 > **Any major-version bump (`X.Y.Z → X+1.0.0`) → Tier C**, regardless of which group the package belongs to. The dependabot group label / config group is a *starting* signal, not the final answer. Always check the version shape before final tier assignment.
 
 For grouped PRs (`chore: bump the X group ...`), extract the individual package names from the PR body bullet list (`gh pr view $PR --json body --jq '.body'`) and classify each; the **highest-risk** member determines the PR's tier (any Tier C member → whole PR Tier C; any major bump in the group → Tier C).
+
+A version that the PR does not state in a form that can be compared (a commit SHA, a date tag, a `0.x` version where a minor can break) has an unparseable bump shape: do not count it as patch or minor. The PR is Tier C with confidence UNKNOWN.
+
+### Label rules
+
+`.weekly_deps.label_rules` (loaded as `LABEL_RULES`) reclassifies PRs by label. This is for PRs that a repo routine opens, such as a transitive-dependency refresh that moves many modules at once and so does not fit a per-package rule.
+
+```json
+[ { "label": "<routine-label>", "tier": "C", "demote_to": "B", "demote_max_packages": 4 } ]
+```
+
+A PR that carries `label` starts in `tier`, whatever the tier rules say. If the rule has `demote_to`, the PR moves to that tier only when all of these hold: the diff changes at most `demote_max_packages` packages or modules, no change is a major bump, and no changed package matches the security-sensitive list (Phase 3.5). A label rule never moves a PR below the tier that an override gives it. If the PR body has a self-review checklist, say so in the table and read it before any subagent review.
+
+### Lockstep sets: packages that must move together
+
+Some packages pin another package at an **exact** version, usually through an exact `peerDependencies` entry. A test runner and its coverage or browser plugin are the common case: the plugin at version N accepts the runner at version N only. Dependabot can still open one single-package PR per member, for example when a security update covers one member, or when a grouped PR was split after a conflict.
+
+Each of those PRs can be green alone, or can be red only because of the pair. If one is merged without the other, the default branch holds versions that the peer range refuses: a clean install fails or resolves a different tree than the lockfile, and the second PR must be rebuilt against a broken base.
+
+Declare the sets in `.weekly_deps.lockstep_sets` (loaded as `LOCKSTEP_SETS`), one list of globs per set:
+
+```json
+[ ["vitest", "@vitest/*"] ]
+```
+
+The rule, for each manifest directory:
+
+1. Collect the open PRs that bump a member of one set in that directory.
+2. If one PR bumps every member that the manifest has, to matching versions, it is a normal PR. Classify it as usual.
+3. If the bumps are split across PRs, or one PR bumps only some members, **do not merge any of them one at a time**. Mark each `HOLD (lockstep: <set>)`. The hold applies at every tier and every confidence, and Phase 4.A never batch-merges a held PR.
+4. Resolve the hold in one of these ways, and let the developer choose: wait for the grouped PR that carries the whole set and close the split PRs in its favor; or comment `@dependabot recreate` on the grouped PR after the split ones are closed; or, if the repo has no group for the set, report that its Dependabot config needs one (and a second group with `applies-to: security-updates`, because a group without that key does not apply to security updates) and leave the PRs open.
+5. A red check on a split PR whose log shows a peer-dependency resolution error (`ERESOLVE`, `peer … @"<exact version>"`) is this case. Do not ask for `@dependabot recreate` on that PR alone; it will be red again.
+
+Without config, treat this as a suspected lockstep set and flag it for the developer: two single-package PRs in one directory whose packages share a scope or a name stem and move between the same two versions. A suspicion holds the PRs the same way until the developer says the packages are independent.
 
 ### Special rule: bundled-engine PRs
 
@@ -251,6 +428,11 @@ override above.
 | WebRTC client/server libraries that bundle libwebrtc | bundled **libwebrtc** |
 | Node runtime bumps (CI matrix, Docker base, `engines` floor) | **V8** |
 | Database / cache / TURN container image tags | the server engine itself |
+| Any `docker` ecosystem bump (base images in a `Dockerfile`, service images in a compose file) | the image contents: OS packages, language runtime, or server |
+| Mobile framework packages that ship a JavaScript engine or native runtime | the bundled JS engine and the native toolchain versions the release requires |
+| Anything the repo lists in `.weekly_deps.bundled_engines` (package globs or Dependabot group names) | as the repo documents |
+
+A `docker` bump is in the class by its ecosystem, not by its name: the tag is a label for contents that the diff does not show, and a tag can move to new contents under the same name. A digest-only refresh under an unchanged tag is still an engine change.
 
 **Step 1 — extract the engine delta at FULL PATCH PRECISION.** Dependabot often already
 prints it; nothing in the routine asks anyone to read it. In the digest, report the engine
@@ -302,7 +484,7 @@ implying the walk happened.
 
 The "dev-environment-only, low-blast-radius" tier. Failures here would surface as developer-experience regressions, not production incidents — they live behind the `devDependencies` (or equivalent dev-only) boundary, so a breakage shows up locally during the repo's test/lint step, not in shipped artifacts, and CI catches it before merge. Batch these together for one confirmation prompt.
 
-Membership is whatever the repo declares under `.weekly_deps.tiers.A` (typically dev-tooling, build-tooling, test frameworks, type stubs — patch/minor bumps). With no config, nothing lands here.
+Membership is whatever the repo declares under `.weekly_deps.tiers.A` (typically dev-tooling, build-tooling, test frameworks, type stubs — patch/minor bumps). With no config, nothing lands here. A tier A rule should set `dependency_type: "development"` unless every package it can match is known to stay out of shipped artifacts; without it, a production package that joins the group later is fast-tracked with the rest.
 
 ### Tier B — Standard (per-PR quick check)
 
@@ -322,7 +504,12 @@ Framework-level changes, security-relevant production libraries, and **all major
 - it is a major-version bump (`X.Y → X+1.0`) in any group (the universal override above), OR
 - any bumped package matches the security-sensitive list (Phase 3.5), OR
 - it has a surprise diff (Phase 3.3), OR
-- **no tier data is configured** (the safe default routes everything here).
+- its bump shape cannot be parsed, OR
+- a label rule puts it here and its demotion condition does not hold (§ Label rules), OR
+- the repository's config could not be read (`--org` mode, `CONFIG_STATE=unreadable`), OR
+- **no rule matches it**, which includes the case where no tier data is configured (the safe default routes everything here).
+
+An ecosystem that the repo's tier data does not mention gets no default tier from this skill. Its PRs match no rule and are Tier C until the repo adds a rule for them.
 
 For a wrapper such as Electron, Tier C asks **two separate questions, and the second is the one that has caused an outage.** (a) *API security* — check release notes for `contextIsolation`, `sandbox`, `webPreferences` default changes against the repo's rules docs. (b) *Bundled-engine behavior* — extract the engine delta at full patch precision and walk the platform-behavior register, per § Special rule: bundled-engine PRs. (a) alone has passed consecutive bumps while the engine broke behavior underneath.
 
@@ -339,10 +526,10 @@ Tier D membership is config-driven via `.weekly_deps.tier_d_sources` (loaded as 
 After classifying, present to the developer (example shape; rows reflect whatever the repo actually has):
 
 ```
-/weekly-deps — N open bot PRs   (ecosystems: <detected/pinned set>)
+/weekly-deps — <owner>/<repo> — N open bot PRs   (ecosystems: <detected/pinned set>)
 ──────────────────────────────────────────────────────────────────────────
 Tier A (Fast — batch-mergeable):              N PRs
-  #NN <group> (K updates)                       [<manifest dir>]    HIGH
+  #NN <group> (K updates)                       [<manifest dir>]    HIGH    rule: <rule name>
   ...
 
 Tier B (Standard — per-PR check):             N PRs
@@ -361,7 +548,10 @@ Tier D (Security data — integrity):           N PRs
 Copilot review queue (Phase 3.6 will request):
   #NN, #NN, ...  — all LOW
 
-Lockfile contention (process order matters):
+Held (do not merge one at a time):
+  #NN, #NN  — HOLD (lockstep: <set>)             [<manifest dir>]
+
+Lockfile contention (process order matters; per repository and directory):
   <manifest dir>/<lockfile>:   K PRs  — sequential merge w/ rebase
   ...
 
@@ -399,20 +589,26 @@ For every PR you plan to merge, verify three things. If any fails, skip that PR 
 ### 3.1 CI status
 
 ```bash
-CI_WF="$(rc_get '.weekly_deps.ci_workflow' '')"   # empty → no presence check
-gh pr checks "$PR" --json bucket,workflow | jq -r --arg wf "$CI_WF" '. as $checks | if ($wf != "" and ([$checks[] | select(.workflow == $wf)] | length) == 0) then "missing" elif ($checks | length) == 0 then "missing" elif ([$checks[].bucket] | all(. == "pass" or . == "skipping")) then "green" elif ([$checks[].bucket] | any(. == "fail")) then "red" else "pending" end'
+pr_ci "$PR"   # § Reading PR state when the token is limited
 ```
 
-- `green` → continue to 3.2.
-- `red` → skip; suggest `@dependabot recreate` only if the failure looks like a transient or stale-lockfile issue (network blip, snapshot mismatch). Otherwise close the PR with an explanatory comment.
+Do not call `gh pr checks` directly here: with a token that cannot read `statusCheckRollup` it fails, and a failed call must not be read as "no failing checks". `pr_ci` tries the three sources in order and names the one that answered.
+
+- `green` → continue to 3.2. Keep the source with the status.
+- `green-unconfirmed` → confirm the required workflow as described under the helper; unconfirmed is `unknown`.
+- `red` → skip; suggest `@dependabot recreate` only if the failure looks like a transient or stale-lockfile issue (network blip, snapshot mismatch), and never for a lockstep hold (Phase 2 § Lockstep sets). Otherwise close the PR with an explanatory comment.
 - `pending` → skip for this run; the developer can re-invoke after CI settles.
-- `missing` → no checks at all, or none from the workflow named in `weekly_deps.ci_workflow` when that key is set. Classify as UNKNOWN and skip. For a routine-labelled PR opened by a workflow that authenticates as a GitHub App (Phase 1), CI should start on its own; if it is still missing, check that workflow's App-token mint step before falling back to a close/reopen.
+- `missing` → a read worked and found no checks at all, or none from the workflow named in `weekly_deps.ci_workflow` when that key is set. Classify as UNKNOWN and skip. For a routine-labelled PR opened by a workflow that authenticates as a GitHub App (Phase 1), CI should start on its own; if it is still missing, check that workflow's App-token mint step before falling back to a close/reopen.
+- `unknown` → no read worked. Classify as UNKNOWN and skip. Report it as a token or API problem, with the PR number, so that it is not mistaken for a PR without CI.
 
 ### 3.2 Mergeable status
 
 ```bash
-gh pr view $PR --json mergeable,mergeStateStatus --jq '{mergeable, mergeStateStatus}'
+gh pr view $PR --json mergeable,mergeStateStatus --jq '{mergeable, mergeStateStatus}' \
+  || gh api "repos/$OWNER_REPO/pulls/$PR" --jq '{mergeable, mergeable_state}'   # REST: true/false/null and clean/behind/dirty/blocked/unstable
 ```
+
+If both reads fail, or `mergeable` is `null` or `UNKNOWN` (GitHub has not computed it yet), the mergeable status is unknown: skip the PR for this run. Do not treat it as ready.
 
 - `mergeable=MERGEABLE` and `mergeStateStatus=CLEAN` → ready.
 - `mergeStateStatus=BEHIND` → behind the default branch; the rebase will happen during merge or via `@dependabot rebase`.
@@ -435,13 +631,15 @@ Expected file footprint per PR type — derived from the PR's detected ecosystem
 | cargo | `Cargo.toml`, `Cargo.lock` in the dependabot directory |
 | rubygems | `Gemfile`, `Gemfile.lock` in the dependabot directory |
 | composer | `composer.json`, `composer.lock` in the dependabot directory |
+| gradle | `build.gradle*`, `settings.gradle*`, `gradle/libs.versions.toml`, `gradle.lockfile`, and for a wrapper bump `gradle/wrapper/gradle-wrapper.properties` (a changed `gradle-wrapper.jar` or `gradlew` script is a surprise diff unless the PR is a wrapper bump, and then the jar still needs its checksum verified) |
+| docker | only the `Dockerfile*` or compose file(s) in the dependabot directory, and in them only image references |
 | security-data refresh (Tier D) | only the data-file path(s) declared in the matching `.weekly_deps.tier_d_sources` descriptor |
 
 **Surprise diffs require manual review.** If a `chore: bump` PR also touches files outside its expected footprint (workflows, source, anything else), escalate to Tier C / LOW confidence regardless of original classification. The surprise-diff signal feeds directly into Phase 3.5 (sets LOW) and Phase 3.6 will then request Copilot review; Phase 4.0/4.C dispatches the deep-review skill for the actual triage. This routing is one of the few defenses against a compromised bot or a malicious-typosquat scenario where a dependency's install script tries to land arbitrary content — the supply-chain concern needs the full review path, not a fast-track.
 
 ### 3.3b Pinned-ref upstream resolution (github-actions ecosystem only)
 
-Skip this for npm and gomod PRs — it applies to `.github/workflows/**` action bumps.
+Skip this for PRs of other ecosystems — it applies to `.github/workflows/**` action bumps.
 
 **Why this lives here and not in CI.** A CI gate of the shape "this action's runtime is digest-pinned" asserts *internal consistency*: that `with.version` fullmatches the version named in the `uses:` line's trailing `# vX.Y.Z` comment, plus a sha256. That is a real invariant and it fails closed — it is the kind of gate that catches a half-updated pin dependabot produces.
 
@@ -513,7 +711,7 @@ Before computing confidence, check whether the upstream community has surfaced k
 
 Read `references/community-signal-lookup.md` for the full mechanics. Summary of what it checks per bumped package:
 
-1. **GitHub Advisory Database** — `gh api "/advisories?ecosystem=<eco>&published=><date>"` filtered server-side by ecosystem and date, then version-range-checked client-side via jq's `.vulnerabilities[].package.name` field. The `<eco>` is the advisory-DB name for the PR's detected ecosystem (npm→`npm`, gomod→`go`, github-actions→`actions`, pip→`pip`, cargo→`rust`, rubygems→`rubygems`, composer→`composer`). The `/advisories` endpoint has no `package=` query parameter; client-side filtering is required. See `references/community-signal-lookup.md` for the full query.
+1. **GitHub Advisory Database** — `gh api "/advisories?ecosystem=<eco>&published=><date>"` filtered server-side by ecosystem and date, then version-range-checked client-side via jq's `.vulnerabilities[].package.name` field. The `<eco>` is the advisory-DB name for the PR's detected ecosystem (npm→`npm`, gomod→`go`, github-actions→`actions`, pip→`pip`, cargo→`rust`, rubygems→`rubygems`, composer→`composer`, gradle→`maven`; docker has no advisory ecosystem, so signal 1 is not available for it and the PR relies on the bundled-engine rule). The `/advisories` endpoint has no `package=` query parameter; client-side filtering is required. See `references/community-signal-lookup.md` for the full query.
 2. **Release-notes keyword scan** — greps the dependabot-supplied release notes in the PR body for unambiguous yank/advisory markers ONLY: `yanked`, `do not upgrade`, `critical bug`, `hotfix needed`, `reverted in v<N>`, plus `CVE-YYYY-NNNN` and `GHSA-` identifiers. Bare `BREAKING` / `MAJOR` / `regression` keywords are deliberately NOT scanned — they fire too often in normal release notes (see History section in `community-signal-lookup.md`).
 3. **Package repo issue spike** (only for packages matching `security-sensitive-packages.md`) — counts recent issues in the package's GitHub repo mentioning the new version + crash/regression keywords. Uses a static known-mapping from package name to GitHub repo (curl is not in `allowed-tools`); skipped for packages outside the known-mapping. A repo can extend the known-mapping via `.weekly_deps.signal3_repo_map`.
 
@@ -529,10 +727,14 @@ Confidence is biased toward false-positives. The cost of an unnecessary Copilot 
 
 | Label | Conditions (ALL must hold) |
 |---|---|
-| **HIGH** | Tier A, AND CI green, AND no surprise diff, AND patch bump (or grouped dev-only), AND no bumped package matches the security-sensitive list, AND community-signal verdict is not LOW |
-| **MEDIUM** | Tier A minor bump with green CI + clean footprint, OR Tier B with green CI + no breaking-change keywords in PR body + no security-sensitive package match + no community-signal LOW verdict |
+| **HIGH** | Tier A, AND CI green, AND no surprise diff, AND no lockstep hold, AND no bumped package matches the security-sensitive list, AND community-signal verdict is not LOW, AND the bump shape is one of: (a) every bumped package moves by a patch; (b) a **grouped** PR matched by a tier A rule with `dependency_type: "development"`, where every member moves by a patch or a minor |
+| **MEDIUM** | Tier A with green CI + clean footprint whose bump shape is not (a) or (b) above: a **single-package** minor bump, or a grouped minor bump matched by a rule without `dependency_type: "development"`. OR Tier B with green CI + no breaking-change keywords in PR body + no security-sensitive package match + no community-signal LOW verdict |
 | **LOW** | ANY of: Tier C; CI red or pending; surprise diff; breaking-change keywords (`BREAKING`, `MAJOR`, `deprecate`, `remove`, `behavior change`, `default changed`) in PR body; any bumped package matches the security-sensitive list; community-signal lookup returned LOW verdict (active GHSA/CVE against the bumped-to version, or strong-negative release-note keyword match); a github-actions PR whose Phase 3.3b pinned-ref upstream resolution failed or could not be completed |
-| **UNKNOWN** | Missing signal — no `statusCheckRollup`, unparseable bump shape, community-signal lookup failed, or any pre-flight check returned an error. Treat as LOW. |
+| **UNKNOWN** | Missing signal — CI state `missing` or `unknown` (Phase 3.1), unparseable bump shape, unreadable repo config, community-signal lookup failed, or any pre-flight check returned an error. Treat as LOW. |
+
+**Why a grouped dev-only minor is HIGH and a single-package minor is MEDIUM.** The two rows used to overlap: HIGH said "patch bump (or grouped dev-only)" and MEDIUM said "Tier A minor bump", so a grouped dev-only minor bump satisfied both. The grouped case is HIGH because the repo declared the group and its dev-only boundary as data, and the rule verified the dependency type for every member from the diff: a breakage stays in the local toolchain and CI is the test for it. A single-package PR has no declared group behind it, so a minor bump gets the per-PR look of Phase 4.B. A grouped PR in which one member fails the dev-only check does not match the rule at all, so it cannot be HIGH by this path.
+
+"CI green" in the HIGH row needs a result from `pr-checks` or `check-runs`. A `green (actions-runs)` result is green for MEDIUM at most, because that source cannot see checks from other Apps.
 
 **To compute the security-sensitive match:** the effective list is the **shared universal default ∪ the repo's `.weekly_deps.security_sensitive_extra`**. Read `references/security-sensitive-packages.md` (the universal default — loaded on demand to keep SKILL.md lean), then union the repo's extras:
 
@@ -552,11 +754,13 @@ Annotate each PR with its label and append to the categorization table from Phas
 >
 > ```bash
 > gh pr edit "$PR" --add-reviewer "@copilot" >/dev/null 2>&1
-> gh pr view "$PR" --json reviewRequests \
->   --jq '[.reviewRequests[] | select((.login // "") == "Copilot" or (.login // "") == "copilot-pull-request-reviewer")] | length'
+> pr_requested "$PR" | grep -ciE '^(copilot|copilot-pull-request-reviewer(\[bot\])?)$'
+> pr_requested "$PR" | grep -cx unknown
 > ```
 >
-> `0` means Copilot is off. Skip the phase for the whole run, log one line — `INFO: Copilot Code Review unavailable; skipping 3.6 and treating its signal as absent` — and **do not** escalate, retry, or surface it as a finding: its absence is a settled decision, not an incident. Then carry that into Phase 4: a Tier C PR that got no Copilot review takes the **direct specialist dispatch** path described in 4.C step 3, not the reconcile-Copilot path.
+> Use `pr_requested` (§ Reading PR state when the token is limited), not `gh pr view --json reviewRequests` alone: that call fails when a team is a requested reviewer, and a failed call is not a count of zero. If the second line prints `1`, the reviewer list could not be read: the probe has no result. Do not conclude that Copilot is off and do not report the review as requested; try the probe on another PR, and if no PR gives a result, treat Copilot's state as unknown for the run and take the direct specialist dispatch path for Tier C.
+>
+> A first line of `0` (with a readable list) means Copilot is off. Skip the phase for the whole run, log one line — `INFO: Copilot Code Review unavailable; skipping 3.6 and treating its signal as absent` — and **do not** escalate, retry, or surface it as a finding: its absence is a settled decision, not an incident. Then carry that into Phase 4: a Tier C PR that got no Copilot review takes the **direct specialist dispatch** path described in 4.C step 3, not the reconcile-Copilot path.
 >
 > Equally, do not hardcode "Copilot is off" — it returns when billing is re-enabled. The probe above is the source of truth; this note is not.
 
@@ -569,14 +773,17 @@ This phase closes that gap — **when Copilot is available** — by explicitly r
 **Step 3.6.1 — Idempotency check.** For each LOW / UNKNOWN PR, check whether Copilot is already requested or has already reviewed:
 
 ```bash
-# Already requested?
-gh pr view $PR --json reviewRequests --jq '[.reviewRequests[] | select((.login // "") == "Copilot" or (.login // "") == "copilot-pull-request-reviewer")] | length'
+# Already requested? (prints "unknown" when the list cannot be read)
+pr_requested "$PR" | grep -iE '^(copilot|copilot-pull-request-reviewer(\[bot\])?|unknown)$'
 
 # Already reviewed?
-gh pr view $PR --json reviews --jq '[.reviews[] | select(.author.login == "copilot-pull-request-reviewer")] | length'
+gh pr view $PR --json reviews --jq '[.reviews[] | select(.author.login == "copilot-pull-request-reviewer")] | length' \
+  || gh api --paginate "repos/$OWNER_REPO/pulls/$PR/reviews" --jq '[.[] | select(.user.login | test("^copilot-pull-request-reviewer"))] | length'
 ```
 
-If either count is > 0, skip this PR (Copilot is either still working on it or done; the next re-invocation will pick up the review in Phase 4.0).
+If the first command prints `unknown`, or both review reads fail, do not send a new request for this PR in this run: a second request cannot be ruled out. List the PR as "Copilot state unknown".
+
+If Copilot is in the requested list, or the review count is > 0, skip this PR (Copilot is either still working on it or done; the next re-invocation will pick up the review in Phase 4.0).
 
 **Step 3.6.2 — Batch confirmation.** Show the developer the list of PRs that need a fresh Copilot review request, grouped by tier with the reason each one was flagged:
 
@@ -633,13 +840,15 @@ If a Copilot review request fails (auth issue, repo billing, API hiccup): surfac
 
 Work through tiers in the proposed order. Within each tier, walk PRs sequentially **within each lockfile group**, but across lockfile groups you can interleave (different directories don't contend).
 
+**Lockstep holds come first.** A PR marked `HOLD (lockstep: …)` in Phase 2 is not processed by 4.A, 4.B or 4.C as a single PR, whatever its tier and confidence. Present the set as one decision (Phase 2 § Lockstep sets, step 4).
+
 **Re-entrant detection.** Before processing any PR, check whether it has a Copilot review present (set in Phase 3.6 of a previous invocation, now completed):
 
 ```bash
 gh pr view $PR --json reviews --jq '[.reviews[] | select(.author.login == "copilot-pull-request-reviewer")] | map({state, submittedAt, body: (.body // "" | .[0:200])})'
 ```
 
-If a Copilot review exists → route through Phase 4.0 (Copilot review triage) before per-tier processing. If no review yet but Copilot is in `reviewRequests`, surface the still-pending state to the developer and skip this PR for this run.
+If a Copilot review exists → route through Phase 4.0 (Copilot review triage) before per-tier processing. If no review yet but Copilot is in the output of `pr_requested "$PR"`, surface the still-pending state to the developer and skip this PR for this run.
 
 ### 4.0 — Copilot review triage (when re-entrant detects a review)
 
@@ -703,7 +912,7 @@ Squash-merge all in sequence?
 
 If `yes — merge all`:
 
-1. **Pick the first PR per directory** to merge first (one per manifest directory). These cannot conflict with each other.
+1. **Pick the first PR per directory** to merge first (one per manifest directory, and in `--org` mode one per repository and directory). These cannot conflict with each other. Leave out every PR with a lockstep hold.
 2. For each:
    ```bash
    gh pr merge $PR --squash --delete-branch
@@ -788,6 +997,10 @@ Tier C deserves the most care. For each Tier C PR:
    | cargo | `cargo test`, `cargo clippy` |
    | rubygems | `bundle exec rspec` (or the repo's test task) |
    | composer | `composer test` (or the repo's test script) |
+   | gradle | `./gradlew test` (or the repo's check task), with the wrapper from the PR head |
+   | docker | (no local test; build the image if the repo has a build target, then rely on CI and step 4b) |
+
+   In `--org` mode this step needs a local checkout of that repository. If there is none, record `Local test result: NOT RUN (no local checkout)` in step 5. Do not run the commands in a different repository's checkout, and do not record a pass.
 
    **4b. For a bundled-engine bump, RUN the register's probes against the new
    engine.** Step 2b establishes which contracts are exposed and which probe
@@ -1117,6 +1330,9 @@ Suggest `--force` only if the removal refuses over build output the agent instal
 - Does **not** auto-dismiss Copilot findings that mention specific behavioral changes, deprecations affecting shipped code, breaking-change call-outs, or supply-chain anomalies — those always surface to the developer regardless of tier.
 - Does **not** suppress or tune static-analysis or quality-gate rules to force a dependency PR's check to pass — if a bump degrades coverage or trips a rule, the fix is in the repo's test code, not the rule config.
 - Does **not** trust `gh pr merge`'s exit code in worktree context — always verifies with `gh pr view`.
+- Does **not** merge one member of a lockstep set while another member's bump is in a different open PR (Phase 2 § Lockstep sets).
+- Does **not** read a failed or refused API call as an empty result — a CI state, a reviewer list or a repo config that cannot be read is unknown, and unknown is never green.
+- Does **not** apply one repository's tier data to another repository in `--org` mode, and does not ship default tier data: a repo that declares none gets Tier C for every bump.
 - Does **not** process all PRs in a single round when lockfile contention is present — that's the entire reason `@dependabot rebase` exists.
 - Does **not** retry the same PR after `@dependabot rebase` in the same invocation — the rebase + CI cycle takes too long. The developer re-invokes `/weekly-deps` after ~15–20 minutes.
 - Does **not** budget hours of investigation for Tier C unless the developer asks. The recommendation in Phase 4.C may be "hold for now" if the bump deserves a dedicated session.
