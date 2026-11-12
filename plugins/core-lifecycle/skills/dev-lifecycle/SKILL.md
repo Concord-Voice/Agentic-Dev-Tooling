@@ -1678,12 +1678,18 @@ done
 }
 # PERSIST these — each phase runs in its own shell, so a plain variable does not survive to
 # Phase 7.5 and the window would silently restart at 600 s on every re-arm. Write a state file
-# keyed by PR, and REWRITE it when Step 7.2 re-summons: that is the documented start of the
-# SECOND ten-minute window, not a continuation of the first.
+# keyed by PR. Step 7.2 rewrites it on every summon: a new READY_AT starts the window at the
+# summon (on a re-summon, the decision table's second window), while READY_ISO (the arrival
+# cutoff) is kept, so window-1 signals for the same head still count.
 STATE=".claude/state/phase75-<PR>.env"
 mkdir -p .claude/state
-printf 'READY_AT=%s\nREADY_ISO=%s\n' "$(date +%s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STATE"
-# Phase 7.5 sources this file. Without it the window restarts arbitrarily AND a pre-push
+# Never write THROUGH a link: `.claude/state/` is worktree content, and a branch can commit a
+# symlink here that checkout drops over the ignored file. Remove the link, write a file.
+[ ! -L "$STATE" ] || rm -f -- "$STATE"
+# READY_HEAD records the head READY_ISO was stamped for; Step 7.2 keeps the cutoff only for it.
+printf 'READY_AT=%s\nREADY_ISO=%s\nREADY_HEAD=%s\n' "$(date +%s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  "$(gh pr view <PR> --json headRefOid --jq .headRefOid 2>/dev/null | grep -E '^[0-9a-f]{40}$' || true)" > "$STATE"
+# Phase 7.5 parses this file. Without it the window restarts arbitrarily AND a pre-push
 # reviewer signal satisfies the new wait — the monitor reports ARRIVED before the current
 # review has begun.
 ```
@@ -1710,20 +1716,43 @@ PR is ready for review.
 BODY
 gh pr comment <PR> --body-file "$SUMMON_FILE"
 rm -f "$SUMMON_FILE"
-
-# RESTART the window here. This is the only place that can: Step 7.1 stamps READY_AT once at
-# the ready flip, and a re-summon after the first window expires used to reload that expired
-# stamp, compute a non-positive remainder, and report "first window already elapsed" forever —
-# so the second ten-minute window the decision table grants was never actually granted. A
-# re-summon IS the start of a new window, so it writes one.
-STATE=".claude/state/phase75-<PR>.env"; mkdir -p .claude/state
-printf 'READY_AT=%s\nREADY_ISO=%s\n' "$(date +%s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STATE"
 ```
 
 Edit the mention line to the roster's mentionable, online reviewers before posting.
 
 Use `--body-file`, never an inline `--body` with a heredoc: a command-scanning
 PreToolUse hook inspects heredoc bodies and can block the call.
+
+**Restart the window, keep the cutoff.** Run this right after the summon is posted.
+
+```bash
+# RESTART the window here. This is the only place that can: Step 7.1 stamps READY_AT once at
+# the ready flip, and a re-summon after the first window expires used to reload that expired
+# stamp, compute a non-positive remainder, and report "first window already elapsed" forever —
+# so the second ten-minute window the decision table grants was never actually granted. A
+# re-summon IS the start of a new window, so it writes READY_AT.
+#
+# KEEP the cutoff. READY_ISO is the monitor's cutoff, not the window. Rewriting it here dropped
+# every window-1 signal for the same head: Gitar edits its re-review into the dashboard comment
+# it created before the summon, and that comment keeps its old createdAt, so a cutoff moved to
+# now hid the verdict (#4389). Keep it ONLY for the head it was stamped for (READY_HEAD): after a
+# push the monitor's push clamp is the only guard left, and with no started check it degrades to
+# committedDate (authoring time), so a kept cutoff would re-admit the old head's verdict — and the
+# monitor's remedy for that is this very re-summon. A moved or unreadable head restarts the
+# cutoff at now (fails closed). PARSE the file, never source it; a missing or malformed value
+# falls back to now. Truncating the file also drops any PHASE75_DONE or PHASE75_TIMEOUT line.
+STATE=".claude/state/phase75-<PR>.env"; mkdir -p .claude/state
+[ ! -L "$STATE" ] || rm -f -- "$STATE"   # never read or write through a planted link (Step 7.1)
+HEAD_NOW=$(gh pr view <PR> --json headRefOid --jq .headRefOid 2>/dev/null | grep -E '^[0-9a-f]{40}$' || true)
+KEPT_HEAD=$(grep -E '^READY_HEAD=' "$STATE" 2>/dev/null | tail -1 | cut -d= -f2- | grep -E '^[0-9a-f]{40}$' || true)
+KEPT_ISO=""
+if [ -n "$HEAD_NOW" ] && [ "$KEPT_HEAD" = "$HEAD_NOW" ]; then
+  KEPT_ISO=$(grep -E '^READY_ISO=' "$STATE" 2>/dev/null | tail -1 | cut -d= -f2- \
+               | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' || true)
+fi
+printf 'READY_AT=%s\nREADY_ISO=%s\nREADY_HEAD=%s\n' "$(date +%s)" \
+  "${KEPT_ISO:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" "$HEAD_NOW" > "$STATE"
+```
 
 **A mention summons Gitar. Do not add a separate `Gitar review` comment.** Both forms
 work: in a sample of mention-only comments, most were followed by a `Gitar` check-run
@@ -1952,8 +1981,9 @@ Reviewers arrive **independently and minutes apart**, so this wait wants one not
 # not from when this monitor happened to be armed. Step 7.1 records READY_AT for exactly this;
 # derive the remainder from it so a re-arm consumes the table's SECOND window rather than a
 # fresh one. Falls back to a full window when READY_AT is unset (direct entry at Phase 7.5).
-# Source the timestamps Step 7.1 persisted; a missing file means direct entry at Phase 7.5.
+# Parse the timestamps Step 7.1 persisted; a missing file means direct entry at Phase 7.5.
 STATE=".claude/state/phase75-<PR>.env"
+[ ! -L "$STATE" ] || rm -f -- "$STATE"   # never read or append through a planted link
 # PARSE the state file; never `.`-source it. Sourcing executes whatever the file contains, and
 # `.claude/state/` is ordinary worktree content — a checked-out branch, another tool, or a stale
 # artifact can put shell there, and this path runs automatically before any review. Read only the
@@ -1995,7 +2025,7 @@ if [ -n "${PHASE75_DONE:-}" ] && [ "$PHASE75_DONE" = "$HEAD_SHA" ]; then
 fi
 READY_ISO="${READY_ISO:-$(date -u -v-10M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-10 min' +%Y-%m-%dT%H:%M:%SZ)}"
 # ADVANCE the cutoff to the newest push when that is later. Step 7.1 stamps READY_ISO at the
-# flip and Step 7.2 rewrites it on a re-summon, but a FIX PUSH does neither — so every review
+# flip (a Step 7.2 re-summon keeps it, #4389), but a FIX PUSH moves neither — so every review
 # and completed check from before that push stays newer than the cutoff and satisfies the
 # re-armed monitor before a single reviewer has looked at the new HEAD. The cycle starts at the
 # newest push. ISO-8601 Z sorts lexicographically in chronological order, so this is max().
@@ -2016,7 +2046,8 @@ HEAD_ISO=$(gh pr view <PR> --json commits | jq -r '.commits | last | .committedD
 # the gap this line exists to close. There is no better proxy available on such a PR (GraphQL
 # `pushedDate` is usually null), so the degradation is accepted, not hidden: on a check-less PR,
 # treat a reviewer signal timestamped between authoring and pushing as UNVERIFIED and re-summon
-# rather than counting it as an arrival for the current head.
+# rather than counting it as an arrival for the current head (Step 7.2 restarts the cutoff when
+# the head moved since it was stamped).
 PUSH_ISO=$(gh pr view <PR> --json statusCheckRollup \
   --jq '[.statusCheckRollup[].startedAt | select(. != null)] | min // empty' 2>/dev/null || true)
 READY_ISO=$(printf '%s\n%s\n%s\n' "$READY_ISO" "$HEAD_ISO" "$PUSH_ISO" | grep -v '^$' | sort | tail -1)
@@ -2024,11 +2055,11 @@ WINDOW=${WINDOW:-$( [ -n "${READY_AT:-}" ] && echo $(( 600 - ( $(date +%s) - REA
 # A non-positive remainder means the first window is already spent — the STOP-and-resummon
 # condition from the decision table, NOT a one-second window; clamping it to 1 would report a
 # false timeout instantly. But do not exit on it either: exiting without querying reported a
-# timeout even when every expected bot had already arrived, and the re-summon that message
-# suggests rewrites READY_ISO to a LATER stamp, so the arrivals it should have counted fall
-# outside the new cycle and Phase 8 stays unreachable. WINDOW=0 makes the loop check arrivals
-# exactly once and then hit its deadline test, which still emits the STOP-and-resummon timeout
-# whenever anyone is genuinely missing.
+# timeout even when every expected bot had already arrived, and a re-summon used to rewrite
+# READY_ISO to a LATER stamp, so the arrivals it should have counted fell outside the new cycle
+# and Phase 8 stayed unreachable (Step 7.2 now keeps READY_ISO; see #4389). WINDOW=0 makes
+# the loop check arrivals exactly once and then hit its deadline test, which still emits the
+# STOP-and-resummon timeout whenever anyone is genuinely missing.
 [ "$WINDOW" -gt 0 ] || WINDOW=0
 
 # The wait set comes from the ROSTER, not from a pair of logins typed into a regex. Hardcoding
