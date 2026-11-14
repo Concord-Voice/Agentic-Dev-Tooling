@@ -49,6 +49,12 @@ echo "$out" | grep -qi "category dir is a symlink" || fail "whole-dir symlinked 
 [ "$(rc)" = "1" ] || fail "whole-dir symlinked category should exit 1"
 rm -f "$TMP/repo/.claude/skills"; mkdir -p "$TMP/repo/.claude/skills/ci-status"; echo "M" > "$TMP/repo/.claude/skills/ci-status/SKILL.md"
 
+# (e2) Root and config/ manifests both present → root wins, as in sync-shared-safe.py.
+mkdir -p "$TMP/master/config"
+printf '{"shared_skills":["ci-status","nope"],"shared_agents":[]}\n' > "$TMP/master/config/shared-manifest.json"
+[ "$(rc)" = "0" ] || fail "root manifest must win over config/shared-manifest.json"
+rm -rf "$TMP/master/config"
+
 # (f) Malformed manifest → hard error (exit != 0), not a misleading OK.
 badm="$TMP/badm"; mkdir -p "$badm/skills/ci-status"; echo "M" > "$badm/skills/ci-status/SKILL.md"; echo "{bad" > "$badm/shared-manifest.json"
 if SHARED_MASTER="$badm" "$SCRIPT" "$TMP/repo" >/dev/null 2>&1; then fail "malformed manifest should fail"; fi

@@ -7,10 +7,10 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MASTER="${SHARED_MASTER:-$(cd "$HERE/.." && pwd)}"
-# The manifest lives under config/ (org reorg); fall back to the pre-reorg root location so
-# an older or externally-supplied Master checkout still resolves.
-MANIFEST="$MASTER/config/shared-manifest.json"
-[ -f "$MANIFEST" ] || MANIFEST="$MASTER/shared-manifest.json"
+# Same precedence as sync-shared-safe.py: an Internal Master's root manifest wins over the
+# public config/ mirror, so the drift check validates the inventory that sync installed.
+MANIFEST="$MASTER/shared-manifest.json"
+[ -f "$MANIFEST" ] || MANIFEST="$MASTER/config/shared-manifest.json"
 die() { echo "drift-check-shared: $*" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || die "jq required"
 [ -f "$MANIFEST" ] || die "manifest not found: $MANIFEST"
