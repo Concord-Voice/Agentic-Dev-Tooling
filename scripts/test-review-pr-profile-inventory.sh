@@ -2,7 +2,7 @@
 # Exercise the actual profile inventory loop from the skill against Git trees.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(cd "$(mktemp -d)" && pwd -P)"; trap 'rm -rf "$TMP"' EXIT
 BLOCK="$TMP/inventory.sh"
 awk '/^for profile_dir in / {copy=1} /^# Nothing moved while we looked/ {copy=0} copy {print}' \
   "$ROOT/plugins/core-lifecycle/skills/review-pr/SKILL.md" > "$BLOCK"

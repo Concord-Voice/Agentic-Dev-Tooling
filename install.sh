@@ -28,7 +28,7 @@ init_protected() {
   need jq
   jq -e 'type == "object" and (.paths | type == "array") and
     ([.paths[] | type == "string" and length > 0 and
-      (startswith("/") | not) and (contains("\\\\") | not) and
+      (startswith("/") | not) and (contains("\\") | not) and
       (split("/") | all(. != "" and . != "." and . != ".."))] | all)' \
     "$PROTECT_FILE" >/dev/null || { echo "invalid protected paths: $PROTECT_FILE" >&2; exit 1; }
 }
