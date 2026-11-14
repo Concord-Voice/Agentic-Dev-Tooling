@@ -2026,10 +2026,14 @@ esac
 # Bind the kept cutoff to THIS head. Step 7.2 checks READY_HEAD before it keeps READY_ISO, but the
 # monitor starts separately, so a push in between would start it on the new head with the old head's
 # cutoff, and that head's verdicts would satisfy the wait. A cutoff stamped for another head, or with
-# no head recorded, restarts at now (fails closed).
+# no head recorded, is DROPPED: the max() with HEAD_ISO/PUSH_ISO below re-anchors it at the new
+# head's push, so a verdict that landed between that push and this run still counts. Stamping now
+# here discarded exactly those verdicts. The new cutoff is persisted with its head below, so a
+# later same-head re-arm (after a probe failure, say) reuses it instead of moving it again.
 READY_HEAD=$(read_state READY_HEAD '^[0-9a-f]{40}$')
+HEAD_MOVED=""
 if [ -n "${READY_ISO:-}" ] && [ "${READY_HEAD:-}" != "$HEAD_SHA" ]; then
-  READY_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  READY_ISO=""; HEAD_MOVED=1
 fi
 
 # Honour a completion already recorded for THIS head SHA — otherwise re-entry re-arms a wait
@@ -2037,7 +2041,9 @@ fi
 if [ -n "${PHASE75_DONE:-}" ] && [ "$PHASE75_DONE" = "$HEAD_SHA" ]; then
   echo "ALL REQUIRED ARRIVED (recorded for this HEAD) — proceed to Phase 8"; exit 0
 fi
-READY_ISO="${READY_ISO:-$(date -u -v-10M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-10 min' +%Y-%m-%dT%H:%M:%SZ)}"
+# A moved head gets no -10 min default: that could reach back before the push and admit the old
+# head's verdicts. Its cutoff comes from HEAD_ISO/PUSH_ISO alone, or now when neither is readable.
+[ -n "$HEAD_MOVED" ] || READY_ISO="${READY_ISO:-$(date -u -v-10M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-10 min' +%Y-%m-%dT%H:%M:%SZ)}"
 # ADVANCE the cutoff to the newest push when that is later. Step 7.1 stamps READY_ISO at the
 # flip (a Step 7.2 re-summon keeps it, #4389), but a FIX PUSH moves neither — so every review
 # and completed check from before that push stays newer than the cutoff and satisfies the
@@ -2065,6 +2071,10 @@ HEAD_ISO=$(gh pr view <PR> --json commits | jq -r '.commits | last | .committedD
 PUSH_ISO=$(gh pr view <PR> --json statusCheckRollup \
   --jq '[.statusCheckRollup[].startedAt | select(. != null)] | min // empty' 2>/dev/null || true)
 READY_ISO=$(printf '%s\n%s\n%s\n' "$READY_ISO" "$HEAD_ISO" "$PUSH_ISO" | grep -v '^$' | sort | tail -1)
+READY_ISO=${READY_ISO:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+if [ -n "$HEAD_MOVED" ]; then   # READY_AT is left alone: the window still runs from the ready flip
+  mkdir -p "$(dirname "$STATE")" && printf 'READY_ISO=%s\nREADY_HEAD=%s\n' "$READY_ISO" "$HEAD_SHA" >> "$STATE"
+fi
 WINDOW=${WINDOW:-$( [ -n "${READY_AT:-}" ] && echo $(( 600 - ( $(date +%s) - READY_AT ) )) || echo 600 )}
 # A non-positive remainder means the first window is already spent — the STOP-and-resummon
 # condition from the decision table, NOT a one-second window; clamping it to 1 would report a
