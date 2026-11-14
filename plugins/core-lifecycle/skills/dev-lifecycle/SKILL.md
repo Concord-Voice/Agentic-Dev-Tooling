@@ -1767,10 +1767,8 @@ PreToolUse hook inspects heredoc bodies and can block the call.
 # it created before the summon, and that comment keeps its old createdAt, so a cutoff moved to
 # now hid the verdict. Keep READY_HEAD with it EXACTLY as it is, even when the head has
 # moved: this block does not decide a moved head's cutoff, the monitor does. It compares
-# READY_HEAD with the live head, drops a cutoff stamped for another head, and re-anchors at the
-# new head's latest check start (never earlier than the old cutoff, and at now when no check has
-# started). Stamping now here on a moved head threw away the new head's verdicts that landed
-# between its push and this re-summon. Only when no valid cutoff exists does this block write
+# READY_HEAD with the live head, drops a cutoff stamped for another head, and re-anchors at now,
+# the one boundary no push-time proxy can undercut. Only when no valid cutoff exists does this block write
 # now and the current head, read BEFORE the stamp as in Step 7.1. PARSE the file, never source
 # it. Truncating the file also drops any PHASE75_DONE or PHASE75_TIMEOUT line.
 STATE=".claude/state/phase75-<PR>.env"
@@ -2069,17 +2067,13 @@ esac
 # Step 7.2 keeps READY_ISO with its READY_HEAD unchanged, and a push can land at any point before
 # this run, so without the check the new head would start with the old head's cutoff and that
 # head's verdicts would satisfy the wait. A state file with READY_ lines whose READY_HEAD is not
-# this head — another head, none recorded, or a READY_ISO that failed to parse (OLD_ISO is then
-# empty) — is MOVED: its cutoff is DROPPED and re-anchored below at the new head's latest check
-# start after the old cutoff (never earlier than the old cutoff or committedDate, and at now when
-# no check has started since), so a verdict that landed between that push and this run still
-# counts. Stamping now here discarded exactly those verdicts. The new cutoff is persisted with its
-# head below, so a later same-head re-arm (after a probe failure, say) reuses it instead of moving
-# it again.
+# this head — another head, none recorded, or a READY_ISO that failed to parse — is MOVED: its cutoff is DROPPED and re-anchored below at now (see there for why no
+# push-time proxy is safe). The new cutoff is persisted with its head below, so a later same-head
+# re-arm (after a probe failure, say) reuses it instead of moving it again.
 READY_HEAD=$(read_state READY_HEAD '^[0-9a-f]{40}$')
-HEAD_MOVED=""; OLD_ISO=""
+HEAD_MOVED=""
 if grep -Eq '^READY_(AT|ISO|HEAD)=' "$STATE" 2>/dev/null && [ "${READY_HEAD:-}" != "$HEAD_SHA" ]; then
-  OLD_ISO=${READY_ISO:-}; READY_ISO=""; HEAD_MOVED=1   # the old cutoff stays a lower bound below
+  READY_ISO=""; HEAD_MOVED=1
 fi
 
 # Honour a completion already recorded for THIS head SHA — otherwise re-entry re-arms a wait
@@ -2088,8 +2082,7 @@ if [ -n "${PHASE75_DONE:-}" ] && [ "$PHASE75_DONE" = "$HEAD_SHA" ]; then
   echo "ALL REQUIRED ARRIVED (recorded for this HEAD) — proceed to Phase 8"; exit 0
 fi
 # A moved head gets no -10 min default: that could reach back before the push and admit the old
-# head's verdicts. Its cutoff is re-anchored below at the latest check start after the old cutoff,
-# or at now when no check has started since.
+# head's verdicts. Its cutoff is re-anchored below at now.
 [ -n "$HEAD_MOVED" ] || READY_ISO="${READY_ISO:-$(date -u -v-10M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-10 min' +%Y-%m-%dT%H:%M:%SZ)}"
 # ADVANCE the cutoff to the newest push when that is later. Step 7.1 stamps READY_ISO at the
 # flip (a Step 7.2 re-summon keeps it), but a FIX PUSH moves neither — so every review
@@ -2127,23 +2120,13 @@ READY_ISO=$(printf '%s\n%s\n%s\n' "$READY_ISO" "$HEAD_ISO" "$PUSH_ISO" | { grep 
 READY_ISO=${READY_ISO:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
 if [ -n "$HEAD_MOVED" ]; then
   # READY_AT is left alone: the window still runs from the latest summon (Step 7.1/7.2).
-  # Re-anchor at the new head's push, and never move the cutoff backwards. The EARLIEST check
-  # start (PUSH_ISO) is the wrong proxy here: one early or forged `startedAt` pulls it before the
-  # push, the max() then collapses to the old cutoff, and an old-head verdict that landed between
-  # that cutoff and the push counts for the new head. So take the LATEST check start strictly
-  # after the old cutoff: an extra check, honest or forged, can only move it later, which fails
-  # closed. Then max() with committedDate and the old cutoff, so a head committed before the old
-  # cutoff but pushed after it cannot re-admit an old-head review that landed in between. With no
-  # check started since the old cutoff there is no push-time boundary, only the authored time,
-  # so fail closed at now.
-  LATE_ISO=$(gh pr checks <PR> --json startedAt 2>/dev/null \
-    | jq -r --arg old "$OLD_ISO" '[.[].startedAt | select(. != null and (startswith("0001-") | not))
-                                   | select(. > $old)] | max // empty' 2>/dev/null || true)
-  if [ -z "$LATE_ISO" ]; then
-    READY_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  else
-    READY_ISO=$(printf '%s\n%s\n%s\n' "$LATE_ISO" "$HEAD_ISO" "$OLD_ISO" | { grep -v '^$' || true; } | sort | tail -1)
-  fi
+  # Re-anchor at NOW, the time this run first saw the head. No GitHub signal says when this PR
+  # adopted the head: a check's `startedAt` can predate the push (the SHA can run CI on another
+  # branch first, or a run can be forged), and committedDate is author-set. Any of them can fall
+  # before an old-head verdict and let it count for the new head, so none is used. The cost is
+  # liveness only: a new-head verdict that landed between the push and this run reads as MISSING
+  # and costs a re-summon, never a false arrival.
+  READY_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   { mkdir -p "$(dirname "$STATE")" && printf 'READY_ISO=%s\nREADY_HEAD=%s\n' "$READY_ISO" "$HEAD_SHA" >> "$STATE"; } \
     || { echo "UNKNOWN: could not record the re-anchored cutoff in $STATE — refusing to wait on an unrecorded cutoff"; exit 2; }
 fi
@@ -2749,7 +2732,7 @@ cannot fix an auth failure. The probe now exits UNKNOWN instead: unobserved is n
 starts, so it re-reads the head after every probe. When a push has landed, it prints `HEAD MOVED`,
 exits 4 and records nothing, because the signals it just read may describe the superseded head.
 Re-arm the monitor (run this block again). The new run reads the new head and moves the cutoff to
-the new push (the head's latest check start), or to now when no check has started. `READY_AT` is
+the time it runs (now), because no GitHub signal reliably says when the PR adopted a head. `READY_AT` is
 unchanged, so the re-arm uses the rest of the current window rather than a fresh one. If that window is already spent, the re-arm checks once and then applies the
 decision table: a blocking reviewer that has not yet seen the new head reads as missing, which
 leads to the re-summon path.
