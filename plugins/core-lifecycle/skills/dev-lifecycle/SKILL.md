@@ -1682,9 +1682,12 @@ done
 # summon (on a re-summon, the decision table's second window), while READY_ISO (the arrival
 # cutoff) is kept, so window-1 signals for the same head still count.
 STATE=".claude/state/phase75-<PR>.env"
-mkdir -p .claude/state
 # Never write THROUGH a link: `.claude/state/` is worktree content, and a branch can commit a
-# symlink here that checkout drops over the ignored file. Remove the link, write a file.
+# symlink here that checkout drops over the ignored file. A linked directory (`.claude` or
+# `.claude/state`) would redirect every write below, so refuse it before `mkdir` follows it;
+# a linked state file is removed and replaced with a regular file.
+if [ -L .claude ] || [ -L .claude/state ]; then echo "UNKNOWN: .claude or .claude/state is a symlink; refusing to write Phase 7.5 state" >&2; return 2 2>/dev/null || exit 2; fi
+mkdir -p .claude/state
 [ ! -L "$STATE" ] || rm -f -- "$STATE"
 # READY_HEAD records the head READY_ISO was stamped for; Step 7.2 keeps the cutoff only for it.
 printf 'READY_AT=%s\nREADY_ISO=%s\nREADY_HEAD=%s\n' "$(date +%s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -1741,7 +1744,9 @@ PreToolUse hook inspects heredoc bodies and can block the call.
 # monitor's remedy for that is this very re-summon. A moved or unreadable head restarts the
 # cutoff at now (fails closed). PARSE the file, never source it; a missing or malformed value
 # falls back to now. Truncating the file also drops any PHASE75_DONE or PHASE75_TIMEOUT line.
-STATE=".claude/state/phase75-<PR>.env"; mkdir -p .claude/state
+STATE=".claude/state/phase75-<PR>.env"
+if [ -L .claude ] || [ -L .claude/state ]; then echo "UNKNOWN: .claude or .claude/state is a symlink; refusing to write Phase 7.5 state" >&2; return 2 2>/dev/null || exit 2; fi   # see Step 7.1
+mkdir -p .claude/state
 [ ! -L "$STATE" ] || rm -f -- "$STATE"   # never read or write through a planted link (Step 7.1)
 HEAD_NOW=$(gh pr view <PR> --json headRefOid --jq .headRefOid 2>/dev/null | grep -E '^[0-9a-f]{40}$' || true)
 KEPT_HEAD=$(grep -E '^READY_HEAD=' "$STATE" 2>/dev/null | tail -1 | cut -d= -f2- | grep -E '^[0-9a-f]{40}$' || true)
@@ -1983,6 +1988,7 @@ Reviewers arrive **independently and minutes apart**, so this wait wants one not
 # fresh one. Falls back to a full window when READY_AT is unset (direct entry at Phase 7.5).
 # Parse the timestamps Step 7.1 persisted; a missing file means direct entry at Phase 7.5.
 STATE=".claude/state/phase75-<PR>.env"
+if [ -L .claude ] || [ -L .claude/state ]; then echo "UNKNOWN: .claude or .claude/state is a symlink; refusing to write Phase 7.5 state" >&2; return 2 2>/dev/null || exit 2; fi   # see Step 7.1
 [ ! -L "$STATE" ] || rm -f -- "$STATE"   # never read or append through a planted link
 # PARSE the state file; never `.`-source it. Sourcing executes whatever the file contains, and
 # `.claude/state/` is ordinary worktree content — a checked-out branch, another tool, or a stale
