@@ -1,5 +1,5 @@
 # Copy into a consumer repo as .github/workflows/sync-tooling.yml and set TOOLING_REPO.
-# Weekly (or on demand) it re-runs `install.sh claude` from this tooling repo and opens one
+# Daily (or on demand) it re-runs `install.sh claude` from this tooling repo and opens one
 # draft PR when anything changed. The install lock means files you edited stay yours.
 # The upstream installer runs in a read-only job with no write token; only its diff to
 # .claude/ and scripts/repo-config.sh crosses to the job that holds write credentials.
@@ -11,7 +11,7 @@
 # Actions to create pull requests" and opens PRs that start no checks.
 name: sync-tooling
 on:
-  schedule: [{cron: '17 6 * * 1'}]
+  schedule: [{cron: '17 6 * * *'}]
   workflow_dispatch:
 permissions: {}
 concurrency: {group: sync-tooling, cancel-in-progress: false}

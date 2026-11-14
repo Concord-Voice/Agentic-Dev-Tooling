@@ -22,7 +22,13 @@ edit that many repositories track. This document describes that pattern.
   copies are not a style preference, they are the only thing that works. The
   shared set is declared in the master's `shared-manifest.json`;
   `scripts/drift-check-shared.sh` flags copies that have fallen behind the
-  master.
+  master. The sync command records installed content hashes in the consumer's
+  `.claude/.shared-tooling.lock.json`. It updates an unchanged managed copy,
+  accepts an identical existing copy, and stops before making changes if it
+  encounters a locally edited or untracked divergent copy. Review such a copy
+  before choosing whether it remains a repository override or is replaced with
+  the shared version. Commit the ledger with the copies so future syncs can
+  distinguish managed updates from customizations.
 
 - **Rules and hooks** are symlinked from the master into each repository's
   `.claude/` by `scripts/setup-symlinks.sh`. Hooks are invoked by path, so

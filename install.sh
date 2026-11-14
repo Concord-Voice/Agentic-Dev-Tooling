@@ -21,6 +21,25 @@ fi
 
 need() { command -v "$1" >/dev/null || { echo "missing prerequisite: $1" >&2; exit 1; }; }
 
+init_protected() {
+  PROTECT_ROOT="$1"
+  PROTECT_FILE="$PROTECT_ROOT/.claude/agentic-protected-paths.json"
+  [[ -f "$PROTECT_FILE" ]] || return 0
+  need jq
+  jq -e 'type == "object" and (.paths | type == "array") and
+    ([.paths[] | type == "string" and length > 0 and
+      (startswith("/") | not) and (contains("\\") | not) and
+      (split("/") | all(. != "" and . != "." and . != ".."))] | all)' \
+    "$PROTECT_FILE" >/dev/null || { echo "invalid protected paths: $PROTECT_FILE" >&2; exit 1; }
+}
+
+protected() { # true when the copied item overlaps a protected path, even under --force
+  local dst=$1 rel
+  [[ -n "${PROTECT_FILE:-}" ]] && [[ -f "$PROTECT_FILE" ]] || return 1
+  rel="${dst#"$PROTECT_ROOT"/}"
+  jq -e --arg p "$rel" '.paths | any(. as $entry | $entry == $p or ($p | startswith($entry + "/")) or ($entry | startswith($p + "/")))' "$PROTECT_FILE" >/dev/null
+}
+
 copy() { # copy $1 -> $2 unless exists and differs without --force
   # `cp -R` must never run against an EXISTING destination directory: GNU cp (coreutils, the
   # default on Linux) nests the source inside it (dst/dst) when dst already exists, rather than
@@ -29,6 +48,7 @@ copy() { # copy $1 -> $2 unless exists and differs without --force
   # With LOCK set, a destination still holding exactly what the last install wrote is not a
   # local change, so upstream updates reach it; anything edited since keeps the skip.
   local src=$1 dst=$2
+  if protected "$dst"; then echo "skip (protected): $dst"; return 0; fi
   if [ -e "$dst" ]; then
     if diff -rq "$src" "$dst" >/dev/null 2>&1; then lock_record "$dst"; return 0; fi
     if [ "$FORCE" = 0 ] && ! lock_untouched "$dst"; then echo "skip (local changes, use --force): $dst"; return 0; fi
@@ -60,6 +80,8 @@ is_template_only_skill() { # $1 = skill dir, trailing slash optional
 
 install_claude() {
   need jq; local root="${PROJECT:-$PWD}"; [ "$USER_SCOPE" = 1 ] && root="$HOME"
+  mkdir -p "$root"; root="$(cd "$root" && pwd)"
+  init_protected "$root"
   local dot="$root/.claude"
   mkdir -p "$dot"; LOCK="$dot/.agentic-dev-tooling.lock"; LOCK_ROOT="$root"
   for p in core-lifecycle guardrails release-ops reviewer-packs writing starter-memory; do
@@ -94,6 +116,11 @@ install_claude() {
   fi
   # Merge hook wiring from base settings into settings.json.
   local settings="$dot/settings.json"; mkdir -p "$dot"
+  if protected "$settings"; then
+    echo "skip (protected): $settings"
+    echo "claude install complete: $dot"
+    return 0
+  fi
   [ -f "$settings" ] || echo '{}' > "$settings"
 
   # jq's `*` deep-merge replaces (not unions) array-valued keys wholesale. Used naively on the
@@ -175,6 +202,7 @@ install_claude() {
 install_rulesync_platform() {
   need npx; local local_root="${PROJECT:-$PWD}"
   mkdir -p "$local_root"; local_root="$(cd "$local_root" && pwd)"
+  init_protected "$local_root"
 
   # rulesync target ids, verified empirically against rulesync@16.7.0's own
   # `generate --help` and `rulesync docs reference/supported-tools` -- NOT what
@@ -236,7 +264,7 @@ MD
   #    array where rulesync's schema requires a string.
   # Skills are therefore emitted directly (copy, not rulesync-import) below,
   # for the two platforms with a native .agents/skills/ convention.
-  ( cd "$stage" && npx -y rulesync@16.7.0 import --targets claudecode \
+  ( cd "$stage" && npx --ignore-scripts -y rulesync@16.7.0 import --targets claudecode \
       -f rules,mcp,hooks,permissions )
 
   # CRITICAL fix (Task 10 review): rulesync writes real files, not through
@@ -256,7 +284,7 @@ MD
   else
     # rulesync generate has no --base-dir flag (verified via `generate --help`);
     # the real equivalent is --output-roots.
-    ( cd "$stage" && npx -y rulesync@16.7.0 generate --targets "$rulesync_target" \
+    ( cd "$stage" && npx --ignore-scripts -y rulesync@16.7.0 generate --targets "$rulesync_target" \
         -f rules,mcp,hooks,permissions --output-roots "$genout" )
     if [ "$PLATFORM" = antigravity ]; then
       # Two more rulesync-side degradations for antigravity-cli, both silent

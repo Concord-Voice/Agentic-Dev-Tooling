@@ -996,28 +996,40 @@ Tier C deserves the most care. For each Tier C PR:
    If Phase 3.6 was skipped for this PR — the developer chose "skip — review yourself", **or the 3.6 precondition probe found Copilot deactivated** — fall back to dispatching the specialist suite directly (per `_shared/pr-review-agent-dispatch.md`). `/enhanced-pr-review` still works without a Copilot review present but adds less value than a direct specialist dispatch in that case.
 
    **If the review produces a fix to apply, check the escalation criteria (E1–E4) before choosing who applies it** — see `_shared/lifecycle-agent-dispatch.md` § Escalation. A bundled-engine bump that turns out to have moved an auth, crypto, or key-handling behavior is **E2 on its face**; a fix in this class often spans app code, a worker or helper, and the rules docs. Never pass a `model` override; select the agent.
-4. **Run local tests if the bump touches buildable/runnable code.** Run them at the PR's head, never in the current checkout: that tree still has the old lockfile, so a pass there proves nothing about the bump. Use a throwaway worktree:
+4. **Run tests for buildable/runnable bumps only in a verified ephemeral sandbox.**
+   The PR's dependency lifecycle scripts, test scripts and configuration are untrusted
+   code. A detached Git worktree changes the checkout, not the privileges of that code.
+   Never install dependencies, execute tests or launch a PR-head app on the developer host.
 
-   ```bash
-   # Detached at the fetched head, outside the repo (so the PR's files never land in
-   # an un-ignored path of this checkout), named by its SHA so a re-run after a
-   # force-push neither collides with a stale branch nor reuses an old worktree.
-   git fetch origin "pull/$PR/head"
-   ROOT=$(git rev-parse --show-toplevel)
-   TMP=$(mktemp -d)
-   WT="$TMP/weekly-deps-pr-$PR-$(git rev-parse --short FETCH_HEAD)"
-   git worktree add --detach "$WT" FETCH_HEAD
-   cd "$WT/$DIR"   # then install deps and run the commands below
-   ```
+   The sandbox must be separate from the host user and repository, contain an isolated
+   copy of the exact PR-head SHA with no host Git directory, and have no host credentials,
+   home directory, Git credential helpers, SSH or other agent sockets, cloud metadata,
+   privileged daemon socket or writable host mounts. Enforce filesystem and network
+   isolation. Deny network by default; if packages must be fetched, use a controlled
+   read-only package proxy and integrity-checked artifacts without publishing credentials.
+   Use disposable storage and resource limits. Verify these properties before executing
+   any PR-controlled install, build, test or probe; a worktree or ordinary container alone
+   does not establish them. Destroy the sandbox after collecting results, treat its output
+   as untrusted, and recheck the PR head before using the result. Do not place the
+   PR-controlled `$DIR` outside the sandbox checkout.
 
-   After the tests, drop the worktree by absolute path (each agent command may run in a fresh shell, so substitute the printed values if `$ROOT`, `$WT` and `$TMP` are gone): `cd "$ROOT" && git worktree remove --force "$WT" && rmdir "$TMP"`.
+   If no environment can establish these properties, report **NOT RUN** and why; do not
+   improvise an unsandboxed run. Hold the affected gate; an independently trusted CI result
+   on the exact PR head may provide separately identified evidence only after verifying its
+   isolation, permissions, secrets and trusted workflow provenance. A missing local test is
+   not a passing test.
 
    Use the repo's configured per-directory commands, read from `.weekly_deps.local_test_cmds` (a map of manifest-directory → command list). When unset for a directory, fall back to a sensible per-ecosystem default for that PR's detected ecosystem:
 
    ```bash
    # Per-directory override (preferred). $DIR is the PR's manifest directory and comes
    # from the PR, so pass it as data (--arg), never into the jq program text.
-   LOCAL_CMDS="$(jq -r --arg d "$DIR" '.weekly_deps.local_test_cmds[$d] // [] | join("\n")' "$RC_FILE" 2>/dev/null)"
+   if [ "$RC_TRUSTED_STATE" = absent ]; then
+     LOCAL_CMDS=""
+   else
+     LOCAL_CMDS="$(printf '%s' "$RC_TRUSTED_CFG" | jq -r --arg d "$DIR" '.weekly_deps.local_test_cmds[$d] // [] | join("\n")')" \
+       || { echo "FATAL: could not parse trusted local test commands" >&2; exit 1; }
+   fi
    ```
 
    | Ecosystem | Default local-test commands (run from the manifest dir) |
@@ -1048,10 +1060,11 @@ Tier C deserves the most care. For each Tier C PR:
    tag bump moves an engine even though it never touches buildable code.
 
    These contracts only exist in a real engine, so the run is the app, not a
-   suite. Run it from the PR-head worktree above (probes run against the current
-   checkout measure the OLD engine), using the repo's own dev launcher with enough
-   clients to exercise the contract. Three things must be true before a reading
-   means anything:
+   suite. Run it against the exact PR head inside the verified sandbox described
+   in Step 4, using the repo's own dev launcher with enough clients to exercise the
+   contract. If a suitable sandbox is unavailable or the probe cannot run inside it,
+   report **NOT RUN**; do not launch PR-head code on the host. Three things must be
+   true before a reading means anything:
 
    1. **You are running the bumped engine — the one THIS bump moved.** Check the
       engine named in Step 1's delta, at full patch precision, not whichever is
@@ -1135,7 +1148,7 @@ Tier C deserves the most care. For each Tier C PR:
      Auto-dismissed: N findings
      Real concerns: N findings (see triage table)
      Conflicts (Copilot vs subagent): N (need your decision)
-   Local test result: <pass/fail>
+   Local test result: <pass/fail/NOT RUN, with reason>
    Engine probes: <n/a — not a bundled-engine bump | clean after real run | BROKEN: … | PARTIAL: … | NOT RUN>
    Rules-doc impact: <none | requires update to a rules doc>
 
@@ -1203,7 +1216,7 @@ After processing completes, report results and surface follow-ups.
 Merged this run:           N PRs
   Tier A (HIGH):  N (#NN, #NN, ...)
   Tier B:         N (#NN, #NN, ...)
-  Tier C:         N (#NN <pkg> — reviewed, local test passed)
+  Tier C:         N (#NN <pkg> — reviewed, local test: PASS | FAIL | NOT RUN)
                      engine probes: clean after real run | BROKEN: … | PARTIAL: … |
                                     NOT RUN | n/a — not a bundled-engine bump
   Tier D:         N (#NN security-data refresh)
@@ -1250,7 +1263,11 @@ Run it whenever any merged PR touched a **production** dependency of a shipped
 artifact. Dev-only bumps (`@types/*`, eslint, vitest, tsx) do not affect it — the
 attribution file records the production bundles only. If the script reads
 installed packages rather than lockfiles (license-checker style), install every
-workspace it covers first (`npm ci` in each), then run it. Expect the same
+workspace it covers first (`npm ci` in each), then run it. Both installation and
+regeneration execute dependency or project code: use the verified ephemeral sandbox
+and credential, filesystem and network restrictions from Phase 4.C. A merged dependency
+is not automatically safe. If that isolation is unavailable, report regeneration
+**NOT RUN** and hold the follow-up rather than running it on the host. Expect the same
 dry-run-by-default / `--apply`-to-write contract as 6.2, but follow the script's
 own docs.
 

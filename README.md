@@ -117,6 +117,16 @@ schedule, copy [`templates/sync-tooling.yml`](templates/sync-tooling.yml) into y
 `.github/workflows/`. It opens one draft PR when something changed, using a GitHub App token it
 mints at runtime (`SYNC_APP_CLIENT_ID` variable, `SYNC_APP_PRIVATE_KEY` secret).
 
+To reserve customized paths for a higher-priority tooling layer, create
+`.claude/agentic-protected-paths.json` with, for example,
+`{"paths":[".claude/skills/dev-lifecycle", ".claude/settings.json"]}`.
+Paths are relative to the target root; a protected path also protects its
+ancestors and descendants from installer copies, including `--force`.
+Protecting settings skips the hook-settings merge too. Invalid paths stop the
+install before it writes files. List the paths for each host you use: this file
+does not configure a host's skill-discovery precedence or install the higher
+layer for you.
+
 ### What's inside
 
 Seven themed plugins, installable individually via the Claude Code

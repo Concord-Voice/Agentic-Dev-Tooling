@@ -24,6 +24,20 @@ printf '%s\n' "$out" | grep -qF -- "--user is only supported for the claude subc
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 git -C "$tmp" init -q
 
+# Verify both compiler invocations without downloading or executing an npm
+# package. npm flags must precede the package so they are interpreted by npx.
+mkdir -p "$tmp/fake-bin" "$tmp/offline-target"
+cat > "$tmp/fake-bin/npx" <<'SH'
+#!/usr/bin/env bash
+set -eu
+[ "${1:-}" = --ignore-scripts ] && [ "${2:-}" = -y ] && [ "${3:-}" = rulesync@16.7.0 ] || exit 9
+printf '%s\n' "${4:-}" >> "$RULESYNC_TRACE"
+SH
+chmod +x "$tmp/fake-bin/npx"
+RULESYNC_TRACE="$tmp/rulesync-trace" PATH="$tmp/fake-bin:$PATH" \
+  "$HERE/install.sh" codex --project "$tmp/offline-target" >/dev/null
+[[ "$(cat "$tmp/rulesync-trace")" = "$(printf 'import\ngenerate')" ]] || fail "rulesync lifecycle policy not applied to both calls"
+
 "$HERE/install.sh" claude --project "$tmp"
 
 [ -f "$tmp/scripts/repo-config.sh" ] || fail "repo-config.sh not installed"
@@ -48,6 +62,20 @@ echo "UPSTREAM-v3" >> "$up/plugins/core-lifecycle/skills/ci-status/SKILL.md"
 "$up/install.sh" claude --project "$proj" >/dev/null
 grep -q LOCAL-EDIT "$proj/.claude/skills/ci-status/SKILL.md" || fail "hand-edited install was overwritten"
 if grep -q UPSTREAM-v3 "$proj/.claude/skills/ci-status/SKILL.md"; then fail "hand-edited install took the upstream change"; fi
+# An explicitly owned Internal/local path must survive even a force install.
+# A protected nested path also protects its containing skill directory.
+jq -n '{paths:[".claude/skills/ci-status/SKILL.md", ".claude/settings.json"]}' > "$proj/.claude/agentic-protected-paths.json"
+settings_before="$(cat "$proj/.claude/settings.json")"
+"$up/install.sh" claude --project "$proj" --force >/dev/null
+grep -q LOCAL-EDIT "$proj/.claude/skills/ci-status/SKILL.md" || fail "force replaced a protected customization"
+[[ "$(cat "$proj/.claude/settings.json")" = "$settings_before" ]] || fail "force changed protected settings"
+bad_protection="$tmp/bad-protection"; mkdir -p "$bad_protection/.claude"
+printf '{"paths":["../outside"]}\n' > "$bad_protection/.claude/agentic-protected-paths.json"
+if "$up/install.sh" claude --project "$bad_protection" >/dev/null 2>&1; then fail "invalid protected path accepted"; fi
+[[ ! -d "$bad_protection/.claude/skills" ]] || fail "invalid protection mutated destination"
+printf '{"paths":[".claude\\\\skills"]}\n' > "$bad_protection/.claude/agentic-protected-paths.json"
+if "$up/install.sh" claude --project "$bad_protection" >/dev/null 2>&1; then fail "single-backslash protected path accepted"; fi
+rm "$proj/.claude/agentic-protected-paths.json"
 # A symlink the adopter added is a local change too, so the next update must not delete it.
 ln -s SKILL.md "$proj/.claude/skills/pr-creation/local-notes"
 echo "UPSTREAM-v2" >> "$up/plugins/core-lifecycle/skills/pr-creation/SKILL.md"
