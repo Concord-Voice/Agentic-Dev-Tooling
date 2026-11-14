@@ -2027,13 +2027,14 @@ esac
 # monitor starts separately, so a push in between would start it on the new head with the old head's
 # cutoff, and that head's verdicts would satisfy the wait. A cutoff stamped for another head, or with
 # no head recorded, is DROPPED: the max() with HEAD_ISO/PUSH_ISO below re-anchors it at the new
-# head's push, so a verdict that landed between that push and this run still counts. Stamping now
+# head's push (never earlier than the old cutoff, and at now when no push time is readable), so a
+# verdict that landed between that push and this run still counts. Stamping now
 # here discarded exactly those verdicts. The new cutoff is persisted with its head below, so a
 # later same-head re-arm (after a probe failure, say) reuses it instead of moving it again.
 READY_HEAD=$(read_state READY_HEAD '^[0-9a-f]{40}$')
 HEAD_MOVED=""
 if [ -n "${READY_ISO:-}" ] && [ "${READY_HEAD:-}" != "$HEAD_SHA" ]; then
-  READY_ISO=""; HEAD_MOVED=1
+  OLD_ISO=$READY_ISO; READY_ISO=""; HEAD_MOVED=1   # the old cutoff stays a lower bound below
 fi
 
 # Honour a completion already recorded for THIS head SHA — otherwise re-entry re-arms a wait
@@ -2073,6 +2074,14 @@ PUSH_ISO=$(gh pr view <PR> --json statusCheckRollup \
 READY_ISO=$(printf '%s\n%s\n%s\n' "$READY_ISO" "$HEAD_ISO" "$PUSH_ISO" | grep -v '^$' | sort | tail -1)
 READY_ISO=${READY_ISO:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
 if [ -n "$HEAD_MOVED" ]; then   # READY_AT is left alone: the window still runs from the ready flip
+  # Never move the cutoff backwards. A head committed before the old cutoff but pushed after it
+  # would otherwise re-admit an old-head review that landed in between. With no PUSH_ISO there is
+  # no push-time boundary at all, only the authored time, so fail closed at now.
+  if [ -z "$PUSH_ISO" ]; then
+    READY_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  else
+    READY_ISO=$(printf '%s\n%s\n' "$READY_ISO" "$OLD_ISO" | sort | tail -1)
+  fi
   mkdir -p "$(dirname "$STATE")" && printf 'READY_ISO=%s\nREADY_HEAD=%s\n' "$READY_ISO" "$HEAD_SHA" >> "$STATE"
 fi
 WINDOW=${WINDOW:-$( [ -n "${READY_AT:-}" ] && echo $(( 600 - ( $(date +%s) - READY_AT ) )) || echo 600 )}
