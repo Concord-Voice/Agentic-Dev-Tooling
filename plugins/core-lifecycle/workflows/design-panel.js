@@ -3,10 +3,10 @@ export const meta = {
   description: 'Phase-2 Architecture & Design panel: architect philosophy → parallel specialists → frontend reconciliation → architect synthesis',
   whenToUse: 'Invoked by /dev-lifecycle Phase 2 for any nontrivial design. Realizes the Architecture & Design team hierarchy, which subagents cannot express directly (a subagent cannot dispatch a subagent).',
   phases: [
-    { title: 'Philosophy', detail: 'architect drafts the design philosophy the panel builds against', model: 'fable' },
+    { title: 'Philosophy', detail: 'architect drafts the design philosophy the panel builds against', model: 'opus' },
     { title: 'Panel', detail: 'system-engineer / ui-designer / ux-designer work the brief in parallel' },
     { title: 'Reconcile', detail: 'frontend-designer merges the UI and UX positions into one handoff spec', model: 'opus' },
-    { title: 'Synthesis', detail: 'architect reconciles every panel output into the final spec', model: 'fable' },
+    { title: 'Synthesis', detail: 'architect reconciles every panel output into the final spec', model: 'opus' },
   ],
 }
 
