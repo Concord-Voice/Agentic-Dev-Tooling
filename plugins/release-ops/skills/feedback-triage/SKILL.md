@@ -104,6 +104,35 @@ if [[ ! $PUBLIC =~ $nwo || ! $TRACKER =~ $nwo || ${PUBLIC,,} == "${TRACKER,,}" ]
   echo "FATAL: set .feedback_triage.public and .tracker (owner/repo, different repos) in .claude/repo-config.json, or pass --public/--tracker" >&2
   return 1 2>/dev/null || exit 1
 fi
+# Optional owning-repo map (.feedback_triage.routing.<surface> -> owner/repo) for multi-repo orgs;
+# falls back to $TRACKER when unset. Fail closed if any configured entry is malformed or targets $PUBLIC.
+nwo_re='^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'
+TRACKER_CLEAN="${TRACKER%.git}"
+PUBLIC_CLEAN="${PUBLIC%.git}"
+[[ "$TRACKER_CLEAN" =~ $nwo_re && "$PUBLIC_CLEAN" =~ $nwo_re ]] || {
+  echo "Invalid TRACKER ($TRACKER) or PUBLIC ($PUBLIC) repo slug" >&2
+  exit 1
+}
+PUBLIC_NORM=$(printf '%s' "$PUBLIC_CLEAN" | tr '[:upper:]' '[:lower:]')
+
+ROUTING_LINES=$(rc_get '.feedback_triage.routing // {} | if type != "object" then "__INVALID__" else (.[] | if type == "string" then . else "__INVALID__" end) end' '')
+VALIDATED_ROUTING=""
+while IFS= read -r raw_repo; do
+  [ -z "$raw_repo" ] && continue
+  repo="${raw_repo%.git}"
+  [[ "$repo" =~ $nwo_re ]] || {
+    echo "Invalid .feedback_triage.routing entry: $raw_repo" >&2
+    exit 1
+  }
+  repo_norm=$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')
+  [ "$repo_norm" != "$PUBLIC_NORM" ] || {
+    echo "Refusing .feedback_triage.routing target equal to public repo ($PUBLIC_CLEAN)" >&2
+    exit 1
+  }
+  VALIDATED_ROUTING="${VALIDATED_ROUTING}${VALIDATED_ROUTING:+$'\n'}${repo}"
+done <<< "$ROUTING_LINES"
+
+CANDIDATE_TRACKERS=$(printf '%s\n%s\n' "$TRACKER_CLEAN" "$VALIDATED_ROUTING" | awk 'NF && !seen[tolower($0)]++')
 # Sentinel prefix for every routine marker. Keep the prefix a repo already has on
 # its public issues: a renamed prefix orphans the existing status comments and the
 # pinned Known Issues issue, and the next run would duplicate them.
@@ -114,7 +143,7 @@ SP="$(rc_get '.feedback_triage.sentinel_prefix' 'feedback-triage')"
 TODAY=$(date -u +%Y-%m-%d)
 ```
 
-1. **Auth + scope check.** Confirm `gh auth status` has `issues:write` on both repos and `project` scope (tracker board mutations via `/issue-creation`). On `INSUFFICIENT_SCOPES`, surface `gh auth refresh -s project,read:project` and stop.
+1. **Auth + scope check.** Confirm `gh auth status` has `issues:write` on `$PUBLIC` and **every repo in `$CANDIDATE_TRACKERS`**, plus `project` scope (tracker board mutations via `/issue-creation`). On `INSUFFICIENT_SCOPES`, surface `gh auth refresh -s project,read:project` and stop.
 2. **Load the safety envelope** (auto mode). Defaults — override only with explicit approval:
    - `MAX_CLOSURES_PER_RUN=15` (consolidation closes + fixed-issue closes, combined)
    - `MAX_CLUSTER_SIZE=8` (a proposed dupe cluster larger than this is flagged for human review, never auto-closed)
@@ -189,25 +218,42 @@ Respect the closure cap; overflow → digest.
 
 ---
 
-## Phase 4 — Sync survivors into the tracker repo (mode-gated)
+## Phase 4 — Sync survivors into the tracker repo(s) (mode-gated)
 
 For each **surviving, non-human-touched** issue that represents real work and whose marker has no `alpha:` ref:
 
-1. **Idempotency guard (belt-and-suspenders).** Before creating, search the tracker for an existing back-reference (covers a prior run that created the issue but failed to write the marker). GitHub search **tokenizes** a raw URL (splitting on `/` and `.`), so a bare-URL query matches noise — any tracker issue mentioning the bare number `$N` would falsely hit. Quote the URL as a **phrase** AND post-filter on literal containment (the search is best-effort; the filter is authoritative):
+1. **Determine and validate the owning tracker repo (`TARGET_REPO`).** Read `.feedback_triage.routing` (see [`references/alpha-sync.md`](references/alpha-sync.md) § Owning-repo routing & multi-repo epics): route to the repo that owns the feedback/fix by surface and root cause, falling back to `$TRACKER` when `.feedback_triage.routing` is unset or ambiguous. Strip any `.git` suffix and validate that `TARGET_REPO` matches one of `$CANDIDATE_TRACKERS` (case-insensitively) and is never `$PUBLIC`; fail closed otherwise.
+2. **Idempotency guard (belt-and-suspenders).** Before creating, search **every candidate tracker repo** (`$CANDIDATE_TRACKERS`: `$TRACKER` plus configured `.feedback_triage.routing` targets) for an existing back-reference (covers a prior run that created the issue in any owning repo but failed to write the marker). GitHub search **tokenizes** a raw URL (splitting on `/` and `.`), so a bare-URL query matches noise — any tracker issue mentioning the bare number `$N` would falsely hit. Quote the URL as a **phrase** AND post-filter on literal body containment while inspecting `labels` (the search is best-effort; the filter is authoritative):
    ```bash
-   PUB_URL="https://github.com/$PUBLIC/issues/$N"
-   gh search issues --repo "$TRACKER" "\"$PUB_URL\"" --json number,body \
-     --jq "[.[] | select(.body | contains(\"$PUB_URL\")) | .number]"
+   PUB_URL="https://github.com/$PUBLIC_CLEAN/issues/$N"
+   HITS=""
+   EPIC_HITS=""
+   while IFS= read -r repo; do
+     [ -z "$repo" ] && continue
+     while IFS=$'\t' read -r ref is_epic; do
+       [ -z "$ref" ] && continue
+       HITS="${HITS}${HITS:+$'\n'}${ref}"
+       [ "$is_epic" = "true" ] && EPIC_HITS="${EPIC_HITS}${EPIC_HITS:+$'\n'}${ref}"
+     done < <(
+       gh search issues --repo "$repo" "\"$PUB_URL\"" --json number,body,labels \
+         | jq -r --arg repo "$repo" --arg pub_url "$PUB_URL" \
+             '.[] | select((.body // "") | contains($pub_url)) | ["\($repo)#\(.number)", ((.labels // [] | map(.name) | index("type: epic")) != null)] | @tsv'
+     )
+   done <<< "$CANDIDATE_TRACKERS"
    ```
-   A **confirmed** hit (body literally contains `$PUB_URL`) ⇒ reuse it; skip creation; jump to recording the ref. No confirmed hit ⇒ create. The marker's `alpha:` field stays the primary record; this search is only the crash-recovery fallback.
-2. **Dispatch `/issue-creation`** on the tracker with a tracking-request payload (topic, kind→labels, the public body, `reports=N` as the demand signal, and the public URL as a `Refs` back-reference). The dispatch contract — including how `/issue-creation`'s human checkpoints are answered in auto mode, the label/domain/release mapping, and the demand-signal→Priority mapping — lives in [`references/alpha-sync.md`](references/alpha-sync.md). Created tracking issues land at board **Status = Triage/Backlog**, never `Ready`: a human still vets scope before work starts.
-3. Capture the new (or reused) `example-repo-private#NNN` and its **`release:` label** (the shipping stream) → the **release window** (`v0.2.0-Beta`, `v1.0.0`, … or `a future release`). The window derives from the ship stream, NOT the milestone (a complete-by deadline). Derivation in [`references/alpha-sync.md`](references/alpha-sync.md).
+   Resolve confirmed hits strictly:
+   - **Zero** hits ⇒ create in `$TARGET_REPO`.
+   - **Exactly one** hit in `HITS` ⇒ reuse that `owner/repo#N`; skip creation; jump to recording the ref.
+   - **Multiple** hits (for example, a parent epic plus child issues referencing `$PUB_URL`): if `EPIC_HITS` has **exactly one** line, reuse that `type: epic` parent ref; if `EPIC_HITS` has **zero or more than one** match, do **not** create or guess — log an ambiguity conflict to the Phase 7 digest for human resolution.
+   The marker's `alpha:` field stays the primary record; this search is only the crash-recovery fallback.
+3. **Dispatch `/issue-creation`** in `$TARGET_REPO` with a tracking-request payload (target repo, topic, kind→labels, the public body, `reports=N` as the demand signal, and the public URL as a `Refs` back-reference). If the fix spans **multiple repositories**, create the **epic-style parent** (`type: epic`) in `$TARGET_REPO` (the main repo owning the fix, carrying `Refs https://github.com/$PUBLIC_CLEAN/issues/$N`), create child tasking issues in each sibling repo that owns an individual tasking (referencing the parent `owner/repo#PARENT_NUM` rather than repeating bare `Refs $PUB_URL`), and link every cross-repo child via GitHub's native sub-issues API (`POST repos/{owner}/{repo}/issues/{parent_num}/sub_issues` with `sub_issue_id`, without `replace_parent=true`). The dispatch contract — including how `/issue-creation`'s human checkpoints are answered in auto mode, routing rules, label/domain/release mapping, and demand-signal→Priority mapping — lives in [`references/alpha-sync.md`](references/alpha-sync.md). Created tracking issues land at board **Status = Triage/Backlog**, never `Ready`: a human still vets scope before work starts.
+4. Capture the full new (or reused) `<owner/repo>#NNN` ref (the parent epic when multi-repo) and its **`release:` label** (the shipping stream) → the **release window** (`v0.2.0-Beta`, `v1.0.0`, … or `a future release`). The window derives from the ship stream, NOT the milestone (a complete-by deadline). Derivation in [`references/alpha-sync.md`](references/alpha-sync.md).
 
 ---
 
 ## Phase 5 — Back-annotate the public issue with tracking status (mode-gated)
 
-Update the survivor's **managed status comment** so a public reader sees it's tracked. Per your disclosure choice, include the tracker ref/link (renders as plain text to anonymous viewers since the tracker is private; links for maintainers):
+Update the survivor's **managed status comment** so a public reader sees it's tracked. Keep the canonical `owner/repo#NNN` ref (or legacy `repo#NNN` / `#NNN`) inside the HTML marker's `alpha:` field for Phase 6 resolution, while rendering the **visible** `alpha_display` token per disclosure policy (strip the `owner/` prefix as `repo#NNN`, or use an opaque `internal#NNN` placeholder when private repository names are withheld; full schema in [`references/markers-and-templates.md`](references/markers-and-templates.md)):
 
 ```
 📌 Tracked internally as example-repo-private#NNN — tracked for an upcoming Beta update.
@@ -219,7 +265,52 @@ Update the survivor's **managed status comment** so a public reader sees it's tr
 
 ## Phase 6 — Reverse sync: shipped fix → close/annotate public (mode-gated)
 
-For every public issue whose marker carries an `alpha:` ref, read the tracker issue's current state and post **only on a transition** (full state machine in [`references/idempotency.md`](references/idempotency.md)):
+For every public issue whose marker carries an `alpha:` ref, parse `ALPHA_REPO` and `ALPHA_NUM` strictly across all three supported forms before querying GitHub:
+
+```bash
+resolve_alpha_ref() {
+  local raw="$1" tracker="$2" candidates="$3" pub="$4"
+  local pub_norm repo_part num matches
+  pub_norm=$(printf '%s' "${pub%.git}" | tr '[:upper:]' '[:lower:]')
+  case "$raw" in
+    */*\#*)
+      repo_part="${raw%#*}"
+      repo_part="${repo_part%.git}"
+      num="${raw##*#}"
+      [[ "$repo_part" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ && "$num" =~ ^[0-9]+$ ]] || return 1
+      ALPHA_REPO="$repo_part"
+      ALPHA_NUM="$num"
+      ;;
+    \#*|[0-9]*)
+      num="${raw#\#}"
+      [[ "$num" =~ ^[0-9]+$ ]] || return 1
+      ALPHA_REPO="${tracker%.git}"
+      ALPHA_NUM="$num"
+      ;;
+    *\#*)
+      repo_part="${raw%#*}"
+      num="${raw##*#}"
+      [[ "$repo_part" =~ ^[A-Za-z0-9._-]+$ && "$num" =~ ^[0-9]+$ ]] || return 1
+      matches=$(printf '%s\n' "$candidates" | awk -v name="$(printf '%s' "$repo_part" | tr '[:upper:]' '[:lower:]')" '
+        NF { split($0, p, "/"); if (tolower(p[2]) == name) print $0 }
+      ')
+      case "$(printf '%s\n' "$matches" | awk 'NF{c++} END{print c+0}')" in
+        1) ALPHA_REPO="$matches" ;;
+        0) ALPHA_REPO="${tracker%%/*}/$repo_part" ;;
+        *) return 1 ;; # ambiguous basename across multiple orgs in $CANDIDATE_TRACKERS
+      esac
+      ALPHA_NUM="$num"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  [[ "$ALPHA_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || return 1
+  [ "$(printf '%s' "$ALPHA_REPO" | tr '[:upper:]' '[:lower:]')" != "$pub_norm" ]
+}
+```
+
+If `resolve_alpha_ref` fails (malformed marker or ambiguous `repo#N` basename across orgs), emit a `digest:` error and skip closing the public issue. When reading the tracker's state, if `ALPHA_REPO#ALPHA_NUM` is a parent / `type: epic` issue, inspect its children via `gh api "repos/$ALPHA_REPO/issues/$ALPHA_NUM/sub_issues"` — a parent epic ships **only** when both the parent AND **every** child sub-issue are closed with `state_reason == "completed"` (or explicitly split out); open or `not_planned` children keep the public issue `in-progress` and emit a `digest:` warning. Post **only on a transition** (full state machine in [`references/idempotency.md`](references/idempotency.md)):
 
 | Tracker state | Public action | Marker → |
 |---|---|---|
