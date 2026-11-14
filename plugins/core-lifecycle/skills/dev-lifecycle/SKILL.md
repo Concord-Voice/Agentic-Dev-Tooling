@@ -2023,6 +2023,14 @@ case "$HEAD_SHA" in
   *) HEAD_SHA="" ;;
 esac
 [ -n "$HEAD_SHA" ] || { echo "UNKNOWN: could not read headRefOid — cannot honour or record a completion"; exit 2; }
+# Bind the kept cutoff to THIS head. Step 7.2 checks READY_HEAD before it keeps READY_ISO, but the
+# monitor starts separately, so a push in between would start it on the new head with the old head's
+# cutoff, and that head's verdicts would satisfy the wait. A cutoff stamped for another head, or with
+# no head recorded, restarts at now (fails closed).
+READY_HEAD=$(read_state READY_HEAD '^[0-9a-f]{40}$')
+if [ -n "${READY_ISO:-}" ] && [ "${READY_HEAD:-}" != "$HEAD_SHA" ]; then
+  READY_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+fi
 
 # Honour a completion already recorded for THIS head SHA — otherwise re-entry re-arms a wait
 # that has already succeeded. A new push changes the SHA, which correctly invalidates it.
