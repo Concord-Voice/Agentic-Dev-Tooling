@@ -7,7 +7,6 @@ allowed-tools:
   - Bash(gh api *)
   - Bash(gh issue view *)
   - Bash(.claude/skills/enhanced-pr-review/check-review-dispositions.sh *)
-  - Bash(.claude/skills/enhanced-pr-review/review-coverage.sh *)
   - Read
   - Grep
   - Glob
@@ -162,8 +161,16 @@ Why a third fetch — this is where verdict-only reviewers and CI-poster workflo
 **Step 6 — Bot-author caveat: review coverage on HEAD.** Applies only when the PR author is a bot (`gh pr view $0 --json author --jq '.author.is_bot'` prints `true`: Dependabot, github-actions, Renovate and the like). Anything other than exactly `true` or `false`, or a non-zero exit, means the author type is UNKNOWN: treat it as a bot PR whose coverage is UNKNOWN, which fails §6.0 precondition 10, never as "not a bot". A bot-authored PR gets no automatic review — Copilot does not review a bot-authored PR unless a maintainer requests it — and an org admin exempt from the default-branch ruleset can merge it with no review at all. So check, and do not count this skill's own pass yet:
 
 ```bash
-.claude/skills/enhanced-pr-review/review-coverage.sh $0   # exit 0 covered · 1 zero · 2 UNKNOWN
+COV_REF="$(git symbolic-ref --quiet refs/remotes/origin/HEAD || echo refs/remotes/origin/main)"   # full refname: a branch or tag named origin/main cannot shadow it
+COV_PATH=.claude/skills/enhanced-pr-review/review-coverage.sh; COV_SH=
+case "$COV_REF" in refs/remotes/origin/?*)
+  case "$(git ls-tree "$COV_REF" -- "$COV_PATH" | cut -d' ' -f1)" in 100644|100755) COV_SH="$(git show "$COV_REF:$COV_PATH")" ;; esac ;;   # a regular file only: a symlink blob would run its target
+esac
+cov() { if [ -n "$COV_SH" ]; then bash -c "$COV_SH" review-coverage "$@"; else echo "UNKNOWN: no regular review-coverage.sh on $COV_REF" >&2; return 2; fi; }
+cov "$0"   # exit 0 covered · 1 zero · 2 UNKNOWN
 ```
+
+**The check runs from the default branch, never from this checkout**, the same rule as the disposition gate (§3.5.3): a bot-authored PR can edit the checkout's copy, and a check the PR controls verifies nothing. A plugin install whose copy lives outside the working tree may run that copy directly instead. Any exit other than 0 or 1 is UNKNOWN.
 
 Coverage is SHA-bound and comes from a trusted reviewer. It is either a submitted review whose `commit_id` is the head SHA, by someone other than the PR author who is a human repo insider (`author_association` `OWNER` / `MEMBER`; `COLLABORATOR` is left out because GitHub returns it for read and triage access too) or an allowlisted review bot, or a **first-party coverage record**. A `COMMENTED` review counts only when it has a body or a top-level inline comment: GitHub files every thread reply, including this skill's own `cv-disposition` replies, as an empty `COMMENTED` review at the head of that moment, and a reply is not a review. A bot must be on the allowlist even when it carries an insider association. The allowlist is Copilot plus the logins in the base branch's `.claude/repo-config.json` `.review_coverage.reviewer_bots`; other bots, such as a code-scanning bot, do not count. A first-party record is a conversation comment with `<!-- cv-review-coverage: sha=<head SHA> reviewer=<login> suite=<skill> -->` on a line of its own, posted by `<login>` under the same trust rule as a review: not the PR author, and a human insider or an allowlisted bot. A review or record on an older SHA is stale and does not count — a push or an `@dependabot rebase` moves the head and resets coverage. Comments and check runs that name no SHA do not count either. Put the printed line in the Phase 3 table as its own row, and feed the exit code to §6.0 precondition 10.
 
