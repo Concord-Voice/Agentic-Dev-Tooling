@@ -257,8 +257,8 @@ prep cron (e.g. 0 13 * * 3) ──┐    triage cron (e.g. 0 15 * * 3) ──┐
    • Phase 3.4 community signal          • find prep-run comment
    • Phase 3.6 request Copilot           • fetch Copilot reviews
    • Phase 3.7 record coverage           • Phase 4.0 auto-dismiss
-   • Phase 5 rebase conflicts            • Step T4a review + record
-   • post digest comment                   zero-coverage PRs
+   • Phase 5 rebase conflicts            • Step T4a re-check coverage
+   • post digest comment
                                          • edit digest comment in place
    • exit                                • exit
                                                   │
@@ -270,7 +270,7 @@ prep cron (e.g. 0 13 * * 3) ──┐    triage cron (e.g. 0 15 * * 3) ──┐
 
 The two crons are **independent** — the prep run does NOT schedule the triage. If prep fails, the triage cron still fires and aborts cleanly with "no prep comment for this week" (Step T2 of `references/autonomous-mode.md`). This is more robust than the chained-schedule alternative.
 
-Both autonomous modes share Phases 1–3 (Phase 3.7 records coverage), plus Phase 5 (rebase) in `prep`, and Phase 4.0 (auto-dismiss only, no merges) and the Step T4a coverage pass in `triage`. Phases 4.A–D and 6.2 (the merge and follow-up PR steps) are **never run in autonomous mode** — they require human confirmation per the operational discipline.
+Both autonomous modes share Phases 1–3 (Phase 3.7 records coverage), plus Phase 5 (rebase) in `prep`, and Phase 4.0 (auto-dismiss only, no merges) and the Step T4a coverage re-check in `triage`. Phases 4.A–D and 6.2 (the merge and follow-up PR steps) are **never run in autonomous mode** — they require human confirmation per the operational discipline.
 
 ---
 
@@ -889,7 +889,6 @@ Each run prints one line, which goes verbatim into the run output (the digest in
 #101 @1a2b3c4 covered: copilot-pull-request-reviewer[bot] (COMMENTED)
 #104 @5d6e7f8 ZERO coverage; stale: copilot-pull-request-reviewer[bot]@9a8b7c6
 #105 @0f1e2d3 covered: <login> (first-party /review-pr)
-#106 @4c5d6e7 covered: <login> (first-party /review-pr:unattended)
 ```
 
 Coverage is bound to the **current head SHA**. It is a submitted review whose `commit_id` is that SHA, by someone other than the PR author who is a human repo insider (`author_association` OWNER or MEMBER; COLLABORATOR also covers read and triage access, so it does not count) or an allowlisted review bot (a bot needs the allowlist even with an insider association), or a first-party coverage record carrying that SHA (see Step 3.7.2). A `COMMENTED` review needs a body or a top-level inline comment, because GitHub files each thread reply as an empty `COMMENTED` review at the current head. The allowlist is Copilot plus `.review_coverage.reviewer_bots` from the base branch's repo config. A drive-by account's review does not count, and neither does a code-scanning bot's. A review on an older SHA is listed as `stale` and does not count. An `@dependabot rebase` (Phase 5) moves the head, so it resets coverage. A manually triggered review counts the same way: a re-requested Copilot review or a human review is recorded against its SHA by GitHub, and a first-party suite run by hand counts once its record names the head SHA and the reviewer. Exit 2 is UNKNOWN. Print the line as `#<n> coverage UNKNOWN` and never treat it as covered. If the script is not found at `$COVERAGE`, print `coverage UNKNOWN — review-coverage.sh not installed` for every PR.
@@ -899,14 +898,14 @@ Coverage is bound to the **current head SHA**. It is a submitted review whose `c
 | Context | Zero coverage on the head SHA → |
 |---|---|
 | `--mode=prep` | Record only. Copilot is requested in this same run (Phase 3.6, autonomous Step P4), so the line goes in the digest and nothing else happens. |
-| `--mode=triage` | Run the suite and post the record (autonomous-mode Step T4a). |
+| `--mode=triage` | Record only. Re-check the line (autonomous-mode Step T4a); the suite waits for the interactive pass (see **No unattended suite** below). |
 | Interactive Phase 4 | Run the suite, then confirm with the developer before posting the record (one batch prompt, the same as Step 3.6.2), before the PR's merge prompt. |
 
 To run it: for a Tier C PR in interactive mode, Phase 4.C's `$DEEP_REVIEW_SKILL` pass *is* the first-party review. Do not run the suite twice. `/enhanced-pr-review` records its own pass (its Phase 1 Step 6, `suite=/enhanced-pr-review`). If no record for the head SHA exists after Phase 4.C (the developer declined that step, or the configured skill is not `/enhanced-pr-review`), post it here with `suite=$DEEP_REVIEW_SKILL`. In every other case, including Tier C in triage mode, run the `/review-pr` suite: the model cannot invoke the user-only `/review-pr` skill, so dispatch the specialist subagents directly (per `_shared/pr-review-agent-dispatch.md`, unioned with the repo's `.claude/repo-config.json` `.review_agents`), the same fallback as Phase 3.6. Post a record only after every dispatched reviewer returned a result. A suite that did not run leaves the PR at ZERO, and that is what gets reported.
 
-**Unattended rule (`--mode=triage`).** The suite reads Dependabot PR bodies and upstream release notes, which are untrusted text, and no human is present to stop a prompt injection. So an unattended run dispatches only **read-only reviewers**: every entry on the agent's `tools:` line must be on this allowlist — `Read`, `Grep`, `Glob`, `Bash(git diff *)`, `Bash(git log *)`, `Bash(git show *)`, `Bash(gh pr view *)`, `Bash(gh pr diff *)`, `Bash(gh pr checks *)`, `Bash(gh issue view *)`. Any other entry (`Write`, `Edit`, unscoped `Bash`, a command that runs repo-configured code such as `Bash(pre-commit run *)`, `WebFetch`, `WebSearch`) means the agent is not dispatched. That drops `red-team` (it has `Bash`, `Write` and `Edit`, and its worktree is not a sandbox), `docs-reviewer` (`pre-commit run` executes the repo's hooks) and any configured `.review_agents` entry that fails the rule. A missing `tools:` line inherits every tool, so it fails too. Read the `tools:` line from the default-branch copy of each agent definition, never the PR's. Name the skipped agents in the record (`skipped (unattended, not read-only): <agents>`). Those reviewers run in the developer's interactive pass. If the read-only set comes out empty, post no record and leave the PR at ZERO.
+**No unattended suite.** Neither autonomous mode runs the first-party suite. It reads Dependabot PR bodies and upstream release notes, which are untrusted text, and a reviewer's tool list cannot make it read-only: `git diff`, `git log` and `git show` all accept `--output=<file>`, and a hook runner executes repo code. With no human present to stop a prompt injection, the suite runs only in the interactive pass.
 
-Record it on the PR from a body file (`gh pr comment $PR -R "$OWNER_REPO" --body-file <file>`), under the identity that ran it (`gh api user --jq .login`). An unattended run (`--mode=triage`) tags its suite `/review-pr:unattended`, so the coverage line shows that no human was in the loop. The template below is the interactive form; triage writes `suite=/review-pr:unattended` in the marker:
+Record it on the PR from a body file (`gh pr comment $PR -R "$OWNER_REPO" --body-file <file>`), under the identity that ran it (`gh api user --jq .login`).:
 
 ```markdown
 <!-- cv-review-coverage: sha=<head SHA> reviewer=<login> suite=/review-pr -->
@@ -1444,9 +1443,9 @@ Suggest `--force` only if the removal refuses over build output the agent instal
 
 **Autonomous mode specifically does NOT:**
 
-- Merge any PR. The prep run + triage run produce *information* (a digest in the pinned issue) and *idempotent preparation* (Copilot review requests, `@dependabot rebase` comments, first-party coverage records). Every merge still requires the developer's interactive `/weekly-deps` session.
+- Merge any PR. The prep run + triage run produce *information* (a digest in the pinned issue) and *idempotent preparation* (Copilot review requests, `@dependabot rebase` comments). Every merge still requires the developer's interactive `/weekly-deps` session.
 - Create any new PRs, branches, or commits. The tech-stack-doc version refresh (Phase 6.2) and the attribution-file regeneration (Phase 6.3) of interactive mode are skipped entirely in autonomous mode — those are the developer's call to make.
-- Run the deep-review reconciliation (`$DEEP_REVIEW_SKILL`, default `/enhanced-pr-review`) on Tier C PRs. The triage run only does the lighter inline auto-dismiss + finding-surface; the heavyweight reconciliation stays interactive. The one subagent dispatch triage does run is the Phase 3.7.2 coverage pass (the `/review-pr` suite, dispatched directly and restricted to read-only reviewers), and only for a PR with zero coverage on its head SHA.
+- Run the deep-review reconciliation (`$DEEP_REVIEW_SKILL`, default `/enhanced-pr-review`) on Tier C PRs. The triage run only does the lighter inline auto-dismiss + finding-surface; the heavyweight reconciliation stays interactive. Neither does it run the Phase 3.7.2 first-party coverage suite: it prints coverage lines and nothing else (see **No unattended suite**).
 - Modify a repo's rules docs or `references/security-sensitive-packages.md` based on what it sees. Updates to those files always require a developer-driven PR.
 - Auto-create or auto-pin the routine's output issue. The digest issue (title from `.weekly_deps.digest_issue_title`) is a one-time manual setup (see `references/pinned-issue-digest.md`); the routine aborts cleanly if it doesn't exist.
 - Retry a failed routine step in the same invocation. If `gh api` fails to post the digest comment, the prep run logs to `/tmp/weekly-deps-digest-<week>.md` and exits non-zero so the cron's failure notification fires — the developer investigates and re-invokes manually.
