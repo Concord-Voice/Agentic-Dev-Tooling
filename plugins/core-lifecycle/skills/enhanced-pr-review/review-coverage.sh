@@ -8,8 +8,12 @@
 #     head SHA, by someone other than the PR author who is EITHER a human repo insider
 #     (author_association OWNER or MEMBER) OR an allowlisted review bot — a bot
 #     must be allowlisted even when it carries an insider association:
-#     copilot-pull-request-reviewer[bot] plus any login in the base branch's
-#     .claude/repo-config.json `.review_coverage.reviewer_bots`. Other bots do not count —
+#     copilot-pull-request-reviewer[bot] plus any login in the default branch's
+#     .claude/repo-config.json `.review_coverage.reviewer_bots`. A login on the default branch's
+#     `.bots[]` roster (exact `.login`, or a case-insensitive `.match` substring) is a bot here
+#     even when GitHub types it `User` (a machine-user account), so it needs the allowlist too.
+#     A review whose body is a refusal (Copilot's "wasn't able to review any files", or the
+#     roster entry's `decline_pattern` / `ack_pattern`) does not count. Other bots do not count —
 #     a code-scanning bot's review is an alert, not a review — and neither does a drive-by
 #     account's review on a public repo. A COMMENTED review counts only when it has a body or
 #     at least one top-level inline comment: GitHub files every thread reply as its own empty
@@ -18,14 +22,17 @@
 #       <!-- cv-review-coverage: sha=<40-hex head SHA> reviewer=<login> suite=<skill> -->
 #     posted BY <login> (the reviewer's identity is the poster's GitHub identity) with
 #     author_association OWNER or MEMBER, and who is not the PR author — the
-#     same trust rule as reviews, so a bot poster must also be allowlisted.
+#     same trust rule as reviews, so a bot poster must also be allowlisted. An edited record
+#     (updated_at != created_at) does not count: an edit keeps the original poster's identity,
+#     and anyone with write access can edit anyone's comment.
 # author_association is GitHub's relationship field, not a permission check. COLLABORATOR is
 # left out because GitHub returns it for read and triage access too, the same rule as
 # check-review-dispositions.sh; MEMBER is any org member.
 # A review or record on an older SHA is reported as stale and does NOT count. Comments,
 # check-runs and verdict posts that name no SHA do not count either.
 #
-# The allowlist is read from the PR's BASE branch, never the working tree, so a PR cannot
+# The allowlist and roster are read from the repository's DEFAULT branch, never the working
+# tree or the PR's base ref (a writer can retarget a PR at a branch they made), so a PR cannot
 # widen its own allowlist. No repo-config.json there = Copilot only.
 #
 # Prints one line, e.g.
@@ -60,8 +67,8 @@ if [[ -n "${CV_COVERAGE_FIXTURE:-}" ]]; then
 else
   [[ -n "$repo" ]] || repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner) || unknown "cannot resolve repo"
   pr=$(gh api "repos/$repo/pulls/$PR") || unknown "cannot read PR #$PR"
-  base=$(printf '%s' "$pr" | jq -r '.base.ref // empty') || unknown "cannot read base ref"
-  [[ -n "$base" ]] || unknown "PR #$PR has no base ref"
+  base=$(printf '%s' "$pr" | jq -r '.base.repo.default_branch // empty') || unknown "cannot read the default branch"
+  [[ -n "$base" ]] || unknown "PR #$PR: no default branch in the PR's base repo"
   errf=$(mktemp) || unknown "cannot create a temp file"
   trap 'rm -f "$errf"' EXIT
   ref=$(jq -rn --arg b "$base" '$b | @uri')
@@ -69,11 +76,11 @@ else
     # Empty content (an empty file, or one over the API's 1 MB inline limit) is unreadable, not absent.
     config=$(printf '%s' "$cfg" | tr -d '\n' | base64 -d 2>/dev/null | jq -c . 2>/dev/null) \
       && [[ "$(jq -r type <<<"$config" 2>/dev/null)" == object ]] \
-      || unknown "base-branch repo-config.json is empty, too large or not a JSON object"
+      || unknown "default-branch repo-config.json is empty, too large or not a JSON object"
   elif grep -q "Not Found (HTTP 404)" "$errf"; then
     config='{}'
   else
-    unknown "cannot read base-branch repo-config.json"
+    unknown "cannot read default-branch repo-config.json"
   fi
   reviews=$(gh api --paginate --slurp "repos/$repo/pulls/$PR/reviews") || unknown "cannot read reviews"
   comments=$(gh api --paginate --slurp "repos/$repo/issues/$PR/comments") || unknown "cannot read comments"
@@ -88,18 +95,27 @@ out=$(printf '%s' "$data" | jq -r --arg n "$PR" --arg sfx "$suffix" '
   (.pr.head.sha // "") as $h | (.pr.user.login // "") as $author |
   (["copilot-pull-request-reviewer[bot]"] + [(.config.review_coverage.reviewer_bots // [])[] | strings]) as $bots |
   def insider: (.author_association // "") | IN("OWNER", "MEMBER");
+  [ (.config.bots // [])[]? | objects ] as $entries |
+  def entries_for($l): ($l | ascii_downcase) as $ll
+    | [ $entries[] | select(
+          any(.login? | (if type == "array" then .[] else . end) | strings | ascii_downcase; . == $ll)
+          or any(.match? | strings | ascii_downcase; . as $m | $m != "" and ($ll | contains($m)))) ];
   def trusted: (.user.login // "") as $l
     | $l != "" and $l != $author
-      and (if (.user.type // "") == "Bot" then ($bots | index($l)) != null else insider end);
+      and (if (.user.type // "") == "Bot" or (entries_for($l) | length) > 0
+           then ($bots | index($l)) != null else insider end);
+  def refusal: (.body // "") as $b
+    | ($b | test("(?i)(wasn.t|was not|unable to|could not|couldn.t) (able to )?review any files"))
+      or any(entries_for(.user.login // "")[] | (.decline_pattern?, .ack_pattern?) | strings; . as $p | $b | test($p));
   [ .review_comments[]? | select(.in_reply_to_id == null) | .pull_request_review_id ] as $roots |
   def substantive: .state != "COMMENTED" or ((.body // "") | test("\\S"))
     or (.id as $i | $i != null and any($roots[]; . == $i));
   if ((.reviews | type) != "array" or (.comments | type) != "array"
-      or ((.review_comments // []) | type) != "array") then "BADDATA"
+      or ((.review_comments // []) | type) != "array" or ((.config.bots // []) | type) != "array") then "BADDATA"
   elif ($h | test("^[0-9a-f]{40}$") | not) then "BADSHA" else
-  [ .reviews[]? | select(trusted and (.state | IN("APPROVED", "CHANGES_REQUESTED", "COMMENTED")) and substantive) ] as $trev
+  [ .reviews[]? | select(trusted and (.state | IN("APPROVED", "CHANGES_REQUESTED", "COMMENTED")) and substantive and (refusal | not)) ] as $trev
   | [ $trev[] | select(.commit_id == $h) | "\(.user.login) (\(.state))" ] as $rev
-  | [ .comments[]? | select(trusted)
+  | [ .comments[]? | select(trusted and (.updated_at // "") == (.created_at // ""))
       | .user.login as $u
       | (.body // "") | capture("(^|\n)<!-- cv-review-coverage: sha=(?<sha>[0-9a-f]{40}) reviewer=(?<who>[^ ]+) suite=(?<suite>[^ ]+) -->"; "g")
       | select(.who == $u) ] as $recs

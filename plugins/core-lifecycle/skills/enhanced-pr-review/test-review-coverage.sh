@@ -7,7 +7,7 @@ TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
 H=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   # head SHA
 O=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb   # older SHA
-PRJ="{\"head\":{\"sha\":\"$H\"},\"base\":{\"ref\":\"main\"},\"user\":{\"login\":\"dependabot[bot]\"}}"
+PRJ="{\"head\":{\"sha\":\"$H\"},\"base\":{\"ref\":\"main\",\"repo\":{\"default_branch\":\"main\"}},\"user\":{\"login\":\"dependabot[bot]\"}}"
 CP='copilot-pull-request-reviewer[bot]'
 NOCFG='{}'   # a variable, not "${7:-{\}}": bash 3.2 keeps the backslash
 
@@ -59,6 +59,18 @@ run "allowlisted bot's reply-only review no"       1 "[$(rev "$CP" "$H" COMMENTE
 run "empty COMMENTED with no comments no"          1 "[$(rev alice "$H" COMMENTED MEMBER User '' 9)]" '[]'
 run "empty COMMENTED with inline comment counts"   0 "[$(rev alice "$H" COMMENTED MEMBER User '' 9)]" '[]' "" "alice (COMMENTED)" "" '[{"pull_request_review_id":9,"in_reply_to_id":null}]'
 run "empty-body APPROVED review counts"            0 "[$(rev alice "$H" APPROVED MEMBER User '' 9)]" '[]'
+MU='{"bots":[{"name":"CI","login":["CI-Machine","ci-alt"]}]}'
+MUOK='{"bots":[{"name":"CI","login":"ci-machine"}],"review_coverage":{"reviewer_bots":["ci-machine"]}}'
+run "rostered machine user (type User) needs list" 1 "[$(rev ci-machine "$H" APPROVED MEMBER)]" '[]' "" "" "$MU"
+run "rostered machine user on allowlist counts"   0 "[$(rev ci-machine "$H" APPROVED MEMBER)]" '[]' "" "ci-machine (APPROVED)" "$MUOK"
+run "rostered machine user's record needs list"   1 '[]' "[$(rec ci-machine MEMBER "$H" ci-machine)]" "" "" "$MU"
+run "array-form roster login is matched"           1 "[$(rev ci-alt "$H" APPROVED OWNER)]" '[]' "" "" "$MU"
+run "non-array .bots roster is UNKNOWN"            2 "[$(rev alice "$H" APPROVED MEMBER)]" '[]' "" "" '{"bots":"ci-machine"}'
+run "match-only roster entry is a bot"             1 "[$(rev scanbot-ci "$H" APPROVED MEMBER)]" '[]' "" "" '{"bots":[{"match":"ScanBot","name":"Scan"}]}'
+run "Copilot could-not-review body does not count" 1 "[$(rev "$CP" "$H" COMMENTED NONE Bot "Copilot wasn't able to review any files in this pull request.")]" '[]'
+run "roster decline_pattern body does not count"   1 "[$(rev 'gitar-bot[bot]' "$H" COMMENTED NONE Bot 'Automatic reviews are paused')]" '[]' "" "" '{"bots":[{"login":"gitar-bot[bot]","decline_pattern":"(?i)reviews are paused"}],"review_coverage":{"reviewer_bots":["gitar-bot[bot]"]}}'
+run "edited record does not count"                1 '[]' "[$(rec mark MEMBER "$H" mark | sed 's/}$/,"created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-02T00:00:00Z"}/')]"
+run "unedited record with timestamps counts"       0 '[]' "[$(rec mark MEMBER "$H" mark | sed 's/}$/,"created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z"}/')]"
 run "COLLABORATOR review does not count"          1 "[$(rev alice "$H" APPROVED COLLABORATOR)]" '[]'
 run "COLLABORATOR record does not count"          1 '[]' "[$(rec mark COLLABORATOR "$H" mark)]"
 run "pending review does not count"                1 "[$(rev alice "$H" PENDING)]" '[]'
@@ -85,11 +97,18 @@ if [[ "$got" -eq 2 ]]; then echo "  ok   malformed repo argument is UNKNOWN (exi
 
 # Live path through a stub `gh`: multi-page --slurp reviews, empty comments, base config 404.
 mkdir -p "$TMP/bin"
+# PR 8 is retargeted at a branch "evil" whose config allowlists evil-bot; the default branch has none.
+PR8="{\"head\":{\"sha\":\"$H\"},\"base\":{\"ref\":\"evil\",\"repo\":{\"default_branch\":\"main\"}},\"user\":{\"login\":\"dependabot[bot]\"}}"
+EVILCFG=$(printf '%s' '{"review_coverage":{"reviewer_bots":["evil-bot[bot]"]}}' | base64 | tr -d '\n')
 cat > "$TMP/bin/gh" <<STUB
 #!/usr/bin/env bash
 case "\$*" in
   "repo view"*) echo o/r ;;
   *"repos/x/y/"*) echo "unexpected repo x/y" >&2; exit 1 ;;
+  *"contents/.claude/repo-config.json?ref=evil"*) echo "$EVILCFG" ;;
+  "api repos/o/r/pulls/8") echo '$PR8' ;;
+  *"pulls/8/reviews"*) echo '[[$(rev 'evil-bot[bot]' "$H" APPROVED NONE Bot)]]' ;;
+  *"issues/8/comments"*|*"pulls/8/comments"*) echo '[[]]' ;;
   *"contents/.claude/repo-config.json?ref=main"*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
   *"pulls/7/reviews"*) echo '[[{"user":{"login":"x","type":"User"},"author_association":"NONE","commit_id":"$O","state":"COMMENTED"}],[$(rev "$CP" "$H" COMMENTED NONE Bot)]]' ;;
   *"issues/7/comments"*) echo '[[]]' ;;
@@ -102,6 +121,8 @@ chmod +x "$TMP/bin/gh"
 out=$(PATH="$TMP/bin:$PATH" "$SCRIPT" 7 2>&1); got=$?
 case "$got:$out" in "0:#7 @aaaaaaa covered: $CP (COMMENTED)") echo "  ok   live path via stub gh (paginated, 404 config)"; pass=$((pass + 1)) ;;
   *) echo "  FAIL live path via stub gh: $got $out"; fail=$((fail + 1)) ;; esac
+out=$(PATH="$TMP/bin:$PATH" "$SCRIPT" 8 2>&1); got=$?
+if [[ "$got" -eq 1 ]]; then echo "  ok   allowlist comes from the default branch, not base"; pass=$((pass + 1)); else echo "  FAIL retargeted base widened the allowlist: $got $out"; fail=$((fail + 1)); fi
 # An explicit <owner/repo> wins over the cwd repo: x/y would fail, o/r succeeds.
 out=$(PATH="$TMP/bin:$PATH" "$SCRIPT" 7 o/r 2>&1); got=$?
 if [[ "$got" -eq 0 ]]; then echo "  ok   explicit repo argument is used"; pass=$((pass + 1)); else echo "  FAIL explicit repo argument: $got $out"; fail=$((fail + 1)); fi
