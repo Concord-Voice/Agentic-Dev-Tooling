@@ -182,4 +182,8 @@ mkdir -p "$TMP/migrations"; : > "$TMP/migrations/000001_init.up.sql"
 [[ "$(wrun "$TMP/migrations/000001_init.up.sql")" = "2" ]] || fail "migrations: Write over an existing migration must BLOCK"
 [[ "$(wrun "$TMP/migrations/000002_next.up.sql")" = "0" ]] || fail "migrations: Write of a new migration should allow"
 
+# Bot-PR review coverage: a review on an older SHA must never count.
+bash "$HERE/../plugins/core-lifecycle/skills/enhanced-pr-review/test-review-coverage.sh" \
+  || fail "review-coverage regression failed"
+
 echo "ALL PASS"
