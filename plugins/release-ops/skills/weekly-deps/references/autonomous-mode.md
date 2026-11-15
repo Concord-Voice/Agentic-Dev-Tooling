@@ -218,7 +218,7 @@ Per `pinned-issue-digest.md`, edit the prep-run comment in place:
 3. Add the "🤖 Copilot reconciliation" section with the auto-dismiss/surface table
 4. Replace the "🛡 Review coverage" lines with Step T4a's re-checked lines
 
-Keep all prep-run content intact. The triage run is additive, not replacing.
+Keep all other prep-run content intact. The triage run is additive, except that the coverage lines are replaced with Step T4a's re-checked lines rather than appended.
 
 ### Step T6: Exit
 
