@@ -878,7 +878,8 @@ A bot-authored PR can merge with nobody having reviewed it: Copilot does not rev
 ```bash
 COVERAGE="${COVERAGE_SCRIPT:-.claude/skills/enhanced-pr-review/review-coverage.sh}"   # plugin install: point at the plugin's copy
 for PR in $ALL_PRS; do   # ALL_PRS = every PR number from the Phase 1 queries, unioned (per repository in --org mode)
-  "$COVERAGE" "$PR" "$OWNER_REPO"   # exit 0 covered · 1 zero · 2 UNKNOWN
+  rc=0; "$COVERAGE" "$PR" "$OWNER_REPO" || rc=$?   # exit 0 covered · 1 zero · 2 UNKNOWN
+  [ "$rc" -le 1 ] || echo "#$PR coverage UNKNOWN"   # the script's reason is on stderr; never drop the PR's line
 done
 ```
 
@@ -888,9 +889,10 @@ Each run prints one line, which goes verbatim into the run output (the digest in
 #101 @1a2b3c4 covered: copilot-pull-request-reviewer[bot] (COMMENTED)
 #104 @5d6e7f8 ZERO coverage; stale: copilot-pull-request-reviewer[bot]@9a8b7c6
 #105 @0f1e2d3 covered: <login> (first-party /review-pr)
+#106 @4c5d6e7 covered: <login> (first-party /review-pr:unattended)
 ```
 
-Coverage is bound to the **current head SHA**. It is a submitted review whose `commit_id` is that SHA, by someone other than the PR author who is a human repo insider (`author_association` OWNER, MEMBER or COLLABORATOR) or an allowlisted review bot (a bot needs the allowlist even with an insider association), or a first-party coverage record carrying that SHA (see Step 3.7.2). The allowlist is Copilot plus `.review_coverage.reviewer_bots` from the base branch's repo config. A drive-by account's review does not count, and neither does a code-scanning bot's. A review on an older SHA is listed as `stale` and does not count. An `@dependabot rebase` (Phase 5) moves the head, so it resets coverage. A manually triggered review counts the same way: a re-requested Copilot review or a human review is recorded against its SHA by GitHub, and a first-party suite run by hand counts once its record names the head SHA and the reviewer. Exit 2 is UNKNOWN. Print the line as `#<n> coverage UNKNOWN` and never treat it as covered. If the script is not found at `$COVERAGE`, print `coverage UNKNOWN — review-coverage.sh not installed` for every PR.
+Coverage is bound to the **current head SHA**. It is a submitted review whose `commit_id` is that SHA, by someone other than the PR author who is a human repo insider (`author_association` OWNER or MEMBER; COLLABORATOR also covers read and triage access, so it does not count) or an allowlisted review bot (a bot needs the allowlist even with an insider association), or a first-party coverage record carrying that SHA (see Step 3.7.2). A `COMMENTED` review needs a body or a top-level inline comment, because GitHub files each thread reply as an empty `COMMENTED` review at the current head. The allowlist is Copilot plus `.review_coverage.reviewer_bots` from the base branch's repo config. A drive-by account's review does not count, and neither does a code-scanning bot's. A review on an older SHA is listed as `stale` and does not count. An `@dependabot rebase` (Phase 5) moves the head, so it resets coverage. A manually triggered review counts the same way: a re-requested Copilot review or a human review is recorded against its SHA by GitHub, and a first-party suite run by hand counts once its record names the head SHA and the reviewer. Exit 2 is UNKNOWN. Print the line as `#<n> coverage UNKNOWN` and never treat it as covered. If the script is not found at `$COVERAGE`, print `coverage UNKNOWN — review-coverage.sh not installed` for every PR.
 
 **Step 3.7.2 — Zero coverage on the head SHA: run and record the first-party suite.** "External reviewer" means any reviewer other than this routine. Give external reviewers their window first. When the first-party suite runs depends on the mode:
 
@@ -902,7 +904,7 @@ Coverage is bound to the **current head SHA**. It is a submitted review whose `c
 
 To run it: for a Tier C PR in interactive mode, Phase 4.C's `$DEEP_REVIEW_SKILL` pass *is* the first-party review. Do not run the suite twice. `/enhanced-pr-review` records its own pass (its Phase 1 Step 6, `suite=/enhanced-pr-review`). If no record for the head SHA exists after Phase 4.C (the developer declined that step, or the configured skill is not `/enhanced-pr-review`), post it here with `suite=$DEEP_REVIEW_SKILL`. In every other case, including Tier C in triage mode, run the `/review-pr` suite: the model cannot invoke the user-only `/review-pr` skill, so dispatch the specialist subagents directly (per `_shared/pr-review-agent-dispatch.md`, unioned with the repo's `.claude/repo-config.json` `.review_agents`), the same fallback as Phase 3.6. Post a record only after every dispatched reviewer returned a result. A suite that did not run leaves the PR at ZERO, and that is what gets reported.
 
-Record it on the PR from a body file (`gh pr comment $PR -R "$OWNER_REPO" --body-file <file>`), under the identity that ran it (`gh api user --jq .login`). An unattended run (`--mode=triage`) tags its suite `/review-pr:unattended`, so the coverage line shows that no human was in the loop:
+Record it on the PR from a body file (`gh pr comment $PR -R "$OWNER_REPO" --body-file <file>`), under the identity that ran it (`gh api user --jq .login`). An unattended run (`--mode=triage`) tags its suite `/review-pr:unattended`, so the coverage line shows that no human was in the loop. The template below is the interactive form; triage writes `suite=/review-pr:unattended` in the marker:
 
 ```markdown
 <!-- cv-review-coverage: sha=<head SHA> reviewer=<login> suite=/review-pr -->
