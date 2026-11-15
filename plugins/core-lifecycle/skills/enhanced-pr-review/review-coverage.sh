@@ -105,7 +105,8 @@ out=$(printf '%s' "$data" | jq -r --arg n "$PR" --arg sfx "$suffix" '
       and (if (.user.type // "") == "Bot" or (entries_for($l) | length) > 0
            then ($bots | index($l)) != null else insider end);
   def refusal: (.body // "") as $b
-    | ($b | test("(?i)(wasn.t|was not|unable to|could not|couldn.t) (able to )?review any files"))
+    | ((.user.login // "") == "copilot-pull-request-reviewer[bot]"   # Copilot's own boilerplate only
+       and ($b | test("(?i)(wasn.t|was not|unable to|could not|couldn.t) (able to )?review any files")))
       or any(entries_for(.user.login // "")[] | (.decline_pattern?, .ack_pattern?) | strings; . as $p | $b | test($p; "i"));   # case-insensitive, as dev-lifecycle matches them
   [ .review_comments[]? | select(.in_reply_to_id == null) | .pull_request_review_id ] as $roots |
   def substantive: .state != "COMMENTED" or ((.body // "") | test("\\S"))

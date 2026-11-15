@@ -68,6 +68,7 @@ run "array-form roster login is matched"           1 "[$(rev ci-alt "$H" APPROVE
 run "non-array .bots roster is UNKNOWN"            2 "[$(rev alice "$H" APPROVED MEMBER)]" '[]' "" "" '{"bots":"ci-machine"}'
 run "match-only roster entry is a bot"             1 "[$(rev scanbot-ci "$H" APPROVED MEMBER)]" '[]' "" "" '{"bots":[{"match":"ScanBot","name":"Scan"}]}'
 run "Copilot could-not-review body does not count" 1 "[$(rev "$CP" "$H" COMMENTED NONE Bot "Copilot wasn't able to review any files in this pull request.")]" '[]'
+run "human quoting Copilot's refusal still counts" 0 "[$(rev alice "$H" APPROVED MEMBER User "Copilot was not able to review any files, so I reviewed this manually. LGTM.")]" '[]' "" "alice (APPROVED)"
 run "roster decline_pattern body does not count"   1 "[$(rev 'gitar-bot[bot]' "$H" COMMENTED NONE Bot 'Automatic reviews are paused')]" '[]' "" "" '{"bots":[{"login":"gitar-bot[bot]","decline_pattern":"(?i)reviews are paused"}],"review_coverage":{"reviewer_bots":["gitar-bot[bot]"]}}'
 run "roster pattern matches case-insensitively"   1 "[$(rev 'gitar-bot[bot]' "$H" COMMENTED NONE Bot 'Automatic reviews are paused')]" '[]' "" "" '{"bots":[{"login":"gitar-bot[bot]","decline_pattern":"automatic reviews are paused"}],"review_coverage":{"reviewer_bots":["gitar-bot[bot]"]}}'
 run "edited record does not count"                1 '[]' "[$(rec mark MEMBER "$H" mark | sed 's/}$/,"created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-02T00:00:00Z"}/')]"
