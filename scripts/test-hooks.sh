@@ -8,12 +8,13 @@ HOOKS="$(cd "$HOOKS_DIR" 2>/dev/null && pwd)"
 [ -n "$HOOKS" ] && [ -d "$HOOKS" ] || { echo "FAIL: cannot resolve hooks dir ($HOOKS_DIR)" >&2; exit 1; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 # Run hooks with the interpreter their shebang names (bash 3.2 on macOS), not the PATH bash.
-HOOK_BASH=/bin/bash; [ -x "$HOOK_BASH" ] || HOOK_BASH=bash
+HOOK_BASH=/bin/bash; [[ -x "$HOOK_BASH" ]] || HOOK_BASH=bash
+fp_json() { local p=$1; jq -nc --arg p "$p" '{tool_input:{file_path:$p}}'; }   # file_path-only hook input
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/.claude"
 run() { # run <hook> <file_path> ; echoes "rc|stderr", uses CLAUDE_PROJECT_DIR=$TMP
   local hook="$1" fp="$2" err rc
-  err="$(printf '{"tool_input":{"file_path":"%s"}}' "$fp" | CLAUDE_PROJECT_DIR="$TMP" "$HOOK_BASH" "$HOOKS/$hook" 2>&1 >/dev/null)"; rc=$?
+  err="$(fp_json "$fp" | CLAUDE_PROJECT_DIR="$TMP" "$HOOK_BASH" "$HOOKS/$hook" 2>&1 >/dev/null)"; rc=$?
   printf '%s|%s' "$rc" "$err"
 }
 
@@ -40,7 +41,7 @@ out="$(run test-reminder.sh "$TMP/src/widget.go")"; echo "$out" | grep -q "DOCS-
 [ "$(run test-reminder.sh "$TMP/README.md")" = "0|" ] || fail "reminder: skip_ext md should be silent"
 
 # ---- destructive-commands: enforced in the hook, not only by a settings deny list ----
-dc() { printf '{"tool_input":{"command":"%s"}}' "$1" | "$HOOK_BASH" "$HOOKS/destructive-commands.sh" >/dev/null 2>&1; echo $?; }
+dc() { local cmd=$1; printf '{"tool_input":{"command":"%s"}}' "$cmd" | "$HOOK_BASH" "$HOOKS/destructive-commands.sh" >/dev/null 2>&1; echo $?; }
 for c in "git push --force origin main" "git push -f" "git reset --hard HEAD~1" "git clean -fd" "rm -rf build" "cd x && rm -r y" "git checkout -- ." \
          "git push origin +main" "git push origin b -fu" "git restore --staged --worktree ." "rm --recursive x" \
          "rm -f -r x" "git checkout -- ./" "git checkout HEAD -- ." "git restore ." "git clean --force" "find . | xargs rm -rf" "bash -c \\\"rm -rf build\\\"" "sh -c 'git reset --hard'" \
@@ -111,7 +112,8 @@ done
 # existing migration: ~, surrounding blanks, a path relative to the session cwd, a
 # newline that splits one path, and apply_patch markers the tool accepts.
 pam() { # pam <json> ; echoes the hook's exit code
-  printf '%s' "$1" | CLAUDE_PROJECT_DIR="$TMP" HOME="$(dirname "$TMP")" "$HOOK_BASH" "$HOOKS/protect-applied-migrations.sh" >/dev/null 2>&1
+  local input=$1
+  printf '%s' "$input" | CLAUDE_PROJECT_DIR="$TMP" HOME="$(dirname "$TMP")" "$HOOK_BASH" "$HOOKS/protect-applied-migrations.sh" >/dev/null 2>&1
   echo $?
 }
 # Write reaches the missing-suffix walk (an Edit with a missing parent already fails closed),
@@ -122,7 +124,7 @@ for seg in .. .; do
       || fail "protect-applied-migrations: Write with '$seg' in a missing path must fail closed ($p)"
   done
 done
-mkdir -p "$TMP/sub"
+mkdir -p "$TMP/sub"; : > "$TMP/sub/a.md"
 MIG="$TMP/migrations/000001_init.up.sql"
 # The Write runs are the real guard below; most Edit runs also fail closed on a missing parent.
 for tool in Edit Write; do
@@ -135,11 +137,16 @@ for tool in Edit Write; do
   [[ "$(pam "$(jq -nc --arg t "$tool" --arg c "$TMP/sub" '{tool_name:$t,cwd:$c,tool_input:{file_path:"../migrations/000001_init.up.sql"}}')")" = "2" ]] \
     || fail "protect-applied-migrations: $tool of a cwd-relative migration path must be blocked"
 done
-for hdr in "*** Add File: $MIG" " *** Update File: $MIG" "*** update file: $MIG" "*** Update File: $MIG"$'\r'; do
+for hdr in $'\v'"*** Update File: $MIG" "*** Add File: $MIG" " *** Update File: $MIG" "*** update file: $MIG" "*** Update File: $MIG"$'\r'; do
   [[ "$(pam "$(jq -nc --arg c "*** Begin Patch"$'\n'"$hdr"$'\n'"+x"$'\n'"*** End Patch" '{tool_name:"apply_patch",tool_input:{command:$c}}')")" = "2" ]] \
     || fail "protect-applied-migrations: apply_patch header must be caught ($(printf %q "$hdr"))"
 done
-# Legitimate creates still pass: a new migration, and a new file in new nested dirs.
+# Legitimate creates still pass: a new migration, a new file in new nested dirs, an
+# absolute path while the session cwd is gone, and apply_patch Move to into a new dir.
+[[ "$(pam "$(jq -nc --arg p "$TMP/docs/abs.md" --arg c "$TMP/gone" '{tool_name:"Write",cwd:$c,tool_input:{file_path:$p}}')")" = "0" ]] \
+  || fail "protect-applied-migrations: absolute Write must not need the session cwd"
+[[ "$(pam "$(jq -nc --arg c "*** Begin Patch"$'\n'"*** Update File: $TMP/sub/a.md"$'\n'"*** Move to: $TMP/newdir/b.md"$'\n'"*** End Patch" '{tool_name:"apply_patch",tool_input:{command:$c}}')")" = "0" ]] \
+  || fail "protect-applied-migrations: apply_patch Move to into a new directory must be allowed"
 [[ "$(pam "$(jq -nc --arg p "$TMP/migrations/000002_next.up.sql" '{tool_name:"Write",tool_input:{file_path:$p}}')")" = "0" ]] \
   || fail "protect-applied-migrations: Write of a new migration must be allowed"
 [[ "$(pam "$(jq -nc --arg p "$TMP/docs/new/a.md" '{tool_name:"Write",tool_input:{file_path:$p}}')")" = "0" ]] \
@@ -163,24 +170,24 @@ GTMP="$(mktemp -d)"
 { "hooks": { "protected_patterns": ["/auth/"] } }
 JSON
   # (a) Without a marker, a protected file is BLOCKED.
-  rc=0; printf '{"tool_input":{"file_path":"%s"}}' "$GTMP/services/auth/login.go" | CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" >/dev/null 2>&1 || rc=$?
+  rc=0; fp_json "$GTMP/services/auth/login.go" | CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" >/dev/null 2>&1 || rc=$?
   [ "$rc" = "2" ] || exit 31
   # (b) With a valid marker entry (repo-relative path), the same file is ALLOWED,
   #     and the bypass log names the marker FILE (auditability — Alpha's test asserts this).
   echo "services/auth/login.go" > ".claude/state/hook-bypass/feature__test.txt"
-  err="$(printf '{"tool_input":{"file_path":"%s"}}' "$GTMP/services/auth/login.go" | CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" 2>&1 >/dev/null)"; rc=$?
+  err="$(fp_json "$GTMP/services/auth/login.go" | CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" 2>&1 >/dev/null)"; rc=$?
   [ "$rc" = "0" ] || exit 32
   echo "$err" | grep -q "feature__test.txt" || exit 35
   # (c) A symlinked marker is IGNORED → file BLOCKED again.
   rm ".claude/state/hook-bypass/feature__test.txt"
   echo "services/auth/login.go" > ".claude/state/hook-bypass/real.txt"
   ln -s real.txt ".claude/state/hook-bypass/feature__test.txt"
-  rc=0; printf '{"tool_input":{"file_path":"%s"}}' "$GTMP/services/auth/login.go" | CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" >/dev/null 2>&1 || rc=$?
+  rc=0; fp_json "$GTMP/services/auth/login.go" | CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" >/dev/null 2>&1 || rc=$?
   [ "$rc" = "2" ] || exit 33
   # (d) A '..' traversal entry is rejected → file BLOCKED.
   rm -f ".claude/state/hook-bypass/feature__test.txt"
   echo "../../../etc/passwd" > ".claude/state/hook-bypass/feature__test.txt"
-  rc=0; printf '{"tool_input":{"file_path":"%s"}}' "$GTMP/services/auth/login.go" | CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" >/dev/null 2>&1 || rc=$?
+  rc=0; fp_json "$GTMP/services/auth/login.go" | CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" >/dev/null 2>&1 || rc=$?
   [ "$rc" = "2" ] || exit 34
 )
 mrc=$?; rm -rf "$GTMP"
