@@ -96,6 +96,13 @@ mkdir -p "$TMP/migrations"
 out="$(run protect-applied-migrations.sh "$TMP/migrations/000001_init.up.sql")"
 [ "${out%%|*}" = "2" ] || fail "protect-applied-migrations: should BLOCK an existing migration file (got $out)"
 echo "$out" | grep -q "BLOCKED" || fail "protect-applied-migrations: missing BLOCKED message"
+# A `..` or `.` segment inside the missing part of a path fails closed: a later mkdir
+# could make the path reach an existing migration.
+for seg in .. .; do
+  out="$(run protect-applied-migrations.sh "$TMP/migrations/not-yet/$seg/000001_init.up.sql")"
+  [ "${out%%|*}" = "2" ] || fail "protect-applied-migrations: '$seg' in a missing suffix must fail closed (got $out)"
+  echo "$out" | grep -q "Failed to resolve" || fail "protect-applied-migrations: '$seg' refusal message missing (got $out)"
+done
 rm -rf "$TMP/migrations"
 
 # ---- I1: invalid regex in protected_patterns fails CLOSED ----
