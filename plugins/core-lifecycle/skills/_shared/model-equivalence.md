@@ -23,16 +23,13 @@ column you actually need:
 
 | Claude pin | Capability equivalence | Codex agent model (authoritative for translation) |
 |---|---|---|
-| Mythos 5.1 | None in the GPT-6 catalog | *None* — Claude-only; no Codex profile is generated |
-| Fable 5 | GPT-6 **Astra** | `gpt-6-astra` |
-| Opus 5 | GPT-6 **Astra** | `gpt-6-astra` |
-| Sonnet 5 | GPT-6.1 **Sol** | `gpt-6.1-sol` |
-| Haiku 4.5 | GPT-5.5 | `gpt-6-luna` — **upgrade** |
+| Mythos | None | *None* — Claude-only; no Codex profile is generated |
+| Fable | Astra | `gpt-6-astra`* |
+| Opus | Sol | `gpt-6.1-sol`* |
+| Sonnet | Terra | `gpt-6.1-terra`* |
+| Haiku | Luna | `gpt-6-luna`* |
 
-**Haiku is the row where the columns diverge, deliberately.** GPT-5.5 is the honest capability
-equivalence, but it is not a member of the GPT-6 agent-profile family, so there is no Codex
-agent model at Haiku's class to translate *into* — a `haiku`-pinned agent upgrades to
-`gpt-6-luna` rather than falling back to whatever a translator's default happens to be.
+`*` - Denotes that this is the formal API pin as of writing, but the actual pin may differ for a later/newer version. Unless a specific version is called out or pinned in a `SKILL.md` or `AGENT.md` file, always find the latest version of `gpt-<VERSION>-<MODEL>`. 
 
 ### Codex-only role overrides
 
@@ -59,18 +56,12 @@ a ceiling. Values in the Codex column are the literal `model_reasoning_effort` w
 
 | Claude | OpenAI / Codex | Notes |
 |---|---|---|
-| *ultracode* | `ultra` | Not an `effort` value — a session posture (above-max reasoning + automated multi-agent parallelization). Governs orchestration breadth, not one agent's depth. **Never emitted into an agent profile**, and the model catalog does not offer it for `gpt-6-luna` at all |
-| `max` | `xhigh` | Codex `max` is deliberately skipped; ultracode owns the rung above `xhigh` |
-| `xhigh` | `high` | |
-| `high` | `medium` | |
-| `medium` | `low` | |
-| `low` | `low` | Collapses with `medium`. `low` is the Codex floor — there is **no** rung beneath it |
-
-**There is no Codex "Light".** An earlier revision of this table mapped `low` → Light; that
-value appears in no model's `supported_reasoning_levels` and is not accepted in
-`config.toml`. The floor is `low`. The verified Codex ladder is
-`low < medium < high < xhigh < max < ultra`. In the GPT-6 family, `ultra` is available on
-`gpt-6-astra` and `gpt-6-sol`, but not `gpt-6-luna`.
+| *ultracode* | `ultra` | Ultracode is no longer an `effort` value, it is a session posture. Codex still features it as an effort level that is for above-max reasoning + automated multi-agent parallelization. As such, this should govern orchestration breadth, not one agent's depth. **Never emitted into an agent profile**. The skill `/dev-lifecycle` recommends `Ultracode` to be toggled *on* when `Dynamic` or `Subagent-Driven` mode are selected during initialization. |
+| `max` | `max` | Codex now emits a `Max` effort setting just below `Ultra` |
+| `xhigh` | `xhigh` | |
+| `high` | `high` | |
+| `medium` | `medium` | |
+| `low` | `low` | UI calls this `Light` effort |
 
 **Governance:** adding or changing a row requires Repo Admin approval — same governance as
 dispatch-catalog entries and labels (file an issue titled `Catalog proposal: model-equivalence
