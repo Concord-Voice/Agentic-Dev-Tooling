@@ -80,14 +80,14 @@ check_one() { # check_one <category> <manifest-entry> <suffix> — caller guaran
   name="$(basename "$entry")$suf"
   dst="$REPO/.claude/$cat/$name"
   # A symlink never loads, protected or not, so it is drift before it can be an overlay.
-  if [ -L "$dst" ]; then echo "DRIFT symlink (Claude Code won't load it — must be a real copy): .claude/$cat/$name"; drift=1; return 0; fi
+  if [[ -L "$dst" ]]; then echo "DRIFT symlink (Claude Code won't load it — must be a real copy): .claude/$cat/$name"; drift=1; return 0; fi
   if is_protected ".claude/$cat/$name"; then
     overlays=$((overlays + 1))
-    if [ -e "$dst" ]; then echo "OVERLAY protected by .claude/agentic-protected-paths.json (not compared): .claude/$cat/$name"
+    if [[ -e "$dst" ]]; then echo "OVERLAY protected by .claude/agentic-protected-paths.json (not compared): .claude/$cat/$name"
     else echo "OVERLAY protected by .claude/agentic-protected-paths.json (not carried): .claude/$cat/$name"; fi
     return 0
   fi
-  if [ ! -e "$dst" ]; then echo "DRIFT missing in consumer: .claude/$cat/$name"; drift=1; return 0; fi
+  if [[ ! -e "$dst" ]]; then echo "DRIFT missing in consumer: .claude/$cat/$name"; drift=1; return 0; fi
   if ! diff -rq "$src" "$dst" >/dev/null 2>&1; then echo "DRIFT differs from Master (run sync-shared.sh): .claude/$cat/$name"; drift=1; fi
 }
 
@@ -96,14 +96,14 @@ check_one() { # check_one <category> <manifest-entry> <suffix> — caller guaran
 # Flag the symlinked category once and skip its per-item checks.
 check_category() { # check_category <category> <manifest-array> <suffix>
   local cat="$1" arr="$2" suf="$3"
-  if [ -L "$REPO/.claude/$cat" ]; then
+  if [[ -L "$REPO/.claude/$cat" ]]; then
     echo "DRIFT category dir is a symlink (Claude Code won't load it): .claude/$cat"; drift=1; return 0
   fi
-  while IFS= read -r n; do [ -n "$n" ] && check_one "$cat" "$n" "$suf"; done < <(jq -r ".${arr}[]?" "$MANIFEST")
+  while IFS= read -r n; do [[ -n "$n" ]] && check_one "$cat" "$n" "$suf"; done < <(jq -r ".${arr}[]?" "$MANIFEST")
 }
 
 check_category skills shared_skills ""
 check_category agents shared_agents ".md"
 
-[ "$drift" -eq 0 ] && echo "OK: all shared skills/agents in $REPO match the Master (real copies), $overlays recorded overlay(s)"
+[[ "$drift" -eq 0 ]] && echo "OK: all shared skills/agents in $REPO match the Master (real copies), $overlays recorded overlay(s)"
 exit "$drift"
