@@ -102,6 +102,8 @@ for seg in .. .; do
   out="$(run protect-applied-migrations.sh "$TMP/migrations/not-yet/$seg/000001_init.up.sql")"
   [[ "${out%%|*}" = "2" ]] || fail "protect-applied-migrations: '$seg' in a missing suffix must fail closed (got $out)"
   echo "$out" | grep -q "Failed to resolve" || fail "protect-applied-migrations: '$seg' refusal message missing (got $out)"
+  out="$(run protect-applied-migrations.sh "$TMP/migrations/not-yet/$seg")"
+  [[ "${out%%|*}" = "2" ]] || fail "protect-applied-migrations: final '$seg' of a missing path must fail closed (got $out)"
 done
 rm -rf "$TMP/migrations"
 
