@@ -2,7 +2,7 @@
 
 Translation tables for generating a non-Claude runner's agent profiles from this repo's
 Claude-native agent pins. Canonical source: Agentic-Dev-Tooling
-`plugins/core-lifecycle/skills/_shared/`. Edit HERE, never in a consumer copy.
+`plugins/core-lifecycle/skills/_shared/`. Edit it there, never in a consumer copy.
 
 **This file never classifies the running orchestrator.** `/dev-lifecycle` has no model gate
 (see its § No model gate): it never reads a model ID, and its defaults are the same on every
@@ -79,8 +79,9 @@ speculative per-vendor prose.
 
 ## GitHub Copilot (including Copilot Fusion)
 
-There is no Copilot column yet: this repo does not generate Copilot custom agents (see
-`CAPABILITIES.md`). Two facts constrain the column when it is added:
+There is no Copilot column yet: Agentic-Dev-Tooling does not generate Copilot custom agents (see
+its `CAPABILITIES.md`; consumer repositories receive this file without it). Two facts constrain
+the column when it is added:
 
 - **Fusion has no fixed model.** It picks a model per prompt, and the running conversation
   cannot read which one. Nothing may depend on the orchestrator's model.
