@@ -105,6 +105,33 @@ for seg in .. .; do
   out="$(run protect-applied-migrations.sh "$TMP/migrations/not-yet/$seg")"
   [[ "${out%%|*}" = "2" ]] || fail "protect-applied-migrations: final '$seg' of a missing path must fail closed (got $out)"
 done
+# Spellings the editing tool resolves differently from the hook must not reach an
+# existing migration: ~, surrounding blanks, a path relative to the session cwd, a
+# newline that splits one path, and apply_patch markers the tool accepts.
+pam() { # pam <json> ; echoes the hook's exit code
+  printf '%s' "$1" | CLAUDE_PROJECT_DIR="$TMP" HOME="$(dirname "$TMP")" bash "$HOOKS/protect-applied-migrations.sh" >/dev/null 2>&1
+  echo $?
+}
+mkdir -p "$TMP/sub"
+MIG="$TMP/migrations/000001_init.up.sql"
+for tool in Edit Write; do
+  # shellcheck disable=SC2088 # the literal ~ is the input under test
+  for p in "~/$(basename "$TMP")/migrations/000001_init.up.sql" " $MIG" "$MIG " "$TMP/migrations/"$'\n'"/../000001_init.up.sql"; do
+    [[ "$(pam "$(jq -nc --arg t "$tool" --arg p "$p" '{tool_name:$t,tool_input:{file_path:$p}}')")" = "2" ]] \
+      || fail "protect-applied-migrations: $tool of a respelled migration path must fail closed ($(printf %q "$p"))"
+  done
+  [[ "$(pam "$(jq -nc --arg t "$tool" --arg c "$TMP/sub" '{tool_name:$t,cwd:$c,tool_input:{file_path:"../migrations/000001_init.up.sql"}}')")" = "2" ]] \
+    || fail "protect-applied-migrations: $tool of a cwd-relative migration path must be blocked"
+done
+for hdr in "*** Add File: $MIG" " *** Update File: $MIG" "*** update file: $MIG" "*** Update File: $MIG"$'\r'; do
+  [[ "$(pam "$(jq -nc --arg c "*** Begin Patch"$'\n'"$hdr"$'\n'"+x"$'\n'"*** End Patch" '{tool_name:"apply_patch",tool_input:{command:$c}}')")" = "2" ]] \
+    || fail "protect-applied-migrations: apply_patch header must be caught ($(printf %q "$hdr"))"
+done
+# Legitimate creates still pass: a new migration, and a new file in new nested dirs.
+[[ "$(pam "$(jq -nc --arg p "$TMP/migrations/000002_next.up.sql" '{tool_name:"Write",tool_input:{file_path:$p}}')")" = "0" ]] \
+  || fail "protect-applied-migrations: Write of a new migration must be allowed"
+[[ "$(pam "$(jq -nc --arg p "$TMP/docs/new/a.md" '{tool_name:"Write",tool_input:{file_path:$p}}')")" = "0" ]] \
+  || fail "protect-applied-migrations: Write into new nested directories must be allowed"
 rm -rf "$TMP/migrations"
 
 # ---- I1: invalid regex in protected_patterns fails CLOSED ----
