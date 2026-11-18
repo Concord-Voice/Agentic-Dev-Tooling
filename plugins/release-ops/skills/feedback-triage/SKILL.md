@@ -228,23 +228,29 @@ For each **surviving, non-human-touched** issue that represents real work and wh
    PUB_URL="https://github.com/$PUBLIC_CLEAN/issues/$N"
    HITS=""
    EPIC_HITS=""
+   SEARCH_OK=1
    while IFS= read -r repo; do
      [ -z "$repo" ] && continue
+     # Capture each search explicitly: a failed search must never read as "zero hits".
+     if ! rows=$(gh search issues --repo "$repo" "\"$PUB_URL\"" --json number,body,labels \
+         | jq -r --arg repo "$repo" --arg pub_url "$PUB_URL" \
+             '.[] | select((.body // "") | contains($pub_url)) | ["\($repo)#\(.number)", ((.labels // [] | map(.name) | index("type: epic")) != null)] | @tsv'); then
+       SEARCH_OK=0
+       break
+     fi
      while IFS=$'\t' read -r ref is_epic; do
        [ -z "$ref" ] && continue
        HITS="${HITS}${HITS:+$'\n'}${ref}"
        [ "$is_epic" = "true" ] && EPIC_HITS="${EPIC_HITS}${EPIC_HITS:+$'\n'}${ref}"
-     done < <(
-       gh search issues --repo "$repo" "\"$PUB_URL\"" --json number,body,labels \
-         | jq -r --arg repo "$repo" --arg pub_url "$PUB_URL" \
-             '.[] | select((.body // "") | contains($pub_url)) | ["\($repo)#\(.number)", ((.labels // [] | map(.name) | index("type: epic")) != null)] | @tsv'
-     )
+     done <<< "$rows"
    done <<< "$CANDIDATE_TRACKERS"
    ```
-   Resolve confirmed hits strictly:
+   Resolve confirmed hits strictly (run with `set -o pipefail` so a `gh` failure fails the pipeline):
+   - **`SEARCH_OK=0`** (any candidate search failed) ⇒ do **not** create; defer the item to the next run and log it to the Phase 7 digest. An unsearched repo is not proof of absence.
    - **Zero** hits ⇒ create in `$TARGET_REPO`.
-   - **Exactly one** hit in `HITS` ⇒ reuse that `owner/repo#N`; skip creation; jump to recording the ref.
-   - **Multiple** hits (for example, a parent epic plus child issues referencing `$PUB_URL`): if `EPIC_HITS` has **exactly one** line, reuse that `type: epic` parent ref; if `EPIC_HITS` has **zero or more than one** match, do **not** create or guess — log an ambiguity conflict to the Phase 7 digest for human resolution.
+   - **Exactly one** hit in `HITS` ⇒ reuse that ref; skip creation; jump to recording the ref.
+   - **Multiple** hits (for example, a parent epic plus child issues referencing `$PUB_URL`): if `EPIC_HITS` has **exactly one** line, reuse that `type: epic` parent ref (after the reconciliation below); if `EPIC_HITS` has **zero or more than one** match, do **not** create or guess — log an ambiguity conflict to the Phase 7 digest for human resolution.
+   - **Reusing a parent epic** (from either branch above) ⇒ first **reconcile** it: list its sub-issues (`gh api "repos/$EPIC_REPO/issues/$EPIC_NUM/sub_issues"`), create any missing child tasking issue per step 3, and link any unlinked child. Record `alpha` **only after** every required child exists and is linked; if reconciliation fails or the required child set is unclear, leave `alpha` unset (so the next run retries Phase 4) and log it to the Phase 7 digest. Recording `alpha` early would exclude the item from Phase 4 forever and leave the breakdown incomplete.
    The marker's `alpha:` field stays the primary record; this search is only the crash-recovery fallback.
 3. **Dispatch `/issue-creation`** in `$TARGET_REPO` with a tracking-request payload (target repo, topic, kind→labels, the public body, `reports=N` as the demand signal, and the public URL as a `Refs` back-reference). If the fix spans **multiple repositories**, create the **epic-style parent** (`type: epic`) in `$TARGET_REPO` (the main repo owning the fix, carrying `Refs https://github.com/$PUBLIC_CLEAN/issues/$N`), create child tasking issues in each sibling repo that owns an individual tasking (referencing the parent `owner/repo#PARENT_NUM` rather than repeating bare `Refs $PUB_URL`), and link every cross-repo child via GitHub's native sub-issues API (`POST repos/{owner}/{repo}/issues/{parent_num}/sub_issues` with `sub_issue_id`, without `replace_parent=true`). The dispatch contract — including how `/issue-creation`'s human checkpoints are answered in auto mode, routing rules, label/domain/release mapping, and demand-signal→Priority mapping — lives in [`references/alpha-sync.md`](references/alpha-sync.md). Created tracking issues land at board **Status = Triage/Backlog**, never `Ready`: a human still vets scope before work starts.
 4. Capture the full new (or reused) `<owner/repo>#NNN` ref (the parent epic when multi-repo) and its **`release:` label** (the shipping stream) → the **release window** (`v0.2.0-Beta`, `v1.0.0`, … or `a future release`). The window derives from the ship stream, NOT the milestone (a complete-by deadline). Derivation in [`references/alpha-sync.md`](references/alpha-sync.md).
@@ -253,7 +259,7 @@ For each **surviving, non-human-touched** issue that represents real work and wh
 
 ## Phase 5 — Back-annotate the public issue with tracking status (mode-gated)
 
-Update the survivor's **managed status comment** so a public reader sees it's tracked. Keep the canonical `owner/repo#NNN` ref (or legacy `repo#NNN` / `#NNN`) inside the HTML marker's `alpha:` field for Phase 6 resolution, while rendering the **visible** `alpha_display` token per disclosure policy (strip the `owner/` prefix as `repo#NNN`, or use an opaque `internal#NNN` placeholder when private repository names are withheld; full schema in [`references/markers-and-templates.md`](references/markers-and-templates.md)):
+Update the survivor's **managed status comment** so a public reader sees it's tracked. The HTML marker is **not private**: anyone can read a comment's raw body. So never write an `owner/` slug into it. Write the marker's `alpha:` field as `repo#NNN` when repository names may be shown, or as the opaque `internal#NNN` when private repository names are withheld; Phase 6 resolves both against `$CANDIDATE_TRACKERS`. The **visible** `alpha_display` token uses the same value (full schema in [`references/markers-and-templates.md`](references/markers-and-templates.md)):
 
 ```
 📌 Tracked internally as example-repo-private#NNN — tracked for an upcoming Beta update.
@@ -265,12 +271,12 @@ Update the survivor's **managed status comment** so a public reader sees it's tr
 
 ## Phase 6 — Reverse sync: shipped fix → close/annotate public (mode-gated)
 
-For every public issue whose marker carries an `alpha:` ref, parse `ALPHA_REPO` and `ALPHA_NUM` strictly across all three supported forms before querying GitHub:
+For every public issue whose marker carries an `alpha:` ref, parse `ALPHA_REPO` and `ALPHA_NUM` strictly across every supported form (`repo#N`, `internal#N`, and legacy `owner/repo#N`, `#N`, bare `N`) before querying GitHub. `internal#N` is resolved by finding the one candidate tracker whose issue `N` carries the public issue's `Refs` back-reference (`$5` is that public issue number):
 
 ```bash
 resolve_alpha_ref() {
-  local raw="$1" tracker="$2" candidates="$3" pub="$4"
-  local pub_norm repo_part num matches
+  local raw="$1" tracker="$2" candidates="$3" pub="$4" pub_num="${5:-}"
+  local pub_norm repo_part num matches repo body
   pub_norm=$(printf '%s' "${pub%.git}" | tr '[:upper:]' '[:lower:]')
   case "$raw" in
     */*\#*)
@@ -281,7 +287,24 @@ resolve_alpha_ref() {
       ALPHA_REPO="$repo_part"
       ALPHA_NUM="$num"
       ;;
-    \#*|[0-9]*)
+    internal\#*)
+      num="${raw#internal#}"
+      [[ "$num" =~ ^[0-9]+$ && "$pub_num" =~ ^[0-9]+$ ]] || return 1
+      matches=""
+      while IFS= read -r repo; do
+        [ -z "$repo" ] && continue
+        # Any gh failure counts as "not here"; zero or several matches fail closed below.
+        if body=$(gh issue view "$num" --repo "$repo" --json body --jq '.body // ""' 2>/dev/null); then
+          case "$body" in
+            *"https://github.com/${pub%.git}/issues/$pub_num"*) matches="${matches}${matches:+$'\n'}${repo}" ;;
+          esac
+        fi
+      done <<< "$candidates"
+      [ "$(printf '%s\n' "$matches" | awk 'NF{c++} END{print c+0}')" = 1 ] || return 1
+      ALPHA_REPO="$matches"
+      ALPHA_NUM="$num"
+      ;;
+    \#*)
       num="${raw#\#}"
       [[ "$num" =~ ^[0-9]+$ ]] || return 1
       ALPHA_REPO="${tracker%.git}"
@@ -301,6 +324,12 @@ resolve_alpha_ref() {
       esac
       ALPHA_NUM="$num"
       ;;
+    [0-9]*)
+      # Bare number. Matched after repo#N so a digit-leading repo name (3d-client#89) parses as repo#N.
+      [[ "$raw" =~ ^[0-9]+$ ]] || return 1
+      ALPHA_REPO="${tracker%.git}"
+      ALPHA_NUM="$raw"
+      ;;
     *)
       return 1
       ;;
@@ -310,7 +339,7 @@ resolve_alpha_ref() {
 }
 ```
 
-If `resolve_alpha_ref` fails (malformed marker or ambiguous `repo#N` basename across orgs), emit a `digest:` error and skip closing the public issue. When reading the tracker's state, if `ALPHA_REPO#ALPHA_NUM` is a parent / `type: epic` issue, inspect its children via `gh api "repos/$ALPHA_REPO/issues/$ALPHA_NUM/sub_issues"` — a parent epic ships **only** when both the parent AND **every** child sub-issue are closed with `state_reason == "completed"` (or explicitly split out); open or `not_planned` children keep the public issue `in-progress` and emit a `digest:` warning. Post **only on a transition** (full state machine in [`references/idempotency.md`](references/idempotency.md)):
+Call it as `resolve_alpha_ref "$ALPHA_RAW" "$TRACKER" "$CANDIDATE_TRACKERS" "$PUBLIC_CLEAN" "$N"`. If `resolve_alpha_ref` fails (malformed marker, ambiguous `repo#N` basename across orgs, or an `internal#N` that matches zero or several candidate trackers), emit a `digest:` error and skip closing the public issue. When reading the tracker's state, if `ALPHA_REPO#ALPHA_NUM` is a parent / `type: epic` issue, inspect its children via `gh api "repos/$ALPHA_REPO/issues/$ALPHA_NUM/sub_issues"` — a parent epic ships **only** when both the parent AND **every** child sub-issue are closed with `state_reason == "completed"` (or explicitly split out); open or `not_planned` children keep the public issue `in-progress` and emit a `digest:` warning. Post **only on a transition** (full state machine in [`references/idempotency.md`](references/idempotency.md)):
 
 | Tracker state | Public action | Marker → |
 |---|---|---|

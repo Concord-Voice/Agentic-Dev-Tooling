@@ -15,7 +15,7 @@ When `.claude/repo-config.json` defines `.feedback_triage.routing` (`surface -> 
     echo "digest: failed to link $SIBLING_REPO#$CHILD_NUM under $PARENT_REPO#$PARENT_NUM (check for existing parent or permissions)"
   fi
   ```
-  Record the parent epic's `owner/repo#NNN` ref in the public `alpha:` field, and include `Refs https://github.com/$PUBLIC/issues/<N>` on the parent epic only. Child sub-issues reference the parent (`Parent: $PARENT_REPO#$PARENT_NUM`) rather than repeating the bare public `Refs` URL so crash-recovery searches remain unambiguous (and never use cross-repo `Closes`).
+  Record the parent epic's ref in the public `alpha:` field as `repo#NNN` (or `internal#NNN` when private repo names are withheld; never `owner/`), only after its children are reconciled (SKILL.md Phase 4 step 2), and include `Refs https://github.com/$PUBLIC/issues/<N>` on the parent epic only. Child sub-issues reference the parent (`Parent: $PARENT_REPO#$PARENT_NUM`) rather than repeating the bare public `Refs` URL so crash-recovery searches remain unambiguous (and never use cross-repo `Closes`).
 
 ## Dispatch contract
 
@@ -36,7 +36,7 @@ Dispatch `/issue-creation` (it is model-invocable — no `disable-model-invocati
 
 | Checkpoint | Auto-mode answer |
 |---|---|
-| Adjacency (Phase 1) | If a **strong duplicate** exists in `$CANDIDATE_TRACKERS` → do NOT create; cross-reference it and record its `owner/repo#N` as `alpha`. If a **strong parent-epic** fit → create as sub-issue (same-repo or cross-repo via `/sub_issues`). Otherwise → standalone (or parent epic if multi-repo). |
+| Adjacency (Phase 1) | If a **strong duplicate** exists in `$CANDIDATE_TRACKERS` → do NOT create; cross-reference it and record it as `alpha` (`repo#N` or `internal#N`, never `owner/`). If a **strong parent-epic** fit → create as sub-issue (same-repo or cross-repo via `/sub_issues`). Otherwise → standalone (or parent epic if multi-repo). |
 | Scope (Phase 2) | **Single issue** for single-repo feedback (one report = one landable change). If work genuinely spans multiple repos → **epic-style parent** (`type: epic`) in the main repo owning the fix + child sub-issues in sibling owning repos. If single-repo work looks oversized, create the issue and flag `needs-scoping` in the digest. |
 | Relationships (Phase 5) | Accept the auto-detected links. |
 | Preview (Phase 6) | Auto-accept. |

@@ -22,7 +22,7 @@ _Consolidated reports: #18, #27. Last updated by automated triage on 2026-06-20.
 schema: 1
 reports: 3
 consolidated: 18,27
-alpha: example-org/example-repo-private#1234
+alpha: example-repo-private#1234
 state: tracked
 release: v0.2.0-Beta
 fixed_in:
@@ -37,7 +37,7 @@ last_synced: 2026-06-20
 | `schema` | marker version, for future migration | `1` |
 | `reports` | total user reports folded into this survivor (Σ of members) | `3` |
 | `consolidated` | comma-list of dupe issue numbers closed into this one | `18,27` |
-| `alpha` | canonical tracker issue (`owner/repo#N`, or legacy `repo#N` / `#N`; empty until Phase 4) | `example-org/example-repo-private#1234` |
+| `alpha` | tracker issue as `repo#N`, or opaque `internal#N` when private repo names are withheld; never an `owner/` slug (legacy `owner/repo#N` / `#N` are still read); empty until Phase 4 | `example-repo-private#1234` |
 | `state` | `untriaged \| tracked \| in-progress \| fixed \| declined` | `tracked` |
 | `release` | release window string, or `future` | `v0.2.0-Beta` |
 | `fixed_in` | version the fix shipped in (only when `state: fixed`) | `v0.2.1` |
@@ -138,13 +138,14 @@ Apply `release_display` at **every** user-facing render of `release`: the Known 
 
 ## Public tracker-ref display (`alpha_display`)
 
-The marker's `alpha` field stores the canonical cross-repo ref (`owner/repo#N`, or legacy `repo#N` / `#N`) so Phase 6 resolution stays unambiguous and idempotent. Never expose private org slugs (or undisclosed private repository names) directly in public prose; instead render `alpha` through `alpha_display` at every public-facing surface (Phase 5 tracking note, visible status line below, and Known Issues list):
+The marker is an HTML comment on a **public** issue, and anyone can read a comment's raw body. So the marker is a public surface too: it never holds an `owner/` slug, and when private repository names are withheld it never holds the repo name either. Phase 6 resolves `repo#N` by basename and `internal#N` by the tracker issue's `Refs` back-reference, both against `$CANDIDATE_TRACKERS`.
 
-| stored `alpha` | public `alpha_display` (repo names shown) | public `alpha_display` (private repos withheld) |
+| disclosure policy | marker `alpha` (written) | public `alpha_display` |
 |---|---|---|
-| `owner/repo#N` | `repo#N` (strip `owner/`) | `internal#N` |
-| `repo#N` (legacy) | `repo#N` | `internal#N` |
-| `#N` (legacy) | `#N` | `internal#N` |
+| repo names shown | `repo#N` | `repo#N` |
+| private repos withheld | `internal#N` | `internal#N` |
+
+Legacy markers (`owner/repo#N`, `#N`) are still read. On the next marker write, rewrite them to the form above.
 
 ## Visible-line regeneration rule
 

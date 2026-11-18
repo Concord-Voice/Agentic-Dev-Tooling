@@ -2,6 +2,8 @@
 # Unit tests for feedback-triage multi-repo routing, validation, and alpha ref resolution.
 set -euo pipefail
 
+command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required for $0" >&2; exit 1; }
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SKILL_MD="$ROOT/plugins/release-ops/skills/feedback-triage/SKILL.md"
 ALPHA_SYNC_MD="$ROOT/plugins/release-ops/skills/feedback-triage/references/alpha-sync.md"
@@ -108,6 +110,31 @@ assert_eq "${ALPHA_REPO}#${ALPHA_NUM}" "${TRACKER_REPO}#3692" "#N resolution fai
 resolve_alpha_ref '4123' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO"
 assert_eq "${ALPHA_REPO}#${ALPHA_NUM}" "${TRACKER_REPO}#4123" "bare N resolution failed"
 
+# 6b. Digit-leading repo basename parses as repo#N, not as a bare number
+DIGIT_CANDS="$(printf '%s\n%s' "$TRACKER_REPO" "example-org/3d-client")"
+resolve_alpha_ref '3d-client#89' "$TRACKER_REPO" "$DIGIT_CANDS" "$PUBLIC_REPO" || fail "3d-client#89 rejected"
+assert_eq "${ALPHA_REPO}#${ALPHA_NUM}" "example-org/3d-client#89" "digit-leading repo#N resolution failed"
+
+# 6c. internal#N resolves via the Refs back-reference; zero or several matches fail closed
+# shellcheck disable=SC2329 # Invoked by resolve_alpha_ref.
+gh() {
+  # gh issue view N --repo R --json body --jq ...
+  case "$5" in
+    "$CLIENT_REPO") printf 'Refs %s\n' "$PUB_ISSUE_URL" ;;
+    "$OPS_REPO") [[ "${GH_BOTH:-}" == 1 ]] && printf 'Refs %s\n' "$PUB_ISSUE_URL" || printf 'unrelated\n' ;;
+    *) return 1 ;;
+  esac
+}
+resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 || fail "internal#45 rejected"
+assert_eq "${ALPHA_REPO}#${ALPHA_NUM}" "${CLIENT_REPO}#45" "internal#N resolution failed"
+if GH_BOTH=1 resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
+  fail "expected internal#N matching two trackers to fail closed"
+fi
+if resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 92; then
+  fail "expected internal#N with no back-reference match to fail closed"
+fi
+unset -f gh
+
 # 7. Phase 6 resolve_alpha_ref fail-closed cases: $PUBLIC target, ambiguous basename, malformed ref
 if resolve_alpha_ref "${PUBLIC_REPO}#9" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO"; then
   fail "expected resolve_alpha_ref to reject PUBLIC repo"
@@ -123,7 +150,7 @@ if resolve_alpha_ref "${CLIENT_REPO}#abc" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO
 fi
 
 # 8. Crash-recovery jq filter syntax & epic label extraction check
-JQ_FILTER="$(awk '/select\(\(\.body \/\/ ""\) \| contains\(\$pub_url\)\)/{gsub(/^ *'\''|'\'' *$/, ""); print; exit}' "$SKILL_MD")"
+JQ_FILTER="$(awk '/select\(\(\.body \/\/ ""\) \| contains\(\$pub_url\)\)/{gsub(/^ *'\''|'\''[^'\'']*$/, ""); print; exit}' "$SKILL_MD")"
 [[ -n "$JQ_FILTER" ]] || fail "could not extract crash-recovery jq filter from $SKILL_MD"
 jq_out="$(printf '%s' "[{\"number\":4370,\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[{\"name\":\"type: epic\"}]},{\"number\":999,\"body\":\"unrelated #91\",\"labels\":[]}]" \
   | jq -r --arg repo "$TRACKER_REPO" --arg pub_url "$PUB_ISSUE_URL" "$JQ_FILTER")"
