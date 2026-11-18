@@ -24,6 +24,9 @@ need() { command -v "$1" >/dev/null || { echo "missing prerequisite: $1" >&2; ex
 init_protected() {
   PROTECT_ROOT="$1"
   PROTECT_FILE="$PROTECT_ROOT/.claude/agentic-protected-paths.json"
+  if [[ -L "$PROTECT_FILE" ]] || { [[ -e "$PROTECT_FILE" ]] && [[ ! -f "$PROTECT_FILE" ]]; }; then
+    echo "protected paths must be a regular file, not a symlink: $PROTECT_FILE" >&2; exit 1
+  fi
   [[ -f "$PROTECT_FILE" ]] || return 0
   need jq
   jq -e 'type == "object" and (.paths | type == "array") and
