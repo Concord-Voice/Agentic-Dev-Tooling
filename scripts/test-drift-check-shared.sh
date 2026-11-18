@@ -103,10 +103,12 @@ echo "DRIFTED" > "$pr/.claude/agents/code-reviewer.md"
 if SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1; then fail "unprotected drift next to an overlay should exit 1"; fi
 echo "A" > "$pr/.claude/agents/code-reviewer.md"
 printf '{"paths":["../outside"]}\n' > "$pr/.claude/agentic-protected-paths.json"
-SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1 && fail "invalid protected paths should fail" || [ $? -eq 2 ] || fail "invalid protected paths should exit 2"
+rc=0; SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1 || rc=$?
+[[ "$rc" -eq 2 ]] || fail "invalid protected paths should exit 2 (got $rc)"
 printf '{"paths":[]}\n' > "$TMP/protect-target.json"; rm "$pr/.claude/agentic-protected-paths.json"
 ln -s "$TMP/protect-target.json" "$pr/.claude/agentic-protected-paths.json"
-SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1 && fail "symlinked protected paths should fail" || [ $? -eq 2 ] || fail "symlinked protected paths should exit 2"
+rc=0; SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1 || rc=$?
+[[ "$rc" -eq 2 ]] || fail "symlinked protected paths should exit 2 (got $rc)"
 rm "$pr/.claude/agentic-protected-paths.json"
 
 # (l) Real-repo smoke: the SHIPPED config/shared-manifest.json must resolve against this
