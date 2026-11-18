@@ -136,6 +136,11 @@ for tool in Edit Write; do
   done
   [[ "$(pam "$(jq -nc --arg t "$tool" --arg c "$TMP/sub" '{tool_name:$t,cwd:$c,tool_input:{file_path:"../migrations/000001_init.up.sql"}}')")" = "2" ]] \
     || fail "protect-applied-migrations: $tool of a cwd-relative migration path must be blocked"
+  # A relative path with the session cwd gone fails closed and names the cwd.
+  err=$(CLAUDE_PROJECT_DIR="$TMP" "$HOOK_BASH" "$HOOKS/protect-applied-migrations.sh" 2>&1 >/dev/null \
+    <<<"$(jq -nc --arg t "$tool" --arg c "$TMP/gone" '{tool_name:$t,cwd:$c,tool_input:{file_path:"docs/a.md"}}')"; echo "rc=$?")
+  [[ "$err" == *"Session cwd '$TMP/gone'"*"rc=2" ]] \
+    || fail "protect-applied-migrations: $tool of a relative path with a gone cwd must fail closed naming the cwd (got $err)"
 done
 for hdr in $'\v'"*** Update File: $MIG" "*** Add File: $MIG" " *** Update File: $MIG" "*** update file: $MIG" "*** Update File: $MIG"$'\r'; do
   [[ "$(pam "$(jq -nc --arg c "*** Begin Patch"$'\n'"$hdr"$'\n'"+x"$'\n'"*** End Patch" '{tool_name:"apply_patch",tool_input:{command:$c}}')")" = "2" ]] \
