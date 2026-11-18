@@ -75,6 +75,13 @@ if "$up/install.sh" claude --project "$bad_protection" >/dev/null 2>&1; then fai
 [[ ! -d "$bad_protection/.claude/skills" ]] || fail "invalid protection mutated destination"
 printf '{"paths":[".claude\\\\skills"]}\n' > "$bad_protection/.claude/agentic-protected-paths.json"
 if "$up/install.sh" claude --project "$bad_protection" >/dev/null 2>&1; then fail "single-backslash protected path accepted"; fi
+printf '{"paths":[]}\n' > "$tmp/protect-target.json"; rm "$bad_protection/.claude/agentic-protected-paths.json"
+ln -s "$tmp/protect-target.json" "$bad_protection/.claude/agentic-protected-paths.json"
+if "$up/install.sh" claude --project "$bad_protection" >/dev/null 2>&1; then fail "symlinked protected paths accepted"; fi
+rm "$bad_protection/.claude/agentic-protected-paths.json"; mkdir "$bad_protection/.claude/agentic-protected-paths.json"
+if "$up/install.sh" claude --project "$bad_protection" >/dev/null 2>&1; then fail "directory protected paths accepted"; fi
+rmdir "$bad_protection/.claude/agentic-protected-paths.json"
+[[ ! -d "$bad_protection/.claude/skills" ]] || fail "refused protection mutated destination"
 rm "$proj/.claude/agentic-protected-paths.json"
 # A symlink the adopter added is a local change too, so the next update must not delete it.
 ln -s SKILL.md "$proj/.claude/skills/pr-creation/local-notes"

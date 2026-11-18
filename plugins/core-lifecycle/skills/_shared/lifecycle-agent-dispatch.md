@@ -72,8 +72,8 @@ Founding incident: five runs across four agents (`architect` ×2,
 their pinned cap and returned only narration; three were Phase-8 reviewers on
 live PRs whose findings were silently discarded. A follow-up re-review confirmed
 the sizing empirically: `security-reviewer` used 11/25 and `docs-reviewer` 10/25,
-while `code-reviewer` — the only `xhigh` agent pinned below 30 — exhausted 20/20
-on the same diff and was raised to 30.
+while `code-reviewer` — then the only `xhigh` agent pinned below 30 — exhausted 20/20
+on the same diff and was raised to 30. Its effort was later lowered to `high`.
 
 ---
 

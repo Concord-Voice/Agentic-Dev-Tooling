@@ -101,13 +101,15 @@ def load_protected(claude: Path) -> list[str]:
     protected_path = claude / 'agentic-protected-paths.json'
     if protected_path.is_symlink():
         fail('refusing symlinked protected paths')
+    if protected_path.exists() and not protected_path.is_file():
+        fail('protected paths is not a regular file')
     protected = []
     if protected_path.exists():
         reservation = json.loads(protected_path.read_text())
         if not isinstance(reservation, dict) or not isinstance(reservation.get('paths'), list):
             fail('invalid protected paths')
         for path in reservation['paths']:
-            if not isinstance(path, str) or not path or path.startswith('/') or any(x in ('', '.', '..') for x in path.split('/')):
+            if not isinstance(path, str) or not path or path.startswith('/') or '\\' in path or any(x in ('', '.', '..') for x in path.split('/')):
                 fail('invalid protected path')
             protected.append(path)
     return protected

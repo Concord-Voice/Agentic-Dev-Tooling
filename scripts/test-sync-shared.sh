@@ -65,7 +65,12 @@ printf '{"paths":[".claude/skills/ci-status/SKILL.md"]}\n' > "$TMP/consumer/.cla
 echo "CUSTOM" > "$TMP/consumer/.claude/skills/ci-status/SKILL.md"
 SHARED_MASTER="$TMP/master" "$SCRIPT" "$TMP/consumer" >/dev/null
 [[ "$(cat "$TMP/consumer/.claude/skills/ci-status/SKILL.md")" = CUSTOM ]] || fail "protected descendant was overwritten"
-rm "$TMP/consumer/.claude/agentic-protected-paths.json"
+printf '{"paths":[".claude\\\\skills"]}\n' > "$TMP/consumer/.claude/agentic-protected-paths.json"
+if SHARED_MASTER="$TMP/master" "$SCRIPT" "$TMP/consumer" >/dev/null 2>&1; then fail "backslash protected path accepted"; fi
+rm "$TMP/consumer/.claude/agentic-protected-paths.json"; mkdir "$TMP/consumer/.claude/agentic-protected-paths.json"
+rc=0; SHARED_MASTER="$TMP/master" "$SCRIPT" "$TMP/consumer" >/dev/null 2>&1 || rc=$?
+[[ "$rc" -eq 2 ]] || fail "directory protected paths should exit 2 (got $rc)"
+rmdir "$TMP/consumer/.claude/agentic-protected-paths.json"
 
 # Unowned links must survive; no later item may be changed on a failed preflight.
 rm -rf "$TMP/consumer/.claude/skills/ci-status"
