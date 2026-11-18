@@ -122,6 +122,8 @@ To reserve customized paths for a higher-priority tooling layer, create
 `{"paths":[".claude/skills/dev-lifecycle", ".claude/settings.json"]}`.
 Paths are relative to the target root; a protected path also protects its
 ancestors and descendants from installer copies, including `--force`.
+`scripts/drift-check-shared.sh` reports a protected item as `OVERLAY`
+instead of drift, so the file also records which differences are intentional.
 Protecting settings skips the hook-settings merge too. Invalid paths stop the
 install before it writes files. List the paths for each host you use: this file
 does not configure a host's skill-discovery precedence or install the higher

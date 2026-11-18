@@ -29,6 +29,9 @@ edit that many repositories track. This document describes that pattern.
   before choosing whether it remains a repository override or is replaced with
   the shared version. Commit the ledger with the copies so future syncs can
   distinguish managed updates from customizations.
+  To keep a copy as a repository override, list it in the consumer's
+  `.claude/agentic-protected-paths.json`: the sync and the installer leave it
+  unchanged, and `drift-check-shared.sh` reports it as `OVERLAY`, not drift.
 
 - **Rules and hooks** are symlinked from the master into each repository's
   `.claude/` by `scripts/setup-symlinks.sh`. Hooks are invoked by path, so

@@ -94,6 +94,21 @@ ptrav="$TMP/pathtrav"; mkdir -p "$ptrav/plugins/x/skills/y"; echo "M" > "$ptrav/
 printf '{"shared_skills":["plugins/../../etc"],"shared_agents":[]}\n' > "$ptrav/shared-manifest.json"
 if SHARED_MASTER="$ptrav" "$SCRIPT" "$pr" >/dev/null 2>&1; then fail "path-traversal inside a path-form entry should fail"; fi
 
+# (m) A path listed in .claude/agentic-protected-paths.json is a recorded overlay: reported as
+# OVERLAY and not counted as drift. Unprotected drift still fails; invalid or symlinked files are errors.
+printf '{"paths":[".claude/skills/ci-status"]}\n' > "$pr/.claude/agentic-protected-paths.json"
+out="$(SHARED_MASTER="$pm" "$SCRIPT" "$pr" 2>&1)" || fail "protected overlay should exit 0"
+echo "$out" | grep -q "OVERLAY .*\.claude/skills/ci-status" || fail "protected overlay must be reported as OVERLAY"
+echo "DRIFTED" > "$pr/.claude/agents/code-reviewer.md"
+if SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1; then fail "unprotected drift next to an overlay should exit 1"; fi
+echo "A" > "$pr/.claude/agents/code-reviewer.md"
+printf '{"paths":["../outside"]}\n' > "$pr/.claude/agentic-protected-paths.json"
+SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1 && fail "invalid protected paths should fail" || [ $? -eq 2 ] || fail "invalid protected paths should exit 2"
+printf '{"paths":[]}\n' > "$TMP/protect-target.json"; rm "$pr/.claude/agentic-protected-paths.json"
+ln -s "$TMP/protect-target.json" "$pr/.claude/agentic-protected-paths.json"
+SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1 && fail "symlinked protected paths should fail" || [ $? -eq 2 ] || fail "symlinked protected paths should exit 2"
+rm "$pr/.claude/agentic-protected-paths.json"
+
 # (l) Real-repo smoke: the SHIPPED config/shared-manifest.json must resolve against this
 # Master, and a freshly synced consumer must read as OK. Regression: entries resolved as
 # <master>/skills/<name> while content lives at plugins/*/skills/<name>.

@@ -2,6 +2,7 @@
 # drift-check-shared.sh — verify a consumer's COPIES of the Master's shared skills/agents
 # still match the Master. Because they're copies (Claude Code can't load symlinked skills),
 # they can drift; this flags any that are missing, symlinked (won't load), or content-divergent.
+# Items a consumer lists in .claude/agentic-protected-paths.json are reported as OVERLAY, not drift.
 # Usage: drift-check-shared.sh <consumer-repo-path>
 # Test seam: SHARED_MASTER overrides the Master root (default = the repo this script lives in).
 set -uo pipefail
@@ -52,6 +53,23 @@ while IFS= read -r e; do [ -n "$e" ] && { [ -e "$(resolve_src agents "$e" ".md")
   < <(jq -r '.shared_agents[]?' "$MANIFEST")
 [ -z "$missing" ] || die "manifest entries not found in Master (fix shared-manifest.json):$missing"
 
+# A consumer records an intentional overlay in .claude/agentic-protected-paths.json, which
+# install.sh and sync-shared.sh already leave unchanged. Report those items as OVERLAY, not
+# DRIFT, using the same overlap rule (equal, ancestor or descendant) as sync-shared-safe.py.
+PROTECT_FILE="$REPO/.claude/agentic-protected-paths.json"
+[ ! -L "$PROTECT_FILE" ] || die "refusing symlinked protected paths: $PROTECT_FILE"
+if [ -f "$PROTECT_FILE" ]; then
+  jq -e 'type == "object" and (.paths | type == "array") and
+    ([.paths[] | type == "string" and length > 0 and (startswith("/") | not) and
+      (split("/") | all(. != "" and . != "." and . != ".."))] | all)' "$PROTECT_FILE" >/dev/null 2>&1 \
+    || die "invalid protected paths: $PROTECT_FILE"
+fi
+is_protected() { # is_protected <consumer-relative-path>
+  [ -f "$PROTECT_FILE" ] || return 1
+  jq -e --arg p "$1" '.paths | any(. as $e | $e == $p or ($p | startswith($e + "/")) or ($e | startswith($p + "/")))' \
+    "$PROTECT_FILE" >/dev/null
+}
+
 drift=0
 check_one() { # check_one <category> <manifest-entry> <suffix> — caller guarantees the category dir is not a whole-dir symlink
   local cat="$1" entry="$2" suf="$3" src name dst
@@ -59,6 +77,7 @@ check_one() { # check_one <category> <manifest-entry> <suffix> — caller guaran
   # The consumer layout is FLAT (see sync-shared.sh) no matter how deep the Master entry sits.
   name="$(basename "$entry")$suf"
   dst="$REPO/.claude/$cat/$name"
+  if is_protected ".claude/$cat/$name"; then echo "OVERLAY protected by .claude/agentic-protected-paths.json (not compared): .claude/$cat/$name"; return 0; fi
   if [ ! -e "$dst" ] && [ ! -L "$dst" ]; then echo "DRIFT missing in consumer: .claude/$cat/$name"; drift=1; return 0; fi
   if [ -L "$dst" ]; then echo "DRIFT symlink (Claude Code won't load it — must be a real copy): .claude/$cat/$name"; drift=1; return 0; fi
   if ! diff -rq "$src" "$dst" >/dev/null 2>&1; then echo "DRIFT differs from Master (run sync-shared.sh): .claude/$cat/$name"; drift=1; fi
