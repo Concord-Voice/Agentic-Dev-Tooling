@@ -110,6 +110,34 @@ ln -s "$TMP/protect-target.json" "$pr/.claude/agentic-protected-paths.json"
 rc=0; SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1 || rc=$?
 [[ "$rc" -eq 2 ]] || fail "symlinked protected paths should exit 2 (got $rc)"
 rm "$pr/.claude/agentic-protected-paths.json"
+protect() { printf '%s\n' "$1" > "$pr/.claude/agentic-protected-paths.json"; }
+# Overlap in both directions: an ancestor entry and a descendant entry each protect the item.
+for entry in '.claude/skills' '.claude/skills/ci-status/SKILL.md'; do
+  protect "{\"paths\":[\"$entry\"]}"
+  out="$(SHARED_MASTER="$pm" "$SCRIPT" "$pr" 2>&1)" || fail "overlap entry $entry should exit 0"
+  echo "$out" | grep -q "OVERLAY .*\.claude/skills/ci-status" || fail "overlap entry $entry must report OVERLAY"
+done
+# A protected agent (the .md suffix path) is an overlay too.
+echo "X" > "$pr/.claude/agents/code-reviewer.md"
+protect '{"paths":[".claude/skills/ci-status",".claude/agents/code-reviewer.md"]}'
+out="$(SHARED_MASTER="$pm" "$SCRIPT" "$pr" 2>&1)" || fail "protected agent should exit 0"
+echo "$out" | grep -q "OVERLAY .*\.claude/agents/code-reviewer.md" || fail "protected agent must report OVERLAY"
+echo "A" > "$pr/.claude/agents/code-reviewer.md"
+# A protected item the consumer does not carry is a recorded opt-out, not missing drift.
+mv "$pr/.claude/skills/ci-status" "$TMP/ci-status.held"
+protect '{"paths":[".claude/skills/ci-status"]}'
+SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1 || fail "protected but absent item should exit 0"
+mv "$TMP/ci-status.held" "$pr/.claude/skills/ci-status"
+# Negative control: an empty protection list protects nothing, so the drifted skill still fails.
+protect '{"paths":[]}'
+if SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1; then fail "empty protection list must not hide drift"; fi
+# Every malformed shape stops the check with exit 2.
+for bad in '{bad' '{"paths":["/abs"]}' '{"paths":"x"}' '{}' '{"paths":["a//b"]}' '{"paths":["a/./b"]}' '{"paths":[""]}' '{"paths":[1]}'; do
+  protect "$bad"
+  rc=0; SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -eq 2 ]] || fail "malformed protected paths $bad should exit 2 (got $rc)"
+done
+rm "$pr/.claude/agentic-protected-paths.json"
 
 # (l) Real-repo smoke: the SHIPPED config/shared-manifest.json must resolve against this
 # Master, and a freshly synced consumer must read as OK. Regression: entries resolved as
