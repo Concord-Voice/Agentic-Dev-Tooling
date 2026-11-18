@@ -14,7 +14,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/.claude"
 run() { # run <hook> <file_path> ; echoes "rc|stderr", uses CLAUDE_PROJECT_DIR=$TMP
   local hook="$1" fp="$2" err rc
-  err="$(fp_json "$fp" | CLAUDE_PROJECT_DIR="$TMP" "$HOOK_BASH" "$HOOKS/$hook" 2>&1 >/dev/null)"; rc=$?
+  err="$(CLAUDE_PROJECT_DIR="$TMP" "$HOOK_BASH" "$HOOKS/$hook" <<<"$(fp_json "$fp")" 2>&1 >/dev/null)"; rc=$?
   printf '%s|%s' "$rc" "$err"
 }
 
@@ -113,7 +113,7 @@ done
 # newline that splits one path, and apply_patch markers the tool accepts.
 pam() { # pam <json> ; echoes the hook's exit code
   local input=$1
-  printf '%s' "$input" | CLAUDE_PROJECT_DIR="$TMP" HOME="$(dirname "$TMP")" "$HOOK_BASH" "$HOOKS/protect-applied-migrations.sh" >/dev/null 2>&1
+  CLAUDE_PROJECT_DIR="$TMP" HOME="$(dirname "$TMP")" "$HOOK_BASH" "$HOOKS/protect-applied-migrations.sh" <<<"$input" >/dev/null 2>&1
   echo $?
 }
 # Write reaches the missing-suffix walk (an Edit with a missing parent already fails closed),
@@ -170,24 +170,24 @@ GTMP="$(mktemp -d)"
 { "hooks": { "protected_patterns": ["/auth/"] } }
 JSON
   # (a) Without a marker, a protected file is BLOCKED.
-  rc=0; fp_json "$GTMP/services/auth/login.go" | CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" >/dev/null 2>&1 || rc=$?
+  rc=0; CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" <<<"$(fp_json "$GTMP/services/auth/login.go")" >/dev/null 2>&1 || rc=$?
   [ "$rc" = "2" ] || exit 31
   # (b) With a valid marker entry (repo-relative path), the same file is ALLOWED,
   #     and the bypass log names the marker FILE (auditability — Alpha's test asserts this).
   echo "services/auth/login.go" > ".claude/state/hook-bypass/feature__test.txt"
-  err="$(fp_json "$GTMP/services/auth/login.go" | CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" 2>&1 >/dev/null)"; rc=$?
+  err="$(CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" <<<"$(fp_json "$GTMP/services/auth/login.go")" 2>&1 >/dev/null)"; rc=$?
   [ "$rc" = "0" ] || exit 32
   echo "$err" | grep -q "feature__test.txt" || exit 35
   # (c) A symlinked marker is IGNORED → file BLOCKED again.
   rm ".claude/state/hook-bypass/feature__test.txt"
   echo "services/auth/login.go" > ".claude/state/hook-bypass/real.txt"
   ln -s real.txt ".claude/state/hook-bypass/feature__test.txt"
-  rc=0; fp_json "$GTMP/services/auth/login.go" | CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" >/dev/null 2>&1 || rc=$?
+  rc=0; CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" <<<"$(fp_json "$GTMP/services/auth/login.go")" >/dev/null 2>&1 || rc=$?
   [ "$rc" = "2" ] || exit 33
   # (d) A '..' traversal entry is rejected → file BLOCKED.
   rm -f ".claude/state/hook-bypass/feature__test.txt"
   echo "../../../etc/passwd" > ".claude/state/hook-bypass/feature__test.txt"
-  rc=0; fp_json "$GTMP/services/auth/login.go" | CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" >/dev/null 2>&1 || rc=$?
+  rc=0; CLAUDE_PROJECT_DIR="$GTMP" "$HOOK_BASH" "$HOOKS/protect-sensitive.sh" <<<"$(fp_json "$GTMP/services/auth/login.go")" >/dev/null 2>&1 || rc=$?
   [ "$rc" = "2" ] || exit 34
 )
 mrc=$?; rm -rf "$GTMP"
