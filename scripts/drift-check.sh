@@ -10,24 +10,27 @@ command -v jq >/dev/null 2>&1 || { echo "drift-check: jq required" >&2; exit 2; 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BASE="${1:-$HERE/../config/base.settings.json}"
 TARGET="${2:-}"
-if [ -z "$TARGET" ]; then
+if [[ -z "$TARGET" ]]; then
   for c in "$HOME/Dev/example-org/example-repo/.claude/settings.json" "$HOME/Dev/example-repo/.claude/settings.json"; do
-    [ -f "$c" ] && { TARGET="$c"; break; }
+    [[ -f "$c" ]] && { TARGET="$c"; break; }
   done
 fi
-[ -f "$BASE" ] || { echo "drift-check: base not found: $BASE" >&2; exit 2; }
-[ -f "$TARGET" ] || { echo "drift-check: target settings.json not found" >&2; exit 2; }
+[[ -f "$BASE" ]] || { echo "drift-check: base not found: $BASE" >&2; exit 2; }
+[[ -f "$TARGET" ]] || { echo "drift-check: target settings.json not found" >&2; exit 2; }
 
 # All hook command strings, regardless of event/matcher nesting.
-cmds() { jq -r '[.hooks[]?[]?.hooks[]?.command] | sort | unique[]' "$1" 2>/dev/null; }
+cmds() {
+  local settings_file="$1"
+  jq -r '[.hooks[]?[]?.hooks[]?.command] | sort | unique[]' "$settings_file" 2>/dev/null
+}
 missing=0
 while IFS= read -r cmd; do
-  [ -z "$cmd" ] && continue
+  [[ -z "$cmd" ]] && continue
   if ! cmds "$TARGET" | grep -qxF "$cmd"; then
     echo "DRIFT: global hook missing from target: $cmd"
     missing=1
   fi
 done < <(cmds "$BASE")
 
-if [ "$missing" -eq 0 ]; then echo "OK: all global hook entries present in target ($TARGET)"; fi
+if [[ "$missing" -eq 0 ]]; then echo "OK: all global hook entries present in target ($TARGET)"; fi
 exit "$missing"

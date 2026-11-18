@@ -49,6 +49,12 @@ echo "$out" | grep -qi "category dir is a symlink" || fail "whole-dir symlinked 
 [ "$(rc)" = "1" ] || fail "whole-dir symlinked category should exit 1"
 rm -f "$TMP/repo/.claude/skills"; mkdir -p "$TMP/repo/.claude/skills/ci-status"; echo "M" > "$TMP/repo/.claude/skills/ci-status/SKILL.md"
 
+# (e2) Root and config/ manifests both present → root wins, as in sync-shared-safe.py.
+mkdir -p "$TMP/master/config"
+printf '{"shared_skills":["ci-status","nope"],"shared_agents":[]}\n' > "$TMP/master/config/shared-manifest.json"
+[[ "$(rc)" = "0" ]] || fail "root manifest must win over config/shared-manifest.json"
+rm -rf "$TMP/master/config"
+
 # (f) Malformed manifest → hard error (exit != 0), not a misleading OK.
 badm="$TMP/badm"; mkdir -p "$badm/skills/ci-status"; echo "M" > "$badm/skills/ci-status/SKILL.md"; echo "{bad" > "$badm/shared-manifest.json"
 if SHARED_MASTER="$badm" "$SCRIPT" "$TMP/repo" >/dev/null 2>&1; then fail "malformed manifest should fail"; fi
@@ -87,6 +93,63 @@ if SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1; then fail "path-form con
 ptrav="$TMP/pathtrav"; mkdir -p "$ptrav/plugins/x/skills/y"; echo "M" > "$ptrav/plugins/x/skills/y/SKILL.md"
 printf '{"shared_skills":["plugins/../../etc"],"shared_agents":[]}\n' > "$ptrav/shared-manifest.json"
 if SHARED_MASTER="$ptrav" "$SCRIPT" "$pr" >/dev/null 2>&1; then fail "path-traversal inside a path-form entry should fail"; fi
+
+# (m) A path listed in .claude/agentic-protected-paths.json is a recorded overlay: reported as
+# OVERLAY and not counted as drift. Unprotected drift still fails; invalid or symlinked files are errors.
+echo "DRIFTED" > "$pr/.claude/skills/ci-status/SKILL.md"   # the protected item differs from the Master
+printf '{"paths":[".claude/skills/ci-status"]}\n' > "$pr/.claude/agentic-protected-paths.json"
+out="$(SHARED_MASTER="$pm" "$SCRIPT" "$pr" 2>&1)" || fail "protected overlay should exit 0"
+echo "$out" | grep -q "OVERLAY .*\.claude/skills/ci-status" || fail "protected overlay must be reported as OVERLAY"
+echo "DRIFTED" > "$pr/.claude/agents/code-reviewer.md"
+if SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1; then fail "unprotected drift next to an overlay should exit 1"; fi
+echo "A" > "$pr/.claude/agents/code-reviewer.md"
+printf '{"paths":["../outside"]}\n' > "$pr/.claude/agentic-protected-paths.json"
+rc=0; SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1 || rc=$?
+[[ "$rc" -eq 2 ]] || fail "invalid protected paths should exit 2 (got $rc)"
+printf '{"paths":[]}\n' > "$TMP/protect-target.json"; rm "$pr/.claude/agentic-protected-paths.json"
+ln -s "$TMP/protect-target.json" "$pr/.claude/agentic-protected-paths.json"
+rc=0; SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1 || rc=$?
+[[ "$rc" -eq 2 ]] || fail "symlinked protected paths should exit 2 (got $rc)"
+rm "$pr/.claude/agentic-protected-paths.json"
+protect() { printf '%s\n' "$1" > "$pr/.claude/agentic-protected-paths.json"; }
+# Overlap in both directions: an ancestor entry and a descendant entry each protect the item.
+for entry in '.claude/skills' '.claude/skills/ci-status/SKILL.md'; do
+  protect "{\"paths\":[\"$entry\"]}"
+  out="$(SHARED_MASTER="$pm" "$SCRIPT" "$pr" 2>&1)" || fail "overlap entry $entry should exit 0"
+  echo "$out" | grep -q "OVERLAY .*\.claude/skills/ci-status" || fail "overlap entry $entry must report OVERLAY"
+done
+# A protected agent (the .md suffix path) is an overlay too.
+echo "X" > "$pr/.claude/agents/code-reviewer.md"
+protect '{"paths":[".claude/skills/ci-status",".claude/agents/code-reviewer.md"]}'
+out="$(SHARED_MASTER="$pm" "$SCRIPT" "$pr" 2>&1)" || fail "protected agent should exit 0"
+echo "$out" | grep -q "OVERLAY .*\.claude/agents/code-reviewer.md" || fail "protected agent must report OVERLAY"
+echo "A" > "$pr/.claude/agents/code-reviewer.md"
+# A protected item the consumer does not carry is a recorded opt-out, not missing drift.
+mv "$pr/.claude/skills/ci-status" "$TMP/ci-status.held"
+protect '{"paths":[".claude/skills/ci-status"]}'
+out="$(SHARED_MASTER="$pm" "$SCRIPT" "$pr" 2>&1)" || fail "protected but absent item should exit 0"
+echo "$out" | grep -q "OVERLAY .*(not carried): \.claude/skills/ci-status" || fail "protected but absent item must say not carried"
+echo "$out" | grep -q "OK: .*1 recorded overlay" || fail "OK line must count overlays"
+# A protected item that is a symlink still never loads, so it stays drift.
+ln -s "$TMP/ci-status.held" "$pr/.claude/skills/ci-status"
+out="$(SHARED_MASTER="$pm" "$SCRIPT" "$pr" 2>&1)" && fail "protected symlink must still be drift"
+echo "$out" | grep -q "DRIFT symlink.*skills/ci-status" || fail "protected symlink must be reported as symlink drift"
+rm "$pr/.claude/skills/ci-status"
+mv "$TMP/ci-status.held" "$pr/.claude/skills/ci-status"
+# Negative control: an empty protection list protects nothing, so the drifted skill still fails.
+protect '{"paths":[]}'
+if SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1; then fail "empty protection list must not hide drift"; fi
+# Every malformed shape stops the check with exit 2.
+for bad in '{bad' '{"paths":["/abs"]}' '{"paths":"x"}' '{}' '{"paths":["a//b"]}' '{"paths":["a/./b"]}' '{"paths":[""]}' '{"paths":[1]}' '{"paths":["a\\\\b"]}'; do
+  protect "$bad"
+  rc=0; SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -eq 2 ]] || fail "malformed protected paths $bad should exit 2 (got $rc)"
+done
+rm "$pr/.claude/agentic-protected-paths.json"; mkdir "$pr/.claude/agentic-protected-paths.json"
+rc=0; SHARED_MASTER="$pm" "$SCRIPT" "$pr" >/dev/null 2>&1 || rc=$?
+[[ "$rc" -eq 2 ]] || fail "directory protected paths should exit 2 (got $rc)"
+rmdir "$pr/.claude/agentic-protected-paths.json"; protect '{}'
+rm "$pr/.claude/agentic-protected-paths.json"
 
 # (l) Real-repo smoke: the SHIPPED config/shared-manifest.json must resolve against this
 # Master, and a freshly synced consumer must read as OK. Regression: entries resolved as

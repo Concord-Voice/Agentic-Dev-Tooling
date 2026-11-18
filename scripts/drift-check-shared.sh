@@ -2,15 +2,16 @@
 # drift-check-shared.sh — verify a consumer's COPIES of the Master's shared skills/agents
 # still match the Master. Because they're copies (Claude Code can't load symlinked skills),
 # they can drift; this flags any that are missing, symlinked (won't load), or content-divergent.
+# Items a consumer lists in .claude/agentic-protected-paths.json are reported as OVERLAY, not drift.
 # Usage: drift-check-shared.sh <consumer-repo-path>
 # Test seam: SHARED_MASTER overrides the Master root (default = the repo this script lives in).
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MASTER="${SHARED_MASTER:-$(cd "$HERE/.." && pwd)}"
-# The manifest lives under config/ (org reorg); fall back to the pre-reorg root location so
-# an older or externally-supplied Master checkout still resolves.
-MANIFEST="$MASTER/config/shared-manifest.json"
-[ -f "$MANIFEST" ] || MANIFEST="$MASTER/shared-manifest.json"
+# Same precedence as sync-shared-safe.py: an Internal Master's root manifest wins over the
+# public config/ mirror, so the drift check validates the inventory that sync installed.
+MANIFEST="$MASTER/shared-manifest.json"
+[ -f "$MANIFEST" ] || MANIFEST="$MASTER/config/shared-manifest.json"
 die() { echo "drift-check-shared: $*" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || die "jq required"
 [ -f "$MANIFEST" ] || die "manifest not found: $MANIFEST"
@@ -52,15 +53,41 @@ while IFS= read -r e; do [ -n "$e" ] && { [ -e "$(resolve_src agents "$e" ".md")
   < <(jq -r '.shared_agents[]?' "$MANIFEST")
 [ -z "$missing" ] || die "manifest entries not found in Master (fix shared-manifest.json):$missing"
 
-drift=0
+# A consumer records an intentional overlay in .claude/agentic-protected-paths.json, which
+# install.sh and sync-shared.sh already leave unchanged. Report those items as OVERLAY, not
+# DRIFT, using the same overlap rule (equal, ancestor or descendant) as sync-shared-safe.py.
+PROTECT_FILE="$REPO/.claude/agentic-protected-paths.json"
+[[ ! -L "$PROTECT_FILE" ]] || die "refusing symlinked protected paths: $PROTECT_FILE"
+[[ ! -e "$PROTECT_FILE" || -f "$PROTECT_FILE" ]] || die "protected paths is not a regular file: $PROTECT_FILE"
+if [[ -f "$PROTECT_FILE" ]]; then
+  jq -e 'type == "object" and (.paths | type == "array") and
+    ([.paths[] | type == "string" and length > 0 and (startswith("/") | not) and (contains("\\") | not) and
+      (split("/") | all(. != "" and . != "." and . != ".."))] | all)' "$PROTECT_FILE" >/dev/null 2>&1 \
+    || die "invalid protected paths: $PROTECT_FILE"
+fi
+is_protected() { # is_protected <consumer-relative-path>
+  local rel="$1"
+  [[ -f "$PROTECT_FILE" ]] || return 1
+  jq -e --arg p "$rel" '.paths | any(. as $e | $e == $p or ($p | startswith($e + "/")) or ($e | startswith($p + "/")))' \
+    "$PROTECT_FILE" >/dev/null
+}
+
+drift=0; overlays=0
 check_one() { # check_one <category> <manifest-entry> <suffix> — caller guarantees the category dir is not a whole-dir symlink
   local cat="$1" entry="$2" suf="$3" src name dst
   src="$(resolve_src "$cat" "$entry" "$suf")"
   # The consumer layout is FLAT (see sync-shared.sh) no matter how deep the Master entry sits.
   name="$(basename "$entry")$suf"
   dst="$REPO/.claude/$cat/$name"
-  if [ ! -e "$dst" ] && [ ! -L "$dst" ]; then echo "DRIFT missing in consumer: .claude/$cat/$name"; drift=1; return 0; fi
-  if [ -L "$dst" ]; then echo "DRIFT symlink (Claude Code won't load it — must be a real copy): .claude/$cat/$name"; drift=1; return 0; fi
+  # A symlink never loads, protected or not, so it is drift before it can be an overlay.
+  if [[ -L "$dst" ]]; then echo "DRIFT symlink (Claude Code won't load it — must be a real copy): .claude/$cat/$name"; drift=1; return 0; fi
+  if is_protected ".claude/$cat/$name"; then
+    overlays=$((overlays + 1))
+    if [[ -e "$dst" ]]; then echo "OVERLAY protected by .claude/agentic-protected-paths.json (not compared): .claude/$cat/$name"
+    else echo "OVERLAY protected by .claude/agentic-protected-paths.json (not carried): .claude/$cat/$name"; fi
+    return 0
+  fi
+  if [[ ! -e "$dst" ]]; then echo "DRIFT missing in consumer: .claude/$cat/$name"; drift=1; return 0; fi
   if ! diff -rq "$src" "$dst" >/dev/null 2>&1; then echo "DRIFT differs from Master (run sync-shared.sh): .claude/$cat/$name"; drift=1; fi
 }
 
@@ -69,14 +96,14 @@ check_one() { # check_one <category> <manifest-entry> <suffix> — caller guaran
 # Flag the symlinked category once and skip its per-item checks.
 check_category() { # check_category <category> <manifest-array> <suffix>
   local cat="$1" arr="$2" suf="$3"
-  if [ -L "$REPO/.claude/$cat" ]; then
+  if [[ -L "$REPO/.claude/$cat" ]]; then
     echo "DRIFT category dir is a symlink (Claude Code won't load it): .claude/$cat"; drift=1; return 0
   fi
-  while IFS= read -r n; do [ -n "$n" ] && check_one "$cat" "$n" "$suf"; done < <(jq -r ".${arr}[]?" "$MANIFEST")
+  while IFS= read -r n; do [[ -n "$n" ]] && check_one "$cat" "$n" "$suf"; done < <(jq -r ".${arr}[]?" "$MANIFEST")
 }
 
 check_category skills shared_skills ""
 check_category agents shared_agents ".md"
 
-[ "$drift" -eq 0 ] && echo "OK: all shared skills/agents in $REPO match the Master (real copies)"
+[[ "$drift" -eq 0 ]] && echo "OK: all shared skills/agents in $REPO match the Master (real copies), $overlays recorded overlay(s)"
 exit "$drift"
