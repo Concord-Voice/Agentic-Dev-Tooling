@@ -100,7 +100,7 @@ echo "$out" | grep -q "BLOCKED" || fail "protect-applied-migrations: missing BLO
 # could make the path reach an existing migration.
 for seg in .. .; do
   out="$(run protect-applied-migrations.sh "$TMP/migrations/not-yet/$seg/000001_init.up.sql")"
-  [ "${out%%|*}" = "2" ] || fail "protect-applied-migrations: '$seg' in a missing suffix must fail closed (got $out)"
+  [[ "${out%%|*}" = "2" ]] || fail "protect-applied-migrations: '$seg' in a missing suffix must fail closed (got $out)"
   echo "$out" | grep -q "Failed to resolve" || fail "protect-applied-migrations: '$seg' refusal message missing (got $out)"
 done
 rm -rf "$TMP/migrations"
