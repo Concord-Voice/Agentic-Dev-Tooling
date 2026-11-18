@@ -20,7 +20,7 @@ a `model` override to `Agent`/`agent()` — there is no longer any exception.** 
 orchestrator's own model is the dynamic piece; the fleet is fixed.
 
 Cross-vendor mirrors preserve those source pins and translate them through
-[`model-capability-tiers.md`](model-capability-tiers.md). Codex then applies only the cataloged
+[`model-equivalence.md`](model-equivalence.md). Codex then applies only the cataloged
 role override: `@red-team` uses `gpt-6-sol`. This is profile generation, not a
 dispatch-time model choice.
 
@@ -30,11 +30,10 @@ path by which an orchestrator could choose a subagent's model. Where a repo need
 an escalation path, it selects a **different agent**, not a different model for
 the same agent — see § Escalation (E1-E4) below.
 
-That distinction matters against the tier catalog's invariant 7
-(`per-agent model / effort pinning`): choosing an escalation agent over
+That distinction matters against per-agent `model` / `effort` pinning: choosing an escalation agent over
 `@backend-developer` is *agent selection*, which the dispatch tables have always
-owned. It is not a model override, and it does not need — or get — a tier's
-permission.
+owned. It is not a model override, and it needs no
+extra permission.
 
 ### `maxTurns` is the third pin — and it fails silently
 
