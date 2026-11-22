@@ -97,19 +97,9 @@ exists for — waiting without a human scheduler, designing before editing, look
 shipping. A harness that cannot do even the fallback records that fact where a reviewer can see
 it.
 
-**This table is not a completeness claim, and reading it as one is the mistake to avoid.** It
-covers the primitives the *waiting, planning and verification* steps introduce. The lifecycle's
-**dispatch backbone is Claude-native throughout** and is deliberately NOT enumerated here: the
-`Skill` tool the DISPATCH-GATE mandates, the `Agent` tool every `@agent` dispatch table assumes,
-the `Workflow` tool the D6 breadth rung routes to, the `Glob` tool phase detection requires, and
-the `/superpowers:*` plugin skills that ARE Phases 2, 3 and 4. None has a portable fallback,
-because none is a step you can degrade — they are the mechanism.
+For named skills, use the [nested skill contract](../_shared/nested-skills.md). Claude can invoke a skill through its Skill tool. A client with disk-activated skills can resolve the approved owner, load the full skill and its references, and execute its checkpoints. For a required specialist, check the host's actual role catalog, permissions and native dispatch operation before starting the phase.
 
-The honest consequence: **a mirrored surface can read this file for the contract, the ordering
-and the gates, but is not expected to execute the full lifecycle unaided.** Say so plainly if you
-are on one, rather than silently substituting a single agent for a specialist suite or skipping
-a phase whose skill you cannot load — the catalog's unknown-skill WARN is not permission for
-either.
+Check each remaining dependency at the phase that uses it. Phase detection needs file matching. A breadth workflow needs its specified orchestration capability. Plugin phases need the approved plugin's implementation and permissions. If a required capability is missing, record the phase and missing dependency, keep that phase pending, and hand it to an authorized host that provides it. Each client's workload assignment and the developer's approval checkpoints still apply.
 </PRIMITIVE-AVAILABILITY>
 
 Orchestrate the full development lifecycle for issue #$0.
