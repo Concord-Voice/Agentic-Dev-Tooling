@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Measure the real sync CLI under its existing integration harness.
+# Measure the sync and profile CLIs while their integration tests exercise them.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUTPUT="${1:?usage: measure-sync-coverage.sh OUTPUT_XML}"
@@ -11,7 +11,7 @@ mkdir -p "$TMP/bin"
 cat > "$TMP/bin/python3" <<'WRAPPER'
 #!/usr/bin/env bash
 case "${1:-}" in
-  */sync-shared-safe.py) exec "$SYNC_REAL_PYTHON" -m coverage run --parallel-mode "$@" ;;
+  "$COVERAGE_SCRIPTS/sync-shared-safe.py"|"$COVERAGE_SCRIPTS/render-agent-profiles.py") exec "$SYNC_REAL_PYTHON" -m coverage run --parallel-mode "$@" ;;
   *) exec "$SYNC_REAL_PYTHON" "$@" ;;
 esac
 WRAPPER
@@ -22,8 +22,14 @@ relative_files = true
 source = scripts
 timid = true
 COVERAGE
-export SYNC_REAL_PYTHON COVERAGE_FILE="$TMP/coverage" COVERAGE_RCFILE="$TMP/.coveragerc"
-PATH="$TMP/bin:$PATH" bash "$ROOT/scripts/test-sync-shared.sh"
+export PYTHONDONTWRITEBYTECODE=1
+export SYNC_REAL_PYTHON COVERAGE_SCRIPTS="$ROOT/scripts" COVERAGE_FILE="$TMP/coverage" COVERAGE_RCFILE="$TMP/.coveragerc"
+export PATH="$TMP/bin:$PATH"
+bash "$ROOT/scripts/test-sync-shared.sh"
+bash "$ROOT/scripts/test-native-agents.sh"
+"$SYNC_REAL_PYTHON" -m coverage run --parallel-mode "$ROOT/scripts/test-codex-isolated-review.py"
 "$SYNC_REAL_PYTHON" -m coverage combine --quiet "$TMP"
 "$SYNC_REAL_PYTHON" -m coverage report --include='*/sync-shared-safe.py' --fail-under=80
-"$SYNC_REAL_PYTHON" -m coverage xml --quiet --include='*/sync-shared-safe.py' -o "$OUTPUT"
+"$SYNC_REAL_PYTHON" -m coverage report --include='*/render-agent-profiles.py' --fail-under=80
+"$SYNC_REAL_PYTHON" -m coverage report --include='*/codex-isolated-review.py,*/codex_review_session.py' --fail-under=80
+"$SYNC_REAL_PYTHON" -m coverage xml --quiet --include='*/sync-shared-safe.py,*/render-agent-profiles.py,*/codex-isolated-review.py,*/codex_review_session.py,*/test-codex-isolated-review.py' -o "$OUTPUT"

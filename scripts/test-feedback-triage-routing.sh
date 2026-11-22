@@ -162,4 +162,32 @@ if grep -q -- 'replace_parent' "$ALPHA_SYNC_MD"; then
   fail "$ALPHA_SYNC_MD must not reference replace_parent when linking sub-issues"
 fi
 
+# Exercise the filter that owns the trust boundary, using only synthetic metadata.
+python3 - "$(dirname "$SKILL_MD")/validate-clusters.jq" <<'PYTEST'
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+with tempfile.TemporaryDirectory() as temp:
+    catalog = Path(temp) / "catalog.json"
+    catalog.write_text(json.dumps([{"number": n, "kind": k} for n, k in
+                                   [(1, "bug"), (2, "bug"), (3, "feature")]]))
+    command = ["jq", "-ces", "--slurpfile", "catalog", str(catalog), "-f", sys.argv[1]]
+    group = {"members": [2, 1], "confidence": "high", "reason": "same-symptom"}
+    valid = {"clusters": [group], "singletons": [3]}
+    passed = subprocess.run(command, input=json.dumps(valid), capture_output=True, text=True, check=True)
+    assert json.loads(passed.stdout)["clusters"][0]["members"] == [1, 2]
+    bad_groups = [dict(group, reason="arbitrary text"), dict(group, rationale="raw text"),
+                  dict(group, members=[1, 3]), dict(group, members=[1, 1]),
+                  dict(group, confidence="unknown"), dict(group, members=[1, True])]
+    bad = [json.dumps({"clusters": [g], "singletons": [3]}) for g in bad_groups]
+    bad += [json.dumps(dict(valid, instructions="arbitrary text")), json.dumps(dict(valid, singletons=[])),
+            json.dumps(dict(valid, singletons=[4])), json.dumps(valid) + "\n" + json.dumps(valid)]
+    for payload in bad:
+        result = subprocess.run(command, input=payload, capture_output=True, text=True)
+        assert result.returncode != 0 and result.stdout == "", "untrusted cluster report escaped"
+PYTEST
+
 echo "PASS: test-feedback-triage-routing"

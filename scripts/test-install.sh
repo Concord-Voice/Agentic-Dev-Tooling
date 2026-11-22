@@ -216,6 +216,32 @@ HOME="$fake_home" "$HERE/install.sh" claude --user >/dev/null
 n2="$(jq '[.hooks[][].hooks[]] | length' "$fake_home/.claude/settings.json")"
 [ "$n1" = "$n2" ] || fail "--user re-run duplicated hooks ($n1 -> $n2)"
 
+# A user-selected dotfiles root can be a symlink. Keep its lock keys and hook
+# commands stable across refreshes, while treating nested links as local.
+linked_home="$tmp/personal"; dotfiles="$tmp/dotfiles/claude"; outside="$tmp/unrelated"
+mkdir -p "$linked_home" "$dotfiles" "$outside"
+ln -s "$dotfiles" "$linked_home/.claude"
+HOME="$linked_home" "$HERE/install.sh" claude --user >/dev/null
+[[ -L "$linked_home/.claude" && -f "$dotfiles/skills/ci-status/SKILL.md" ]] || fail "linked personal install"
+jq -e 'has(".claude/skills/ci-status")' "$dotfiles/.agentic-dev-tooling.lock" >/dev/null || fail "linked personal lock keys"
+hook_count="$(jq '[.hooks[][].hooks[]] | length' "$dotfiles/settings.json")"
+ln -s "$outside/settings-sentinel" "$dotfiles/settings.json.tmp"
+HOME="$linked_home" "$HERE/install.sh" claude --user >/dev/null
+[[ ! -e "$outside/settings-sentinel" ]] || fail "linked settings temp redirected a write"
+jq -e --arg prefix "$linked_home/.claude/hooks/" --argjson count "$hook_count" '
+  [.hooks[][].hooks[].command] | length == $count and all(.[]; startswith($prefix))
+' "$dotfiles/settings.json" >/dev/null || fail "linked user refresh changed hook wiring"
+
+if "$HERE/install.sh" claude --project "$linked_home" >/dev/null 2>&1; then
+  fail "project install accepted a linked .claude directory"
+fi
+mv "$dotfiles/skills" "$dotfiles/previous-skills"
+ln -s "$outside" "$dotfiles/skills"
+if HOME="$linked_home" "$HERE/install.sh" claude --user >/dev/null 2>&1; then
+  fail "personal install followed a nested skills link"
+fi
+[[ -z "$(ls -A "$outside")" ]] || fail "personal install wrote through a nested link"
+
 # IMPORTANT 4: --with-fleet positive path -- a fresh target should get the fleet skill/hook and
 # the session-management MCP note (the earlier test only checked fleet is ABSENT without the flag).
 fleet_target="$tmp/fleet-target"; mkdir -p "$fleet_target"; git -C "$fleet_target" init -q

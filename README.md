@@ -29,8 +29,7 @@ Concord Voice is a privacy-first place to talk with your friends, your community
 Concord Voice uses AI coding assistants every day. This repository shares the tools that keep those assistants safe and consistent.
 Anyone can use them.
 
-One source tree installs into several AI coding tools. Each tool supports a different subset, and [CAPABILITIES.md](CAPABILITIES.md) lists the gaps honestly.
-Read it before you trust a hook to survive the trip to another platform.
+Choose the installer for the client that will open the checkout. The coverage table lists which skills, agent profiles, hooks, and MCP settings each installer provides. [Platform capabilities](CAPABILITIES.md)
 
 For guides and background, see the [Agentic-Dev-Tooling wiki](https://github.com/Concord-Voice/Agentic-Dev-Tooling/wiki).
 
@@ -41,58 +40,38 @@ For guides and background, see the [Agentic-Dev-Tooling wiki](https://github.com
 A portable, attributed library of AI dev-tooling — skills, agents, hooks,
 guardrail scripts, MCP config templates, and an installer — refined over
 months of real use running a multi-service product's development lifecycle,
-and generalized here for any team to adopt. One canonical Claude-native
-source tree compiles to Claude Code, OpenAI Codex, GitHub Copilot, Google
-Gemini CLI, and Google Antigravity via `install.sh`. Every layer's actual,
-verified per-platform coverage — including the gaps — is documented in
-[`CAPABILITIES.md`](CAPABILITIES.md); read it before you rely on a hook or
-subagent surviving conversion to a non-Claude platform.
+and generalized here for any team to adopt. Claude Code supplies the source format for skills and agent instructions.
+The installer copies skill bundles and renders selected specialists into each client's native
+agent directory. It uses rulesync for project instructions and supported hook events.
+[Platform capabilities](CAPABILITIES.md)
 
 ### Quickstart
 
-Clone the repo, `cd` into it, then run one `install.sh` command per platform
-you use. Every command accepts `--project <path>` (default: current
-directory); `claude` additionally accepts `--user` for a user-scope install
-into `$HOME/.claude` (the other subcommands have no user-scope target and
-exit 2 if you pass `--user` to them). Every install is safe to re-run: files
-that already match are left alone, files you've hand-edited are skipped
-unless you pass `--force`.
+From this tooling checkout, run the command for each client your project uses.
+Replace `../my-project` with the path to the consumer checkout.
 
 ```bash
-./install.sh claude      [--project <path>|--user] [--with-fleet] [--force]
-# installs skills, agents, hooks, and repo-config docs natively into .claude/;
-# merges hook wiring into settings.json non-destructively. --with-fleet adds
-# the Claude-desktop-only multi-session supervision pack.
-
-./install.sh codex       [--project <path>] [--force]
-# compiles via rulesync into AGENTS.md, .agents/skills/, .codex/hooks.json,
-# config.toml.
-
-./install.sh copilot     [--project <path>] [--force]
-# compiles via rulesync into .github/copilot-instructions.md and hooks (only
-# UserPromptSubmit-shaped hooks survive); .vscode/mcp.json is written as an
-# empty scaffold ({"servers": {}}) — populate it by hand (see CAPABILITIES.md).
-
-./install.sh gemini      [--project <path>] [--force]
-# writes GEMINI.md directly (no rulesync target exists for Gemini CLI, which
-# was sunset for consumer use in 2026-06). Prefer antigravity unless you're
-# on Gemini Enterprise Code Assist.
-
-./install.sh antigravity [--project <path>] [--force]
-# compiles via rulesync into AGENTS.md, .agents/skills/, .agents/hooks.json
-# (partial — one hook event dropped), and an empty MCP scaffold; project-scope
-# permissions are dropped entirely (see CAPABILITIES.md).
-
-./install.sh imports
-# prints fetch-from-source instructions for third-party marketplace plugins
-# (superpowers, mattpocock-skills, pr-review-toolkit, ponytail) and the
-# graphify CLI; if the claude CLI is present, it also prints the
-# marketplace-add/install commands to run — it does not execute them for you.
-
-./install.sh doctor
-# checks prerequisites (git, jq, gh, npx) and prints a summary of key
-# capability gaps.
+./install.sh claude --project ../my-project
+./install.sh codex --project ../my-project
+./install.sh copilot --project ../my-project
+./install.sh antigravity --project ../my-project
 ```
+
+| Target | What to look for in the consumer checkout |
+|---|---|
+| Claude Code | Project skills and agents in `.claude/`, with hook registration merged into `.claude/settings.json`. Use `--user` for a personal install or `--with-fleet` to include the Claude Desktop supervision pack. |
+| Codex | `AGENTS.md`, `.agents/skills/`, native TOML profiles under `.codex/agents/`, and `.codex/hooks.json`. |
+| Copilot | `.github/copilot-instructions.md` and the GitHub review profile in `.github/agents/`. Automatic PR review and failed-run triggers have separate GitHub settings. |
+| Antigravity | `AGENTS.md`, `.agents/skills/`, selected specialist profiles in `.agents/agents/`, and the supported hook events in `.agents/hooks.json`. |
+
+To install only the portable specialist profiles on a machine without network access, use
+`./install.sh codex --agents-only --project ../my-project` (or `claude`, `copilot`, or
+`antigravity`). This path requires Bash, jq, and Python 3. Use it when the checkout already
+supplies the skills and rules referenced by the profiles.
+
+The legacy `./install.sh gemini --project ../my-project` target writes `GEMINI.md`.
+Use `./install.sh doctor` to check prerequisites and `./install.sh imports` for
+third-party plugin and CLI setup instructions.
 
 Claude Code users can alternatively add this repo as a plugin marketplace
 (`.claude-plugin/marketplace.json`) and install individual packs — see "What's
@@ -106,16 +85,18 @@ or copy `scripts/repo-config.sh` and `docs/rules/*.md` into your repo by hand �
 otherwise the config-driven steps degrade to their defaults and rules-file
 references resolve to nothing.
 
+For a personal Claude install, `--user` accepts an existing `~/.claude` link to a user-owned configuration directory. Project installs require a real `.claude` directory. The installer checks descendant output directories for symlinks in both scopes and preserves linked settings files.
+
 #### Keeping a repo current
 
-`install.sh claude` records what it wrote in `.claude/.agentic-dev-tooling.lock`. Commit
-that file with the install. On a later run, a file that still matches the lock takes the
-upstream update, and a file you edited is skipped (`--force` overrides). A repo installed
-before the lock existed has no record, so every file that differs is skipped: run
-`install.sh claude --force` once on a clean tree, review the diff, and commit the lock. To re-run it on a
-schedule, copy [`templates/sync-tooling.yml`](templates/sync-tooling.yml) into your repo's
-`.github/workflows/`. It opens one draft PR when something changed, using a GitHub App token it
-mints at runtime (`SYNC_APP_CLIENT_ID` variable, `SYNC_APP_PRIVATE_KEY` secret).
+Commit the installer's lock files alongside the installed tooling. On a later install,
+unchanged managed files take upstream updates. The installer skips locally edited files
+and reports their paths. A differing file from a pre-lock install also needs reconciliation.
+Use a clean branch to review any replacements made with `--force`.
+
+The supplied sync workflow refreshes the Claude project install and opens a draft pull
+request for updates. Its setup and permissions are documented in the template.
+[Claude sync workflow](templates/sync-tooling.yml)
 
 To reserve customized paths for a higher-priority tooling layer, create
 `.claude/agentic-protected-paths.json` with, for example,

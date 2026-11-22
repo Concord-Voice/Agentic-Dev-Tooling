@@ -78,4 +78,15 @@ for t in "$tmp_codex" "$tmp_antigravity"; do
   [ -f "$t/scripts/repo-config.sh" ] || { echo "FAIL: $t skills source scripts/repo-config.sh, which was not installed"; exit 1; }
 done
 
+# A standalone target's skill must resolve its own executable helpers at the
+# native skill path, including helpers read from a trusted default-branch ref.
+for t in "$tmp_codex" "$tmp_antigravity"; do
+  for helper in pr-creation/lib.sh enhanced-pr-review/review-coverage.sh ste-writing/ste-lint.py; do
+    grep -qF ".agents/skills/$helper" "$t/.agents/skills/${helper%/*}/SKILL.md"
+    [[ -f "$t/.agents/skills/$helper" ]]
+  done
+  [[ -f "$t/.claude/repo-config.reference.md" ]]
+  [[ -f "$t/.claude/rules/labels.md" ]]
+done
+
 echo ok

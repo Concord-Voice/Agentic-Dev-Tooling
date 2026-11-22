@@ -1,166 +1,69 @@
-# CAPABILITIES.md
+# Platform capabilities
 
-`install.sh <platform>` compiles this repo's Claude-native source tree into
-each target platform's own format. Claude Code is served directly; Codex,
-Copilot, Gemini CLI, and Antigravity are served through a pinned compiler,
-[rulesync](https://github.com/dyoshikawa/rulesync) `16.7.0` (MIT, by
-dyoshikawa). This document is the honest result of actually running that
-pipeline against this repo's real content — not the original design
-assumptions. Where a cell says "converted" or "native", it was verified by
-running `install.sh` against a scratch target and inspecting the output — every
-deviation that verification turned up is written into the "Known non-portables"
-section below rather than left in a side document.
+Choose a target for each client that will open the consumer checkout. Use a full project install for the skills and their dependencies. Use `--agents-only` to refresh the portable specialist profiles in a checkout that already supplies its own skills, rules and hooks.
+
+```sh
+./install.sh codex --project ../my-project
+./install.sh copilot --agents-only --project ../my-project
+```
 
 ## Platform × layer matrix
 
-| | Skills | Instructions | Subagents | Hooks | MCP | Commands |
-|---|---|---|---|---|---|---|
-| **Claude Code** | native — `.claude/skills` | native — path-scoped rules docs at `.claude/rules/` (`--project` only); `CLAUDE.md` is a seeded root doc used to stage the other platforms | native — `.claude/agents` | full — `.claude/settings.json`, merged non-destructively | **manual, opt-in template** — `config/sonarqube.mcp.json` (secret-free) is never installed automatically; copy it into `.mcp.json` yourself | native (skills double as commands) |
-| **Codex** | raw-copied — `.agents/skills/<name>/` (not rulesync-transformed) | `AGENTS.md` (rulesync-generated) | **none** — not converted | converted — `.codex/hooks.json` (rulesync) | **not emitted at all** — `.codex/config.toml` carries permissions only, no `[mcp_servers]` section; configure `~/.codex/config.toml` by hand | — (Codex has no separate command layer here) |
-| **GitHub Copilot** | not copied by `install.sh copilot` itself — Copilot reads `.claude/skills` and `.agents/skills` natively, so skills only reach it if `install.sh claude` and/or `install.sh codex`/`antigravity` was also run against the same root | `.github/copilot-instructions.md` (rulesync) | **none** — not converted | **partial** — only `UserPromptSubmit`-shaped hooks survive; `PreToolUse`/`PostToolUse` guardrails (destructive-commands, protect-env-files, protect-sensitive, auto-format, test-reminder) are dropped | **empty scaffold only** — `.vscode/mcp.json` is written as `{"servers": {}}`; populate it by hand per Copilot's MCP docs | — |
-| **Gemini CLI** | not installed by this platform target | `GEMINI.md` only — direct copy of the seeded root doc, **not** rulesync-generated | **none** | **none** | **none** | **none** |
-| **Antigravity** | raw-copied — `.agents/skills/<name>/` (not rulesync-transformed) | `AGENTS.md` (rulesync-generated; no non-root `.agents/rules/` content shipped yet) | **none** — not converted | **partial** — `beforeSubmitPrompt`/`UserPromptSubmit` (detect-secrets.sh) is dropped; `PreToolUse`/`PostToolUse` guardrails (destructive-commands, protect-env-files, protect-sensitive, auto-format, test-reminder) convert and are retained | **empty scaffold only** — `.agents/mcp_config.json` is written as `{"mcpServers": {}}`; populate it by hand per Antigravity's MCP docs | — |
+| Target | Project instructions | Skills | Specialist profiles |
+|---|---|---|---|
+| Claude Code | Project rules in `.claude/rules/` | `.claude/skills/` | Markdown under `.claude/agents/`. The full install includes the Claude pack roster. |
+| Codex | `AGENTS.md` | `.agents/skills/` | TOML under `.codex/agents/` for design, implementation, defensive review, read-only research, documentation and feedback analysis. |
+| Antigravity | `AGENTS.md` | `.agents/skills/` | Markdown under `.agents/agents/` for code review, documentation, test authoring and feedback analysis. The test writer returns its validation command to the caller for execution. |
+| GitHub Copilot | `.github/copilot-instructions.md` | The Copilot target leaves skill installation to the other project targets. Copilot can discover skills in the resulting `.claude/skills/` or `.agents/skills/`. | `.github/agents/code-reviewer.agent.md` for PR review and analysis of supplied CI or tooling failure evidence. |
+| Gemini CLI | `GEMINI.md` | — | — |
 
-Legend: "native" = the platform reads this repo's Claude-native files
-directly, no compilation step. "converted" = rulesync transforms it.
-"raw-copied" = installed via a plain file copy, not rulesync's importer.
-"—" = platform has no equivalent layer this installer targets.
+The `--agents-only` install works offline with Bash, jq and Python 3. It supports the four clients with specialist profiles. It installs the selected profiles and records their hashes. Claude receives the portable Codex roster in this mode. Install or provision any project rules and skills referenced by a profile before assigning work that requires them.
 
-None of the five MCP cells above ship a real, populated server list for any
-platform — `config/sonarqube.mcp.json` is the one example template in this
-repo, and it's Claude-only and manual. See "Future work" below.
+For a standalone checkout, keep project files and referenced resources available inside the checkout or provision them when the environment is built. Claude supports project skill directories that are symlinks when their targets exist. An absolute link into one developer's machine cannot supply that skill to a fresh cloud checkout. [Claude skill discovery](https://code.claude.com/docs/en/skills#choose-where-skills-load) · [Antigravity discovery](https://antigravity.google/docs/customization-discovery/)
 
-## Known non-portables
+## Dispatch and permissions
 
-These are disclosed deliberately, not silently dropped. `install.sh` prints a
-matching `NOTE:` at install time for every item below that's runtime-visible,
-and `doctor` summarizes them in one line.
+Use the host's native dispatch operation and the installed role name. For feedback classification, pass the sanitized report payload to `feedback-analyst` in an analysis session provisioned for that data. The Claude profile uses an explicit empty tool list, which Claude Code documents as a tool-free launch. [Claude tool-list behavior](https://code.claude.com/docs/en/errors#agent-would-be-spawned-with-zero-tools)
 
-- **Subagents never convert, on any non-Claude platform.** rulesync's
-  `import --targets claudecode` hard-fails (exit 1) on this repo's real
-  `.claude/agents/*.md` frontmatter — any `description:` containing `": "`
-  inside an unquoted YAML scalar (e.g. `researcher.md`) breaks rulesync's
-  strict parser. Since the install pipeline chains commands with `&&`, a
-  failing subagent import would abort the whole run, so subagent import is
-  excluded entirely. Codex, Copilot, Gemini, and Antigravity installs ship
-  **no** subagent layer.
-- **Skills also hard-fail rulesync's importer** on real content, for two
-  independent reasons: `.claude/skills/_shared` has no `SKILL.md` by design
-  (a real cross-skill dependency, not a template — several skills reference
-  it via relative links), which rulesync's importer requires and aborts
-  without; and several skills (`ci-status`, `dev-lifecycle`,
-  `reproduce-then-fix`, `review-pr`, ...) use an unquoted
-  `argument-hint: [foo]`, which YAML parses as a one-element array where
-  rulesync's schema requires a string. Skills are therefore installed by
-  plain directory copy into `.agents/skills/<name>/` for Codex and
-  Antigravity — the verified native skills path for both — rather than
-  through rulesync's transform. Codex's actual frontmatter tolerance for
-  Claude-specific extra keys (`allowed-tools`, `argument-hint`, etc.) is
-  unverified beyond this, since the Codex CLI itself was not run against the
-  output.
-- **Copilot hooks are partial, not absent.** rulesync 16.7.0 does support
-  Copilot hook conversion, but only for hooks shaped like `UserPromptSubmit`
-  (Copilot's `userPromptSubmitted`). `PreToolUse`/`PostToolUse` matcher hooks
-  — every guardrail in `plugins/guardrails` (destructive-command gate,
-  env/secret protection, sensitive-path protection, auto-format, test
-  reminders) — are skipped with a warning printed to stderr by rulesync
-  (`Skipped matcher hook(s) for copilot (not supported): postToolUse,
-  preToolUse`) and are not present in the installed Copilot output at all.
-- **Antigravity hooks are also partial.** The `UserPromptSubmit`-mapped hook
-  (`detect-secrets.sh`, mapped from `beforeSubmitPrompt`) is unsupported by
-  rulesync's `antigravity-cli` target and is dropped silently by rulesync
-  (stderr-only warning); other hook events convert normally.
-- **Antigravity's permissions layer is global-scope only.** rulesync reports
-  `Target 'antigravity-cli' supports the feature 'permissions' only in global
-  scope` and skips it. A `--project`-scoped install therefore never writes
-  Antigravity permissions; only a `--global` rulesync invocation would (this
-  installer does not expose that flag).
-- **Gemini CLI has no rulesync target at all**, consistent with the consumer
-  Gemini CLI's 2026-06 sunset — rulesync's supported-tools table lists only
-  the two Antigravity targets under the Gemini config-tree family, no plain
-  Gemini CLI id. `install.sh gemini` therefore bypasses rulesync entirely and
-  writes `GEMINI.md` as a direct copy of the same seeded root doc used to
-  stage the Claude import — a real but minimal instructions file, not a
-  rulesync-rendered one. Skills, hooks, MCP, and commands are not installed
-  for this target. Use `antigravity` instead unless you're specifically on
-  Gemini Enterprise Code Assist.
-- **`fleet/` pack is Claude-desktop only**, opt-in via `--with-fleet`. It
-  depends on the Claude Code desktop session-management MCP
-  (`mcp__ccd_session_mgmt`) and is a no-op without that host — it is never
-  installed for non-Claude platforms, and is skipped on Claude installs
-  unless `--with-fleet` is passed.
-- **graphify is an external CLI, fetch-only.** It is not a skill or agent
-  tree bundled in this repo; `red-team` pairs well with a graphify-style
-  external scanner when your setup provides one, but ships with none
-  declared. See `imports/README.md` for fetch instructions.
-- **Copilot never receives skills from `install.sh copilot` alone.** Copilot's
-  native ability to read `.claude/skills` and `.agents/skills` only helps if
-  one of those directories already exists on the target root — which means
-  running `install.sh claude` (writes `.claude/skills`) and/or
-  `install.sh codex` or `antigravity` (writes `.agents/skills`) against the
-  same `--project` path first. `install.sh copilot` by itself installs
-  instructions and (partial) hooks; the MCP file it writes is an empty
-  scaffold, not real server config.
-- **Hook script paths only resolve when `install.sh claude` also targets the
-  same root.** The generated `.codex/hooks.json` and Antigravity's
-  `.agents/hooks.json` still reference `.claude/hooks/*.sh` relative paths.
-  If you install `codex` or `antigravity` into a project that never received
-  `install.sh claude` against the same root, those hook commands point at
-  files that don't exist.
-- **`.agents/rules/` (non-root rule docs) is unpopulated for every
-  platform.** `install.sh claude` stages the path-scoped rules docs into
-  `.claude/rules/`, and rulesync does import them — but it renders them
-  *inlined into the root file* (`AGENTS.md` / `GEMINI.md`) rather than as
-  separate non-root detail docs. So the rules content does reach every
-  rulesync-compiled platform; what is lost is the path scoping (the
-  `paths:` frontmatter that makes a rule apply only to matching files),
-  which becomes always-on prose. Non-Claude platforms therefore carry a
-  larger root instructions file than Claude Code does.
-- **SonarQube MCP is opt-in and inert by default.** `config/sonarqube.mcp.json`
-  is a secret-free template (`${SONARQUBE_TOKEN}` etc. via env expansion); it
-  is not installed automatically by any platform target and is gated behind
-  `quality_gate.enabled` in `repo-config.json` for the skills that use it.
+When a policy requires credential isolation, verify the host's actual credentials and tool access before dispatch. In particular, a Codex custom agent inherits its parent's permissions and MCP servers. Its supported feature switches can disable specific capabilities. A role file cannot independently enforce a read-only identity. [Codex custom agents](https://learn.chatgpt.com/docs/agent-configuration/subagents) · [Antigravity tool and permission inheritance](https://antigravity.google/docs/subagents/)
 
-## Future work
+For untrusted PRs, Codex review requires an independent worker before the caller collects the diff. Use Python 3.11+ and the trusted Codex CLI on a host with working filesystem confinement. Resolve `ADT` to the verified tooling checkout outside the PR. For example, the following checks the review environment before a trusted collector stages the requested PR.
 
-- **MCP seeding from a shared source.** No platform target currently emits a
-  populated MCP server list — Codex gets none at all, Copilot and Antigravity
-  get empty `{}` scaffolds, and Claude's `config/sonarqube.mcp.json` template
-  is copy-by-hand only. A follow-up could seed rulesync's staged import with
-  this repo's MCP templates so `generate` renders them per platform, instead
-  of leaving every non-Claude platform's MCP file empty. Tracked as a gap,
-  not silently left out.
+```bash
+set -eu
+worker="$ADT/scripts/codex-isolated-review.py"
+python3 -I -B "$worker" --role code-reviewer --check
+review_dir="$(mktemp -d)"
+gh pr diff "$pr_number" --repo "$target_repo" --color=never > "$review_dir/input.diff"
+python3 -I -B "$worker" --role code-reviewer --input "$review_dir/input.diff"
+```
 
-## How the compilation works
+The helper starts a separate Codex app server in an empty directory and checks its effective filesystem policy, approvals and MCP inventory before opening the input. It stages no repository checkout, hooks or connectors. The sandbox probe verifies that workspace writes and reads of a private sibling file are denied. The review uses the source role's model and effort with an existing ChatGPT subscription login. The preflight performs no inference. A failed check leaves the reviewer pending. The helper accepts six defensive reviewer names listed by `--help`; research with Context7 and payload-only feedback classification require their own independently verified capabilities.
 
-1. **Stage.** `install_claude` runs once into a throwaway `mktemp -d`
-   directory (`$stage`), producing a Claude-native tree: `.claude/skills`,
-   `.claude/agents`, `.claude/hooks`, `.claude/rules`, plus a seeded minimal
-   root `CLAUDE.md` (this repo ships no root doc by default, and rulesync's
-   importer reports "No rule files found" and imports nothing without one).
-2. **Convert.** For non-Claude platforms, `npx rulesync@16.7.0 import
-   --targets claudecode -f rules,mcp,hooks,permissions` reads `$stage` (rules,
-   MCP, hooks, and permissions only — subagents and skills are excluded per
-   the non-portables above), then `rulesync generate --targets <id>
-   --output-roots <second tmp dir>` renders the platform-specific files into
-   a **second** throwaway staging directory (`$genout`) — never directly into
-   the adopter's project. Gemini bypasses this step and writes `GEMINI.md`
-   directly from the staged root doc. **`$stage` never contains an MCP source
-   file** (`install_claude` doesn't seed one), so the `mcp` feature has
-   nothing real to import or render — this is why every generated MCP output
-   is empty or absent rather than populated; see "Future work" below.
-3. **Install via `copy()`, no-clobber.** Every file under `$genout` (and, for
-   Claude, every file staged directly) is installed into the real target
-   through the same `copy()` function: if the destination doesn't exist, it's
-   created; if it exists and is byte-identical, nothing happens; if it exists
-   and differs, the install is **skipped** with `skip (local changes, use
-   --force): <path>` unless `--force` is passed, which overwrites it. This
-   makes every platform's install idempotent and safe to re-run without
-   destroying hand-edits — verified by hand-editing a generated `AGENTS.md`,
-   re-running the installer, and confirming the edit survives until `--force`
-   is passed.
-4. **Report.** Any degradation the compiler applied (Copilot's dropped
-   guardrail hooks, Antigravity's dropped `beforeSubmitPrompt` hook and
-   global-only permissions, Gemini's non-rulesync path, the fleet pack's host
-   dependency) is echoed as a `NOTE:` line on stdout during install, and
-   summarized again by `install.sh doctor`.
+The independent reviewer returns a validated JSON object containing a completion status and up to 40 findings. Each finding identifies a severity, a diagnostic category and an inclusive line range in the staged input, counted from one at LF boundaries. The caller can show the reviewer role and those codes to the maintainer, who can inspect that range in the original diff. The example keeps the private staged file for that inspection. Remove the temporary directory after disposition. Unsupported fields, free text, duplicate entries and invalid locations block the review. A finding by itself never authorizes a mutation.
+
+The GitHub review profile uses read and search tools. Supply a PR diff or relevant job failure evidence for the requested investigation. Automatic PR review is controlled by GitHub rulesets, and a failed workflow needs a configured trigger. Installing the profile alone schedules zero jobs. [GitHub custom agents](https://docs.github.com/en/copilot/concepts/customizations/custom-agents) · [GitHub automations](https://docs.github.com/en/copilot/concepts/agent-capabilities/agent-powered-workflows-and-operations/about-automations)
+
+Codex profiles translate the Claude source model and effort using the literal model and effort table rows. The renderer resolves starred model families against the reviewed Codex CLI 0.171.0 catalog snapshot so an offline install produces the same pins. Update the snapshot from `codex debug models --bundled` when releasing new family versions. A missing model or unsupported effort on the target account makes that role unavailable. The GitHub custom review agent retains the source Opus class with the `claude-opus-5.5` ID listed by Copilot CLI 1.0.115-5. GitHub controls the model and billing for its separate automatic PR review service. Antigravity’s bounded roles select its native `flash` tier and inherit the host’s supported effort. [Model equivalence table](plugins/core-lifecycle/skills/_shared/model-equivalence.md) · [GitHub cloud model availability](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/cloud-agent/changing-the-ai-model) · [Antigravity agent configuration](https://antigravity.google/docs/subagents/)
+
+## Hooks and MCP
+
+| Target | Hook registration from a full install | MCP configuration from the installer |
+|---|---|---|
+| Claude Code | `.claude/settings.json` merges the base wiring with existing project hooks. `--with-fleet` adds the desktop supervision pack. | Optional SonarQube template in `config/sonarqube.mcp.json`. |
+| Codex | rulesync emits `.codex/hooks.json`. | The generated `.codex/config.toml` contains permission configuration. Configure required servers or connectors for the trusted project or user. |
+| Antigravity | `.agents/hooks.json` retains the converted pre- and post-tool hooks. The `antigravity-cli` target drops the prompt-submit hook and supports permission generation at global scope only. | Empty `.agents/mcp_config.json` scaffold. |
+| GitHub Copilot | rulesync retains the prompt-submit hook. It drops pre- and post-tool matcher hooks. | Empty `.vscode/mcp.json` scaffold for local use. GitHub cloud review has its own repository MCP configuration. |
+| Gemini CLI | — | — |
+
+The installer supplies the scripts under `.claude/hooks/` that the generated hook configurations call. An installed script only runs when its event and matcher survive conversion and the host accepts the configuration. For the optional fleet pack, the desktop session also needs the session-management MCP. For SonarQube, configure the template and runtime environment variables using the setup guide. For Context7-dependent work, confirm the active client exposes both the library-resolution and documentation-query operations. [SonarQube setup](config/mcp-README.md) · [Codex MCP](https://learn.chatgpt.com/docs/extend/mcp) · [Copilot MCP](https://docs.github.com/en/copilot/concepts/customizations/mcp)
+
+## Installation and updates
+
+The Claude pack sources live under `plugins/`. The full installer stages a temporary Claude project and uses pinned rulesync 16.7.0 for rules, hook wiring and supported permission output. Gemini receives the staged root instruction document directly. The converted instructions can inline rules that Claude would apply only to matching paths. The installer writes selected agent profiles in the client’s own format, independently of rulesync's agent importer. [rulesync](https://github.com/dyoshikawa/rulesync)
+
+Codex and Antigravity receive complete skill directories, including referenced files under `_shared/`. The installer skips authoring templates that only contain `SKILL.md.template`. Project resources such as `scripts/repo-config.sh` support config-driven steps. Each host determines which skill metadata it recognizes.
+
+Commit the installed assets and lock files together. Claude uses `.claude/.agentic-dev-tooling.lock`. The other project targets track their output under `.claude/.agentic-dev-tooling.<platform>.lock`. On refresh, the installer updates unchanged managed files and reports local edits. The `--force` option can replace local edits. Paths reserved in `.claude/agentic-protected-paths.json` retain their protection during a force install. [Installer](install.sh)
+
+The platform smoke test installs into separate temporary repositories, verifies the expected files and exercises protection of local changes. To confirm activation on a particular host, start a fresh session in the installed checkout and inspect its available profiles, tools and hook trust. [Platform smoke test](scripts/test-install-platforms.sh)
