@@ -202,7 +202,7 @@ install_claude() {
   # $HOME, so they're inert there. For --user we rewrite any ".claude/hooks/..." command
   # (base- or adopter-supplied) to the absolute path they were just installed at.
   merged_settings="$(mktemp "$dot/.settings.XXXXXXXX")"
-  if jq -s --arg abs_prefix "$root/.claude/hooks/" --argjson userscope "$([ "$USER_SCOPE" = 1 ] && echo true || echo false)" '
+  if jq -s --arg abs_prefix "$root/.claude/hooks/" --argjson userscope "$([[ "$USER_SCOPE" = 1 ]] && echo true || echo false)" '
     # --user rewrote earlier commands to absolute paths, so compare in relative form.
     def norm: if type == "string" and startswith($abs_prefix) then ".claude/hooks/" + ltrimstr($abs_prefix) else . end;
     (.[0]) as $adopter | (.[1]) as $base |
