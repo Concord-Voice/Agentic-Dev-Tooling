@@ -6,7 +6,6 @@ import json
 import os
 from pathlib import Path
 import runpy
-import shutil
 import stat
 import sys
 import tempfile
@@ -61,14 +60,28 @@ def directory(path, *, private=False):
         raise ValueError("fleet cache requires a trusted directory")
 
 
+def trusted_parent(parent):
+    if not os.path.lexists(parent):
+        return
+    st = parent.lstat()
+    if stat.S_ISLNK(st.st_mode):
+        if st.st_uid != 0:
+            raise ValueError("linked parent of fleet cache")
+        return
+    public_sticky_root = st.st_uid == 0 and bool(st.st_mode & stat.S_ISVTX)
+    if st.st_uid not in (0, os.getuid()) or (st.st_mode & 0o022 and not public_sticky_root):
+        raise ValueError("untrusted parent of fleet cache")
+
+
 def cache_root(cache):
     if not cache.is_absolute() or cache != Path(os.path.abspath(cache)):
         raise ValueError("fleet cache requires a normalized absolute path")
     # macOS /tmp and /var are root-owned aliases. A user-controlled link
     # in the supplied cache path has no authority to select another location.
     for parent in cache.parents:
-        if parent.is_symlink() and parent.lstat().st_uid != 0:
-            raise ValueError("linked parent of fleet cache")
+        trusted_parent(parent)
+    for parent in cache.parent.resolve().parents:
+        trusted_parent(parent)
     cache.mkdir(mode=0o700, parents=True, exist_ok=True)
     directory(cache)
     root = cache.resolve() / "fleet-workflows"
@@ -107,30 +120,38 @@ def verify_tree(root, files):
         raise ValueError("incomplete fleet edition")
 
 
+def write_edition(stage, files):
+    for relative, contents in files.items():
+        out = stage / relative
+        for parent in reversed(relative.parents):
+            (stage / parent).mkdir(mode=0o700, exist_ok=True)
+        with out.open("xb") as stream:
+            os.fchmod(stream.fileno(), 0o700 if out.suffix == ".sh" else 0o600)
+            stream.write(contents)
+
+
+def publish_edition(target, files):
+    with tempfile.TemporaryDirectory(prefix=".preparing-", dir=target.parent) as temporary:
+        # Rename a child so TemporaryDirectory always owns a real cleanup root.
+        stage = Path(temporary, "edition")
+        stage.mkdir(mode=0o700)
+        write_edition(stage, files)
+        try:
+            stage.rename(target)
+        except OSError:
+            # A concurrent process may have completed the same immutable edition.
+            # The caller verifies it before returning any entry from that tree.
+            if not os.path.lexists(target):
+                raise
+
+
 def resolve(cache, skill):
     if skill not in SKILLS:
         raise ValueError("unknown fleet workflow")
     digest, files = edition()
-    root = cache_root(cache)
-    target = root / digest
+    target = cache_root(cache) / digest
     if not os.path.lexists(target):
-        stage = Path(tempfile.mkdtemp(prefix=".preparing-", dir=root))
-        try:
-            for relative, contents in files.items():
-                out = stage / relative
-                for parent in reversed(relative.parents):
-                    (stage / parent).mkdir(mode=0o700, exist_ok=True)
-                with out.open("xb") as stream:
-                    os.fchmod(stream.fileno(), 0o700 if out.suffix == ".sh" else 0o600)
-                    stream.write(contents)
-            try:
-                stage.rename(target)
-            except OSError:
-                if not os.path.lexists(target):
-                    raise
-        finally:
-            if stage.exists():
-                shutil.rmtree(stage)
+        publish_edition(target, files)
     verify_tree(target, files)
     return target / "skills" / skill / "SKILL.md"
 

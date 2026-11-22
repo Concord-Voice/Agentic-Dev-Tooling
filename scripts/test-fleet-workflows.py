@@ -38,7 +38,8 @@ class FleetWorkflowTests(unittest.TestCase):
             self.assertIn("../_shared/nested-skills.md", path.read_text())
         all_text = "\n".join(p.read_text() for p in edition.rglob("*.md"))
         for term in ["red-team", "red_team.", ".review_agents", ".weekly_deps.deep_review_skill",
-                     ".agents.escalation`", "executable proof-of-concept"]:
+                     ".agents.escalation`", "executable proof-of-concept", "adversarial security pass",
+                     "dynamic skill scoping (mandatory)"]:
             self.assertNotIn(term, all_text.lower())
         text = entry.read_text()
         for phase in range(1, 11):
@@ -124,6 +125,12 @@ class FleetWorkflowTests(unittest.TestCase):
                 fleet.cache_root(self.cache / "child")
             self.assertFalse((self.tmp / "child").exists())
         self.cache.unlink()
+        unsafe = self.tmp / "shared"
+        unsafe.mkdir()
+        unsafe.chmod(0o777)
+        with self.assertRaises(ValueError):
+            fleet.cache_root(unsafe / "target")
+        self.assertFalse((unsafe / "target").exists())
         self.cache.mkdir(mode=0o700)
         (self.cache / "fleet-workflows").symlink_to(self.tmp, target_is_directory=True)
         with self.assertRaises(ValueError):
@@ -158,6 +165,11 @@ class FleetWorkflowTests(unittest.TestCase):
         config.write_text('{"value": "working tree"}')
         self.assertEqual(read(good).stdout.strip(), "false")
         self.assertEqual(read(empty).stdout.strip(), "absent")
+        fallback = run("bash", "-ec",
+                       'source "$1"; fleet_load_config "$2"; rc_get \'.labels.namespaces | join(" ")\' "type area"; '
+                       'source "$3"; printf "|%s" "$LABEL_NAMESPACES"',
+                       "test", helper, empty, str(fleet.ROOT / fleet.CORE / "pr-creation/lib.sh"))
+        self.assertEqual(fallback.stdout, "type area|type area domain release risk routine workflow-validation")
         config.write_text("invalid")
         self.assertNotEqual(read(commit()).returncode, 0)
         config.unlink()

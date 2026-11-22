@@ -2,7 +2,7 @@
 # Sourced only from the verified fleet edition, with the exact default-branch OID.
 fleet_load_config() {
   local oid="$1" entry
-  case "$oid" in ''|*[!0-9a-f]*) return 1 ;; esac
+  [[ "$oid" =~ ^[0-9a-f]+$ ]] || return 1
   case "${#oid}" in 40|64) ;; *) return 1 ;; esac
   git cat-file -e "$oid^{commit}" || return 1
   entry="$(git ls-tree "$oid" -- .claude/repo-config.json)" || return 1
@@ -18,8 +18,15 @@ fleet_load_config() {
   esac
 }
 rc_get() {
-  jq -r --arg fallback "${2:-}" "($1) | if . == null then \$fallback elif type == \"string\" then . else tostring end" <<<"$RC_TRUSTED_CFG"
+  local filter="$1" fallback="${2:-}"
+  local result
+  if result="$(jq -r --arg fallback "$fallback" "($filter) | if . == null then \$fallback elif type == \"string\" then . else tostring end" <<<"$RC_TRUSTED_CFG" 2>/dev/null)"; then
+    printf '%s' "$result"
+  else
+    printf '%s' "$fallback"
+  fi
 }
 rc_has() {
-  jq -e "($1) != null" >/dev/null <<<"$RC_TRUSTED_CFG"
+  local filter="$1"
+  jq -e "($filter) != null" >/dev/null <<<"$RC_TRUSTED_CFG"
 }
