@@ -34,12 +34,13 @@ set -eu
 worker="$ADT/scripts/codex-isolated-review.py"
 python3 -I -B "$worker" --role code-reviewer --check
 review_dir="$(mktemp -d)"
-trap 'rm -rf "$review_dir"' EXIT
 gh pr diff "$pr_number" --repo "$target_repo" --color=never > "$review_dir/input.diff"
 python3 -I -B "$worker" --role code-reviewer --input "$review_dir/input.diff"
 ```
 
 The helper starts a separate Codex app server in an empty directory and checks its effective filesystem policy, approvals and MCP inventory before opening the input. It stages no repository checkout, hooks or connectors. The sandbox probe verifies that workspace writes and reads of a private sibling file are denied. The review uses the source role's model and effort with an existing ChatGPT subscription login. The preflight performs no inference. A failed check leaves the reviewer pending. The helper accepts six defensive reviewer names listed by `--help`; research with Context7 and payload-only feedback classification require their own independently verified capabilities.
+
+The independent reviewer returns a validated JSON object containing a completion status and up to 40 findings. Each finding identifies a severity, a diagnostic category and an inclusive line range in the staged input, counted from one at LF boundaries. The caller can show the reviewer role and those codes to the maintainer, who can inspect that range in the original diff. The example keeps the private staged file for that inspection. Remove the temporary directory after disposition. Unsupported fields, free text, duplicate entries and invalid locations block the review. A finding by itself never authorizes a mutation.
 
 The GitHub review profile uses read and search tools. Supply a PR diff or relevant job failure evidence for the requested investigation. Automatic PR review is controlled by GitHub rulesets, and a failed workflow needs a configured trigger. Installing the profile alone schedules zero jobs. [GitHub custom agents](https://docs.github.com/en/copilot/concepts/customizations/custom-agents) · [GitHub automations](https://docs.github.com/en/copilot/concepts/agent-capabilities/agent-powered-workflows-and-operations/about-automations)
 

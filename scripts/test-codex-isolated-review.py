@@ -23,6 +23,8 @@ import codex_review_session as session
 
 BINARY = Path(sys.executable).resolve()
 CWD = str(SCRIPTS)
+FINDING = {"line": 1, "end_line": 1, "severity": "P2", "category": "correctness"}
+REPORT = {"status": "complete", "findings": [FINDING]}
 ROLE = {"model": "test-model", "model_reasoning_effort": "high", "developer_instructions": "Review supplied text."}
 
 
@@ -51,7 +53,7 @@ class FixtureRpc(session.Rpc):
         }
         self.notifications = [
             {"method": "item/completed", "params": {"threadId": "thread-1", "turnId": "turn-1",
-             "item": {"type": "agentMessage", "phase": "final_answer", "text": "fixture final"}}},
+             "item": {"type": "agentMessage", "phase": "final_answer", "text": json.dumps(REPORT)}}},
             {"method": "turn/completed", "params": {"threadId": "thread-1",
              "turn": {"id": "turn-1", "status": "completed"}}},
         ]
@@ -96,7 +98,7 @@ class IsolatedReviewTest(unittest.TestCase):
             self.assertEqual(rpc.methods(), preflight)
             return "staged fixture"
 
-        self.assertEqual(rpc.run(read), "fixture final")
+        self.assertEqual(json.loads(rpc.run(read)), REPORT)
         self.assertEqual(rpc.methods(), preflight + ["turn/start"])
         start = rpc.sent[3]["params"]
         self.assertEqual(start["permissions"], "adt-review")
@@ -106,8 +108,53 @@ class IsolatedReviewTest(unittest.TestCase):
         self.assertEqual(start["selectedCapabilityRoots"], [])
         self.assertFalse(start["allowProviderModelFallback"])
         self.assertEqual(rpc.sent[4]["params"], {"threadId": "thread-1"})
-        self.assertEqual(rpc.sent[-1]["params"]["input"][0]["text"], "staged fixture")
+        self.assertEqual(rpc.sent[-1]["params"]["input"][0]["text"], "1\tstaged fixture")
+        self.assertEqual(rpc.sent[-1]["params"]["outputSchema"], session.report_schema(1))
         self.assertTrue(rpc.closed_for_test)
+
+    def test_unsanctioned_model_text_never_leaves_the_session(self):
+        free_text = "private fixture text is never returned"
+        bad_reports = [
+            free_text, "{", "[]", '{"status":"complete","status":"complete","findings":[]}',
+            '{"status":"complete","findings":[{"line":1,"line":1,"end_line":1,"severity":"P2","category":"tests"}]}',
+            json.dumps({**REPORT, "note": free_text}), json.dumps({**REPORT, "status": free_text}),
+            json.dumps({"status": "complete", "findings": [FINDING, FINDING]}),
+        ]
+        for changes in ({"text": free_text}, {"severity": free_text}, {"category": free_text},
+                        {"line": 0}, {"line": True}, {"line": "1"}, {"end_line": 2},
+                        {"end_line": False}, {"end_line": 1.0}):
+            bad_reports.append(json.dumps({"status": "complete", "findings": [{**FINDING, **changes}]}))
+        for raw in bad_reports:
+            with self.subTest(report=raw):
+                rpc = FixtureRpc()
+                rpc.notifications[0]["params"]["item"]["text"] = raw
+                with redirect_stdout(io.StringIO()) as output, self.assertRaises(RuntimeError) as error:
+                    rpc.run(lambda: "one line")
+                self.assertEqual(str(error.exception), "Reviewer returned an invalid findings report")
+                self.assertEqual(output.getvalue(), "")
+                self.assertTrue(rpc.closed_for_test)
+
+    def test_findings_reference_supplied_lines_and_are_bounded(self):
+        findings = [{**FINDING, "line": i, "end_line": i} for i in range(1, 42)]
+        report = {"status": "complete", "findings": findings[:40]}
+        self.assertEqual(json.loads(session.validated_report(json.dumps(report), 41)), report)
+        for bad in (findings, [{**FINDING, "line": 2, "end_line": 1}]):
+            with self.subTest(count=len(bad)), self.assertRaises(RuntimeError):
+                session.validated_report(json.dumps({**report, "findings": bad}), 41)
+        empty = {"status": "insufficient-evidence", "findings": []}
+        self.assertEqual(json.loads(session.validated_report(json.dumps(empty), 1)), empty)
+        rpc = FixtureRpc()
+        rpc.run(lambda: "first line\nsecond line")
+        params = rpc.sent[-1]["params"]
+        self.assertEqual(params["input"][0]["text"], "1\tfirst line\n2\tsecond line")
+        schema = params["outputSchema"]
+        self.assertFalse(schema["additionalProperties"])
+        findings_schema = schema["properties"]["findings"]
+        self.assertEqual(findings_schema["maxItems"], 40)
+        self.assertFalse(findings_schema["items"]["additionalProperties"])
+        for key in ("line", "end_line"):
+            self.assertEqual(findings_schema["items"]["properties"][key],
+                             {"type": "integer", "minimum": 1, "maximum": 2})
 
     def test_unsafe_or_incomplete_policy_stops_before_reading_payload(self):
         missing = object()
@@ -218,7 +265,7 @@ class IsolatedReviewTest(unittest.TestCase):
                 "        print(json.dumps(reply), flush=True)\n"
             )
             answer = session.run_session(BINARY, work, {"PATH": os.defpath}, ROLE, lambda: "staged text")
-            self.assertEqual(answer, "fixture final")
+            self.assertEqual(json.loads(answer), REPORT)
 
     def test_invalid_rpc_frames_and_deadline_terminate_cleanly(self):
         for raw in (b"", b"not-json", b"[]", b'{"jsonrpc":"1.0"}'):

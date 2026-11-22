@@ -18,6 +18,70 @@ DISABLED_FEATURES = (
 MAX_LINE = 8 * 1024 * 1024
 
 
+REPORT_STATUSES = ("complete", "insufficient-evidence")
+SEVERITIES = ("P0", "P1", "P2", "P3")
+CATEGORIES = ("correctness", "security", "permissions", "data-integrity", "compatibility",
+              "performance", "reliability", "maintainability", "tests", "documentation",
+              "scope", "migration", "accessibility")
+MAX_FINDINGS = 40
+
+
+def report_schema(line_count):
+    position = {"type": "integer", "minimum": 1, "maximum": line_count}
+    fields = {
+        "line": position, "end_line": position,
+        "severity": {"type": "string", "enum": list(SEVERITIES)},
+        "category": {"type": "string", "enum": list(CATEGORIES)},
+    }
+    item = {"type": "object", "properties": fields, "required": list(fields),
+            "additionalProperties": False}
+    return {
+        "type": "object", "additionalProperties": False, "required": ["status", "findings"],
+        "properties": {"status": {"type": "string", "enum": list(REPORT_STATUSES)},
+                       "findings": {"type": "array", "maxItems": MAX_FINDINGS, "items": item}},
+    }
+
+
+def _unique_keys(pairs):
+    result = dict(pairs)
+    if len(result) != len(pairs):
+        raise ValueError("duplicate keys")
+    return result
+
+
+def _finding(raw, line_count):
+    if type(raw) is not dict or raw.keys() != {"line", "end_line", "severity", "category"}:
+        raise ValueError
+    start, end, severity, category = (raw[k] for k in ("line", "end_line", "severity", "category"))
+    if type(start) is not int or type(end) is not int or not 1 <= start <= end <= line_count:
+        raise ValueError
+    if severity not in SEVERITIES or category not in CATEGORIES:
+        raise ValueError
+    return start, end, severity, category
+
+
+def validated_report(text, line_count):
+    """Rebuild the only worker output allowed back into the privileged parent."""
+    try:
+        if len(text) > 32 * 1024:
+            raise ValueError
+        raw = json.loads(text, object_pairs_hook=_unique_keys)
+        if type(raw) is not dict or raw.keys() != {"status", "findings"}:
+            raise ValueError
+        status, items = raw["status"], raw["findings"]
+        if status not in REPORT_STATUSES or type(items) is not list or len(items) > MAX_FINDINGS:
+            raise ValueError
+        findings = [_finding(item, line_count) for item in items]
+        if len(set(findings)) != len(findings):
+            raise ValueError
+    except (ValueError, TypeError, RecursionError):
+        raise RuntimeError("Reviewer returned an invalid findings report") from None
+    return json.dumps({"status": status, "findings": [
+        {"line": start, "end_line": end, "severity": severity, "category": category}
+        for start, end, severity, category in sorted(findings)
+    ]}, separators=(",", ":"))
+
+
 class Rpc:
     """Line-delimited JSON-RPC with a deadline and no client-executed tools."""
 
@@ -212,10 +276,17 @@ def _review(rpc, thread_id, role, payload):
     completed = {}
     finals = {}
     observe = partial(_record_notification, thread_id=thread_id, completed=completed, finals=finals)
+    # Match physical lines in the staged Git diff, including blank lines.
+    # Unicode line separators inside a filename or hunk do not shift references.
+    lines = payload.removesuffix("\n").split("\n") if payload else []
+    if not lines:
+        raise RuntimeError("No review input lines were provided")
+    numbered = "\n".join(f"{number}\t{line}" for number, line in enumerate(lines, 1))
     turn = rpc.request("turn/start", {
         "threadId": thread_id, "environments": [], "model": role["model"],
         "effort": role["model_reasoning_effort"],
-        "input": [{"type": "text", "text": payload, "text_elements": []}],
+        "outputSchema": report_schema(len(lines)),
+        "input": [{"type": "text", "text": numbered, "text_elements": []}],
     }, deadline, observe)["turn"]["id"]
     while turn not in completed:
         message = rpc.receive(deadline)
@@ -224,7 +295,7 @@ def _review(rpc, thread_id, role, payload):
         observe(message)
     if completed[turn] != "completed" or not finals.get(turn, "").strip():
         raise RuntimeError("Codex review finished without a final text answer")
-    return finals[turn]
+    return validated_report(finals[turn], len(lines))
 
 
 def run_session(binary, cwd, environment, role, read_payload=None):
