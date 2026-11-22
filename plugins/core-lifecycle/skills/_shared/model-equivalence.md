@@ -41,7 +41,7 @@ After the general pin translation above, Codex applies role-specific assignments
 
 GPT-6 Sol is an explicitly pinned security baseline that replaces the phased-out `gpt-daybreak-blue-latest` assignment. It is not a new capability equivalence, and it is never passed as a dispatch-time override. The translator applies these assignments only while generating `.codex/agents/*.toml`; the `.claude/agents/*.md` source pins stay untouched.
 
-The cyber baseline covers only the adversarial role. Other Opus-pinned agents, including `security-reviewer` and any repo-local domain reviewers, are not in it: no override has been decided for them, so they follow the default Opus mapping (`gpt-6-astra`).
+Other Opus-pinned agents, including `security-reviewer`, follow the Opus row of the translation table above.
 
 An agent pinned to a Claude-only model (e.g. Mythos) is never an override row, because it gets no Codex profile at all: the translator skips it, and must fail rather than fall back to a default model for it.
 
@@ -49,10 +49,7 @@ An agent pinned to a Claude-only model (e.g. Mythos) is never an override row, b
 
 Agent files pin `effort` in Claude's vocabulary. Non-Claude surfaces translate as below.
 
-This is a **uniform one-rung down-shift, not a ceiling clamp**: a Codex rung reasons harder
-than the Claude rung of the same name, so mapping the names onto each other would run every
-mirrored agent hotter than its pin intends. Every row shifts, not just rows that would exceed
-a ceiling. Values in the Codex column are the literal `model_reasoning_effort` wire strings.
+The Codex column supplies the literal `model_reasoning_effort` wire strings. Use the row matching the source agent’s `effort` field.
 
 | Claude | OpenAI / Codex | Notes |
 |---|---|---|
@@ -70,9 +67,7 @@ speculative per-vendor prose.
 
 ## GitHub Copilot (including Copilot Fusion)
 
-There is no Copilot column yet: Agentic-Dev-Tooling does not generate Copilot custom agents (see
-its `CAPABILITIES.md`; consumer repositories receive this file without it). Two facts constrain
-the column when it is added:
+The installer generates one GitHub review profile. It preserves the source Opus class using the verified Copilot model ID documented in the tooling source’s `CAPABILITIES.md`. Two constraints govern Copilot model selection:
 
 - **Fusion has no fixed model.** It picks a model per prompt, and the running conversation
   cannot read which one. Nothing may depend on the orchestrator's model.

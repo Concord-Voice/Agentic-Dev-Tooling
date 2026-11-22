@@ -3,9 +3,10 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PLATFORM="${1:-}"; shift || true
-PROJECT=""; USER_SCOPE=0; WITH_FLEET=0; FORCE=0
+PROJECT=""; USER_SCOPE=0; WITH_FLEET=0; FORCE=0; AGENTS_ONLY=0
 while [ $# -gt 0 ]; do case "$1" in
   --project) PROJECT="$2"; shift 2;; --user) USER_SCOPE=1; shift;;
+  --agents-only) AGENTS_ONLY=1; shift;;
   --with-fleet) WITH_FLEET=1; shift;; --force) FORCE=1; shift;;
   *) echo "unknown flag $1" >&2; exit 2;; esac; done
 
@@ -23,6 +24,9 @@ need() { command -v "$1" >/dev/null || { echo "missing prerequisite: $1" >&2; ex
 
 init_protected() {
   PROTECT_ROOT="$1"
+  if [[ "$PROTECT_ROOT" = / || -L "$PROTECT_ROOT/.claude" ]]; then
+    echo "install into a project directory with its own .claude directory" >&2; exit 1
+  fi
   PROTECT_FILE="$PROTECT_ROOT/.claude/agentic-protected-paths.json"
   if [[ -L "$PROTECT_FILE" ]] || { [[ -e "$PROTECT_FILE" ]] && [[ ! -f "$PROTECT_FILE" ]]; }; then
     echo "protected paths must be a regular file, not a symlink: $PROTECT_FILE" >&2; exit 1
@@ -43,6 +47,29 @@ protected() { # true when the copied item overlaps a protected path, even under 
   jq -e --arg p "$rel" '.paths | any(. as $entry | $entry == $p or ($p | startswith($entry + "/")) or ($entry | startswith($p + "/")))' "$PROTECT_FILE" >/dev/null
 }
 
+# A native profile and its ownership record belong inside this checkout. Reject
+# linked parents even on an otherwise empty destination (including dangling links).
+check_parents() {
+  local path="${1%/*}"
+  while [[ "$path" != "$PROTECT_ROOT" ]]; do
+    if [[ -L "$path" ]]; then
+      echo "destination traverses a symlink: $path" >&2; exit 1
+    fi
+    path="${path%/*}"
+  done
+}
+
+init_lock() {
+  local root="$1" file=".agentic-dev-tooling.lock"
+  [ "$2" = claude ] || file=".agentic-dev-tooling.$2.lock"
+  LOCK="$root/.claude/$file"; LOCK_ROOT="$root"
+  check_parents "$LOCK"
+  if [[ -L "$LOCK" ]] || { [[ -e "$LOCK" ]] && [[ ! -f "$LOCK" ]]; }; then
+    echo "install lock must be a regular file: $LOCK" >&2; exit 1
+  fi
+  mkdir -p "$root/.claude"
+}
+
 copy() { # copy $1 -> $2 unless exists and differs without --force
   # `cp -R` must never run against an EXISTING destination directory: GNU cp (coreutils, the
   # default on Linux) nests the source inside it (dst/dst) when dst already exists, rather than
@@ -51,6 +78,8 @@ copy() { # copy $1 -> $2 unless exists and differs without --force
   # With LOCK set, a destination still holding exactly what the last install wrote is not a
   # local change, so upstream updates reach it; anything edited since keeps the skip.
   local src=$1 dst=$2
+  check_parents "$dst"
+  if [[ -L "$dst" ]]; then echo "skip (local symlink): $dst"; return 0; fi
   if protected "$dst"; then echo "skip (protected): $dst"; return 0; fi
   if [ -e "$dst" ]; then
     if diff -rq "$src" "$dst" >/dev/null 2>&1; then lock_record "$dst"; return 0; fi
@@ -86,7 +115,7 @@ install_claude() {
   mkdir -p "$root"; root="$(cd "$root" && pwd)"
   init_protected "$root"
   local dot="$root/.claude"
-  mkdir -p "$dot"; LOCK="$dot/.agentic-dev-tooling.lock"; LOCK_ROOT="$root"
+  init_lock "$root" claude
   for p in core-lifecycle guardrails release-ops reviewer-packs writing starter-memory; do
     [ -d "$HERE/plugins/$p/skills" ] && for s in "$HERE/plugins/$p/skills"/*/; do
       is_template_only_skill "$s" && continue
@@ -202,10 +231,29 @@ install_claude() {
   echo "claude install complete: $dot"
 }
 
+install_staged_files() {
+  local generated="$1" root="$2" f
+  while IFS= read -r -d '' f; do
+    copy "$f" "$root/${f#"$generated"/}"
+  done < <(find "$generated" -type f -print0)
+}
+
+install_agents_only() (
+  need python3; need jq
+  local root="${PROJECT:-$PWD}" stage
+  mkdir -p "$root"; root="$(cd "$root" && pwd)"
+  init_protected "$root"; init_lock "$root" "$PLATFORM"
+  stage="$(mktemp -d)"
+  trap 'rm -rf "$stage"' EXIT
+  python3 "$HERE/scripts/render-agent-profiles.py" "$PLATFORM" "$stage"
+  install_staged_files "$stage" "$root"
+  echo "$PLATFORM specialist profiles installed: $root"
+)
+
 install_rulesync_platform() {
   need npx; local local_root="${PROJECT:-$PWD}"
   mkdir -p "$local_root"; local_root="$(cd "$local_root" && pwd)"
-  init_protected "$local_root"
+  init_protected "$local_root"; init_lock "$local_root" "$PLATFORM"
 
   # rulesync target ids, verified empirically against rulesync@16.7.0's own
   # `generate --help` and `rulesync docs reference/supported-tools` -- NOT what
@@ -247,9 +295,10 @@ install_rulesync_platform() {
   cat > "$stage/CLAUDE.md" <<'MD'
 # AI agent instructions
 
-Installed via agentic-dev-tooling. See .claude/skills/, .claude/agents/, and
-.claude/hooks/ for available capabilities; .claude/repo-config.reference.md
-documents optional per-repo configuration.
+Use the skills and specialist profiles discovered by your client for this checkout.
+Use only its advertised operations. A required isolated dispatch needs an actual
+agent with the specified scope and permissions. Report a missing capability with
+its name and host. See .claude/repo-config.reference.md for project configuration.
 MD
 
   # `rulesync import --targets claudecode` with no -f imports only the "rules"
@@ -298,11 +347,18 @@ MD
     fi
   fi
 
-  # Install every rulesync-staged file into the real target through copy(),
-  # preserving relative paths (copy() mkdir -p's the parent dir for each).
-  while IFS= read -r -d '' f; do
-    copy "$f" "$local_root/${f#"$genout"/}"
-  done < <(find "$genout" -type f -print0)
+  if [ "$PLATFORM" != gemini ]; then
+    need python3
+    python3 "$HERE/scripts/render-agent-profiles.py" "$PLATFORM" "$genout"
+  fi
+  install_staged_files "$genout" "$local_root"
+
+  # Profiles and hooks reference the Claude rule/config paths even on a
+  # standalone install. Keep those paths usable without enabling Claude hooks.
+  for r in "$stage/.claude/rules"/*.md; do copy "$r" "$local_root/.claude/rules/$(basename "$r")"; done
+  copy "$stage/.claude/repo-config.reference.md" "$local_root/.claude/repo-config.reference.md"
+  copy "$stage/.claude/repo-config.example.json" "$local_root/.claude/repo-config.example.json"
+  copy "$HERE/scripts/repo-config.sh" "$local_root/scripts/repo-config.sh"
 
   # The converted hook configs still run .claude/hooks/<name>.sh, so ship those scripts too.
   for p in core-lifecycle guardrails release-ops reviewer-packs writing starter-memory; do
@@ -315,13 +371,14 @@ MD
   # granularity install_claude uses for the same skill directories.
   case "$PLATFORM" in
     codex|antigravity)
-      # Several skills source scripts/repo-config.sh from the project root.
-      copy "$HERE/scripts/repo-config.sh" "$local_root/scripts/repo-config.sh"
-      for p in core-lifecycle guardrails release-ops reviewer-packs writing starter-memory; do
-        [ -d "$HERE/plugins/$p/skills" ] && for s in "$HERE/plugins/$p/skills"/*/; do
-          is_template_only_skill "$s" && continue
-          copy "$s" "$local_root/.agents/skills/$(basename "$s")"
-        done
+      # Run the native bundled helpers from the same .agents path where the
+      # whole skill is installed. Preserve the skills' trusted-ref checks.
+      for s in "$stage/.claude/skills"/*; do
+        if [ -f "$s/SKILL.md" ]; then
+          sed -e 's|\.claude/skills/|.agents/skills/|g' "$s/SKILL.md" > "$s/SKILL.md.tmp"
+          mv "$s/SKILL.md.tmp" "$s/SKILL.md"
+        fi
+        copy "$s" "$local_root/.agents/skills/$(basename "$s")"
       done
       ;;
   esac
@@ -343,10 +400,19 @@ imports_cmd() {
     echo "claude CLI not found — follow the instructions above manually."
 }
 
+if [ "$AGENTS_ONLY" = 1 ]; then
+  case "$PLATFORM" in claude|codex|copilot|antigravity) ;; *) echo "--agents-only requires claude, codex, copilot or antigravity" >&2; exit 2 ;; esac
+  if [ "$USER_SCOPE" = 1 ] || [ "$WITH_FLEET" = 1 ]; then
+    echo "--agents-only installs project profiles; --user and --with-fleet are incompatible" >&2; exit 2
+  fi
+  install_agents_only
+  exit
+fi
+
 case "$PLATFORM" in
   claude) install_claude ;;
   doctor) doctor ;;
   imports) imports_cmd ;;
   codex|copilot|gemini|antigravity) install_rulesync_platform ;;
-  *) echo "usage: install.sh {claude|codex|copilot|gemini|antigravity|imports|doctor} [--project <path>|--user] [--with-fleet] [--force]" >&2; exit 2 ;;
+  *) echo "usage: install.sh {claude|codex|copilot|gemini|antigravity|imports|doctor} [--project <path>|--user] [--with-fleet] [--agents-only] [--force]" >&2; exit 2 ;;
 esac
