@@ -60,8 +60,8 @@ check_parents() {
 }
 
 init_lock() {
-  local root="$1" file=".agentic-dev-tooling.lock"
-  [ "$2" = claude ] || file=".agentic-dev-tooling.$2.lock"
+  local root="$1" platform="$2" file=".agentic-dev-tooling.lock"
+  [[ "$platform" == claude ]] || file=".agentic-dev-tooling.$platform.lock"
   LOCK="$root/.claude/$file"; LOCK_ROOT="$root"
   check_parents "$LOCK"
   if [[ -L "$LOCK" ]] || { [[ -e "$LOCK" ]] && [[ ! -f "$LOCK" ]]; }; then
@@ -347,7 +347,7 @@ MD
     fi
   fi
 
-  if [ "$PLATFORM" != gemini ]; then
+  if [[ "$PLATFORM" != gemini ]]; then
     need python3
     python3 "$HERE/scripts/render-agent-profiles.py" "$PLATFORM" "$genout"
   fi
@@ -374,7 +374,7 @@ MD
       # Run the native bundled helpers from the same .agents path where the
       # whole skill is installed. Preserve the skills' trusted-ref checks.
       for s in "$stage/.claude/skills"/*; do
-        if [ -f "$s/SKILL.md" ]; then
+        if [[ -f "$s/SKILL.md" ]]; then
           sed -e 's|\.claude/skills/|.agents/skills/|g' "$s/SKILL.md" > "$s/SKILL.md.tmp"
           mv "$s/SKILL.md.tmp" "$s/SKILL.md"
         fi
@@ -400,9 +400,9 @@ imports_cmd() {
     echo "claude CLI not found — follow the instructions above manually."
 }
 
-if [ "$AGENTS_ONLY" = 1 ]; then
+if [[ "$AGENTS_ONLY" == 1 ]]; then
   case "$PLATFORM" in claude|codex|copilot|antigravity) ;; *) echo "--agents-only requires claude, codex, copilot or antigravity" >&2; exit 2 ;; esac
-  if [ "$USER_SCOPE" = 1 ] || [ "$WITH_FLEET" = 1 ]; then
+  if [[ "$USER_SCOPE" == 1 || "$WITH_FLEET" == 1 ]]; then
     echo "--agents-only installs project profiles; --user and --with-fleet are incompatible" >&2; exit 2
   fi
   install_agents_only

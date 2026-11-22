@@ -66,6 +66,47 @@ def translation_tables():
     return models, efforts
 
 
+def render_codex(source, header, body, description, tools):
+    name = source.stem
+    models, efforts = translation_tables()
+    source_model, source_effort = value(header, "model"), value(header, "effort")
+    if source_model not in models or source_effort not in efforts:
+        raise ValueError(f"{source}: no approved Codex translation for {source_model}/{source_effort}")
+    policy = (
+        f"Source tool envelope: {tools}. Use only its authorized operations and "
+        "the permissions of the parent session. The parent host must enforce any "
+        "required isolation. Report unavailable operations.\n\n"
+    )
+    if name == "researcher":
+        policy += ("Use the approved Context7 server or connector's native library resolution "
+                   "and documentation query tools for external library contracts. "
+                   "If unavailable, report the missing documentation checkpoint.\n\n")
+    elif name == "security-reviewer":
+        policy += ("Perform a defensive, read-only review of the supplied changes and "
+                   "recommend mitigations from the repository evidence.\n\n")
+    lines = (policy + body).split("\n")
+    instructions = "\n".join(quote(line)[1:-1] for line in lines)
+    content = (
+        f"name = {quote(name)}\ndescription = {quote(description)}\n"
+        f"model = {quote(models[source_model])}\n"
+        f"model_reasoning_effort = {quote(efforts[source_effort])}\n"
+        f'developer_instructions = """\n{instructions}"""\n'
+    )
+    if name == "feedback-analyst":
+        if tools != "[]":
+            raise ValueError("feedback-analyst must declare an empty tool list")
+        content += (
+            "\n[features]\nshell_tool = false\napps = false\nplugins = false\n"
+            "memories = false\nrequest_permissions_tool = false\n"
+            "\n[skills]\ninclude_instructions = false\n"
+        )
+    elif name == "researcher":
+        # The source uses Context7 through MCP. Connector support can be
+        # required on this client, while the source grants no shell.
+        content += "\n[features]\nshell_tool = false\nrequest_permissions_tool = false\n"
+    return content
+
+
 def render(source, platform):
     _, header, body = source.read_text(encoding="utf-8").split("---\n", 2)
     name = value(header, "name")
@@ -74,7 +115,9 @@ def render(source, platform):
     description = value(header, "description")
     tools = value(header, "tools")
     turns = int(value(header, "maxTurns"))
-    body = re.sub(r"(?ms)^## Turn Budget\n.*?(?=^## |\Z)", "", body).strip()
+    sections = re.split(r"(?=^## )", body, flags=re.MULTILINE)
+    body = "".join(section for section in sections
+                   if not section.startswith("## Turn Budget\n")).strip()
     # Keep the skill references at the client's native install path.
     if platform in ("antigravity", "codex"):
         body = body.replace(".claude/skills/", ".agents/skills/")
@@ -85,50 +128,14 @@ def render(source, platform):
                 "plugins/core-lifecycle/skills/_shared references and scripts/repo-config.sh. "
                 "Use any missing project-specific setting's documented fallback or report it."
                 "\n\n" + body)
-    skills = re.findall(r"^  - (\S+)\s*$", header, re.MULTILINE)
+    skills = re.findall(r"^ {2}- (\S+)\s*$", header, re.MULTILINE)
     if skills:
         body += "\n\nSource skill dependencies: " + ", ".join(skills) + (
             ". Resolve them using the active client's catalog and report missing dependencies."
         )
     body += f"\n\nReturn the available evidence within {turns} turns."
     if platform == "codex":
-        models, efforts = translation_tables()
-        source_model, source_effort = value(header, "model"), value(header, "effort")
-        if source_model not in models or source_effort not in efforts:
-            raise ValueError(f"{source}: no approved Codex translation for {source_model}/{source_effort}")
-        policy = (
-            f"Source tool envelope: {tools}. Use only its authorized operations and "
-            "the permissions of the parent session. The parent host must enforce any "
-            "required isolation. Report unavailable operations.\n\n"
-        )
-        if name == "researcher":
-            policy += ("Use the approved Context7 server or connector's native library resolution "
-                       "and documentation query tools for external library contracts. "
-                       "If unavailable, report the missing documentation checkpoint.\n\n")
-        elif name == "security-reviewer":
-            policy += ("Perform a defensive, read-only review of the supplied changes and "
-                       "recommend mitigations from the repository evidence.\n\n")
-        lines = (policy + body).split("\n")
-        instructions = "\n".join(quote(line)[1:-1] for line in lines)
-        content = (
-            f"name = {quote(name)}\ndescription = {quote(description)}\n"
-            f"model = {quote(models[source_model])}\n"
-            f"model_reasoning_effort = {quote(efforts[source_effort])}\n"
-            f'developer_instructions = """\n{instructions}"""\n'
-        )
-        if name == "feedback-analyst":
-            if tools != "[]":
-                raise ValueError("feedback-analyst must declare an empty tool list")
-            content += (
-                "\n[features]\nshell_tool = false\napps = false\nplugins = false\n"
-                "memories = false\nrequest_permissions_tool = false\n"
-                "\n[skills]\ninclude_instructions = false\n"
-            )
-        elif name == "researcher":
-            # The source uses Context7 through MCP. Connector support can be
-            # required on this client, while the source grants no shell.
-            content += "\n[features]\nshell_tool = false\nrequest_permissions_tool = false\n"
-        return content
+        return render_codex(source, header, body, description, tools)
     if platform == "antigravity":
         # Translate only unscoped file operations. Glob/search and constrained
         # shell calls never turn into a general-purpose shell grant.

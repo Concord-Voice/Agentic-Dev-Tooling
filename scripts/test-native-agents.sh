@@ -34,6 +34,9 @@ for path in codex.glob("*.toml"):
     profile = tomllib.loads(path.read_text())
     assert path.stem == profile["name"] and profile["description"] and profile["developer_instructions"]
     assert "sandbox_mode" not in profile and "mcp_servers" not in profile
+architect = tomllib.loads((codex / "architect.toml").read_text())["developer_instructions"]
+assert "## Turn Budget" not in architect
+assert "## Output Format" in architect
 analyst = tomllib.loads((codex / "feedback-analyst.toml").read_text())
 assert analyst["features"] == {key: False for key in (
     "apps", "shell_tool", "plugins", "memories", "request_permissions_tool"

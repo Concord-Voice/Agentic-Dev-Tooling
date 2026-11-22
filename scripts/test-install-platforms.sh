@@ -83,10 +83,10 @@ done
 for t in "$tmp_codex" "$tmp_antigravity"; do
   for helper in pr-creation/lib.sh enhanced-pr-review/review-coverage.sh ste-writing/ste-lint.py; do
     grep -qF ".agents/skills/$helper" "$t/.agents/skills/${helper%/*}/SKILL.md"
-    [ -f "$t/.agents/skills/$helper" ]
+    [[ -f "$t/.agents/skills/$helper" ]]
   done
-  [ -f "$t/.claude/repo-config.reference.md" ]
-  [ -f "$t/.claude/rules/labels.md" ]
+  [[ -f "$t/.claude/repo-config.reference.md" ]]
+  [[ -f "$t/.claude/rules/labels.md" ]]
 done
 
 echo ok
