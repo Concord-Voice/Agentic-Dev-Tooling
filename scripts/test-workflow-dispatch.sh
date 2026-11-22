@@ -25,7 +25,7 @@ for skill in (feedback, issue, lifecycle):
 for skill in (issue, lifecycle):
     gate = section(skill, "<DISPATCH-GATE>", "</DISPATCH-GATE>")
     for target in re.findall(r"\]\(([^)]+)\)", gate):
-        if not (skill.parent / target).is_file():
+        if not (skill.parent / target.split("#", 1)[0]).is_file():
             sys.exit(f"{skill}: unresolved dispatch instruction {target}")
     if "nested-skills.md" not in gate:
         sys.exit(f"{skill}: missing shared skill resolution contract")
