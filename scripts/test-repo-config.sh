@@ -33,6 +33,16 @@ JSON
   rc_has '.flag_off' || fail "rc_has should be true for a present false value"
 )
 
+# A POSIX caller can source the helper without overwriting its own variables.
+RC_FILE="$TMP/.claude/repo-config.json" sh -eu -c '
+  . "$1"
+  filter=caller_filter default=caller_default v=caller_value
+  rc_get ".default_branch" > "$2"
+  rc_has ".flag_off"
+  test "$(cat "$2")" = trunk
+  test "$filter/$default/$v" = caller_filter/caller_default/caller_value
+' sh "$HERE/repo-config.sh" "$TMP/portable-result"
+
 # Case C: malformed JSON → rc_get returns default (never errors out the caller).
 echo "{ not json" > "$TMP/.claude/repo-config.json"
 ( cd "$TMP"

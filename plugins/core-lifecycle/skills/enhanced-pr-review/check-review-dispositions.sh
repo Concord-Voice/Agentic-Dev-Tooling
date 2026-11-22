@@ -72,7 +72,7 @@
 set -euo pipefail
 
 PR="${1:-}"
-if [ -z "$PR" ]; then
+if [[ -z "$PR" ]]; then
     echo "usage: $0 <pr-number>" >&2
     exit 2
 fi
@@ -89,7 +89,7 @@ fail=0
 # (top-level master/summary comments). They are distinct GitHub objects; a gate
 # that reads only the first is structurally blind to the second.
 RAW=""
-if [ -n "${CV_REVIEW_FIXTURE:-}" ]; then
+if [[ -n "${CV_REVIEW_FIXTURE:-}" ]]; then
     # Error-checked: an unreadable fixture exited 1 under `set -e`, which the
     # caller reads as "blocking violations found" rather than "could not run".
     if ! RAW=$(cat "$CV_REVIEW_FIXTURE" 2>&1); then
@@ -293,11 +293,11 @@ TRUNCATED=$(echo "$RAW" | jq -r '
     (.data.repository.pullRequest.reviewThreads.nodes[]?.comments.pageInfo.hasNextPage // false
         | if . then "thread-comments" else empty end)
   ] | unique | join(", ")' 2>/dev/null || echo "JQERR")
-if [ "$TRUNCATED" = "JQERR" ]; then
+if [[ "$TRUNCATED" = "JQERR" ]]; then
     echo "STOP: could not evaluate pagination state for #${PR}." >&2
     exit 2
 fi
-if [ -n "$TRUNCATED" ]; then
+if [[ -n "$TRUNCATED" ]]; then
     echo "STOP: review surface is truncated (more pages on: ${TRUNCATED})." >&2
     echo "      Part of the review was never read. UNKNOWN, not clean." >&2
     exit 2
@@ -317,8 +317,8 @@ fi
 # merged INTO. `CV_REPO_CONFIG` overrides for tests only.
 ROSTER_JSON='[]'
 ROSTER_SOURCE='(none — login-only matching)'
-if [ -n "${CV_REPO_CONFIG:-}" ]; then
-    if [ -f "$CV_REPO_CONFIG" ]; then
+if [[ -n "${CV_REPO_CONFIG:-}" ]]; then
+    if [[ -f "$CV_REPO_CONFIG" ]]; then
         ROSTER_RAW=$(cat "$CV_REPO_CONFIG" 2>&1) || ROSTER_RAW=''
         ROSTER_SOURCE="$CV_REPO_CONFIG (override)"
     else
@@ -332,8 +332,8 @@ elif git rev-parse --git-dir >/dev/null 2>&1; then
     # output is indistinguishable from a legitimately roster-less repo.
     # /dev-lifecycle knows this from `gh pr view --json baseRefName`.
     BASE_REF="${CV_BASE_REF:-${GITHUB_BASE_REF:-}}"
-    [ -n "$BASE_REF" ] && BASE_REF="refs/remotes/origin/${BASE_REF#origin/}"   # full refname: a local branch or tag named origin/<x> cannot shadow it
-    if [ -z "$BASE_REF" ]; then
+    [[ -n "$BASE_REF" ]] && BASE_REF="refs/remotes/origin/${BASE_REF#origin/}"   # full refname: a local branch or tag named origin/<x> cannot shadow it
+    if [[ -z "$BASE_REF" ]]; then
         BASE_REF=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null) \
             || BASE_REF="refs/remotes/origin/${CV_DEFAULT_BRANCH:-main}"
     fi
@@ -347,7 +347,7 @@ else
     ROSTER_RAW=''
 fi
 
-if [ -n "$ROSTER_RAW" ]; then
+if [[ -n "$ROSTER_RAW" ]]; then
     # A malformed roster is a config error, not a reason to quietly fall back to
     # login-only: silent degradation blocks correctly-written posts while telling
     # the operator the accepted spelling is the raw login, with no hint why.
@@ -356,7 +356,7 @@ if [ -n "$ROSTER_RAW" ]; then
         echo "      Reviewer coverage cannot be evaluated. UNKNOWN, not clean." >&2
         exit 2
     fi
-    [ -z "$ROSTER_JSON" ] && ROSTER_JSON='[]'
+    [[ -z "$ROSTER_JSON" ]] && ROSTER_JSON='[]'
 
     # Validate before trusting. An unvalidated `.name` is a universal key: a
     # single-space name matches any prose body, and a newline inside one splits
@@ -395,7 +395,7 @@ if [ -n "$ROSTER_RAW" ]; then
         echo "      Reviewer coverage cannot be evaluated. UNKNOWN, not clean." >&2
         exit 2
     fi
-    if [ -n "$ROSTER_BAD" ]; then
+    if [[ -n "$ROSTER_BAD" ]]; then
         echo "STOP: reviewer roster at ${ROSTER_SOURCE} has unusable entries:" >&2
         printf '%s\n' "$ROSTER_BAD" | sed 's/^/      /' >&2
         echo "      An over-broad alias satisfies coverage for reviewers it does not name;" >&2
@@ -507,15 +507,15 @@ if [[ "$THREAD_ROWS" = "JQERR" ]] || printf '%s' "$THREAD_ROWS" | grep '^jq: err
     exit 2
 fi
 
-if [ -n "$THREAD_ROWS" ]; then
+if [[ -n "$THREAD_ROWS" ]]; then
     while IFS=$'\t' read -r disp evidence path line bot resolved_by; do
-        [ -z "${disp:-}" ] && continue
+        [[ -z "${disp:-}" ]] && continue
         # Decode the jq sentinel. `-` means "this field was empty"; the sentinel
         # exists only to stop an empty @tsv field collapsing against its tab in
         # `read`. Decoding it here is what makes the `-z "$evidence"` guard below
         # reachable — without this line the guard is dead code and a disposition
         # with no evidence exits 0.
-        [ "$evidence" = "-" ] && evidence=""
+        [[ "$evidence" = "-" ]] && evidence=""
         loc="${path}:${line}"
         case "$disp" in
             MISSING)
@@ -523,12 +523,12 @@ if [ -n "$THREAD_ROWS" ]; then
                 fail=1
                 ;;
             accepted|rejected|deferred|undecided)
-                if [ -z "$evidence" ]; then
+                if [[ -z "$evidence" ]]; then
                     echo "BLOCKING: disposition '${disp}' has no evidence: field — ${loc} (${bot})"
                     fail=1
                     continue
                 fi
-                if [ "$disp" = "undecided" ]; then
+                if [[ "$disp" = "undecided" ]]; then
                     # Blocks, like MISSING — but for the opposite reason. MISSING is
                     # "nobody decided and nobody noticed"; undecided is "we know this
                     # is open and here is what it waits on". Distinguishing them is
@@ -539,7 +539,7 @@ if [ -n "$THREAD_ROWS" ]; then
                     continue
                 fi
                 # Assertion 2 — a deferral is only a deferral if the issue exists.
-                if [ "$disp" = "deferred" ]; then
+                if [[ "$disp" = "deferred" ]]; then
                     issue="${evidence#\#}"
                     case "$issue" in
                         ''|*[!0-9]*)
@@ -547,7 +547,7 @@ if [ -n "$THREAD_ROWS" ]; then
                             fail=1
                             ;;
                         *)
-                            if [ "${CV_SKIP_EXISTENCE_CHECKS:-0}" != "1" ]; then
+                            if [[ "${CV_SKIP_EXISTENCE_CHECKS:-0}" != "1" ]]; then
                                 # -R pins the repo: without it `gh` resolves against
                                 # cwd, which in a fork is the PARENT, so a deferral
                                 # could name an upstream issue and pass. `--json
@@ -567,7 +567,7 @@ if [ -n "$THREAD_ROWS" ]; then
                                 # runs, so a separate `ISSUE_RC=$?` never executes and
                                 # every transport failure exited 1 instead of 2.
                                 ISSUE_RC=0
-                                if [ -n "$OWNER" ] && [ -n "$REPO" ]; then
+                                if [[ -n "$OWNER" ]] && [[ -n "$REPO" ]]; then
                                     ISSUE_OUT=$(gh issue view "$issue" -R "${OWNER}/${REPO}" --json url --jq '.url' 2>&1) || ISSUE_RC=$?
                                 else
                                     ISSUE_OUT=$(gh issue view "$issue" --json url --jq '.url' 2>&1) || ISSUE_RC=$?
@@ -578,7 +578,7 @@ if [ -n "$THREAD_ROWS" ]; then
                                         echo "BLOCKING: deferred to #${issue}, which is a pull request, not an issue — ${loc}" >&2
                                         fail=1 ;;
                                     0:*)
-                                        echo "BLOCKING: deferred to #${issue} resolved to an unexpected URL '"'"'${ISSUE_OUT}'"'"' — ${loc}" >&2
+                                        printf "BLOCKING: deferred to #%s resolved to an unexpected URL '%s' — %s\n" "$issue" "$ISSUE_OUT" "$loc" >&2
                                         fail=1 ;;
                                     *"Could not resolve"*|*"not found"*|*"Not Found"*|*"NOT_FOUND"*)
                                         echo "BLOCKING: deferred to #${issue} but that issue does not exist — ${loc}" >&2
@@ -592,17 +592,17 @@ if [ -n "$THREAD_ROWS" ]; then
                             ;;
                     esac
                 fi
-                if [ "$disp" = "accepted" ]; then
+                if [[ "$disp" = "accepted" ]]; then
                     # 'accepted' means a fix landed; evidence is the commit that landed it.
                     if ! echo "$evidence" | grep -E '^[0-9a-f]{7,40}$' >/dev/null; then
                         echo "BLOCKING: accepted disposition needs 'evidence: <commit-sha>', got '${evidence}' — ${loc}"
                         fail=1
-                    elif [ "${CV_SKIP_EXISTENCE_CHECKS:-0}" != "1" ] \
+                    elif [[ "${CV_SKIP_EXISTENCE_CHECKS:-0}" != "1" ]] \
                          && ! git rev-parse --git-dir >/dev/null 2>&1; then
                         echo "NOTE: not inside a git checkout — the accepted-SHA sanity" >&2
                         echo "      check was SKIPPED for ${evidence}. Absence of a WARN" >&2
                         echo "      here is not a verification." >&2
-                    elif [ "${CV_SKIP_EXISTENCE_CHECKS:-0}" != "1" ] \
+                    elif [[ "${CV_SKIP_EXISTENCE_CHECKS:-0}" != "1" ]] \
                          && ! git cat-file -e "${evidence}^{commit}" 2>/dev/null; then
                         # WARN, never BLOCK: a shallow/fresh checkout legitimately
                         # lacks the object. A typo'd SHA is the case worth catching,
@@ -711,21 +711,21 @@ RECON_COUNT=$(echo "$RAW" | jq --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'[.
     | select(rostered(.author.login) | not)
     | select((.authorAssociation // "NONE") | IN("OWNER","MEMBER"))
     | select(.body | test("<!--\\s*cv-review-reconciliation\\s*-->"))] | length' 2>/dev/null || echo "JQERR")
-if [ "$RECON_COUNT" = "JQERR" ]; then
+if [[ "$RECON_COUNT" = "JQERR" ]]; then
     echo "STOP: could not read reconciliation posts for #${PR}." >&2
     exit 2
 fi
 
-if [ -z "$REQUIRED" ] && [ "$RECON_COUNT" -eq 0 ]; then
+if [[ -z "$REQUIRED" ]] && [[ "$RECON_COUNT" -eq 0 ]]; then
     # Nobody reviewed anything. Requiring a post that reconciles nothing is
     # ceremony, and Step 9.1 runs this gate on EVERY PR including ones no bot
     # ever touches. Assertion 1 still governs any human thread on such a PR.
     echo "INFO: no reviewer posted on this PR; reconciliation post not required."
-elif [ "$RECON_COUNT" -eq 0 ]; then
+elif [[ "$RECON_COUNT" -eq 0 ]]; then
     echo "BLOCKING: no /enhanced-pr-review reconciliation post on this PR."
     echo "          Post it per /enhanced-pr-review Phase 3.5 before the merge gate."
     fail=1
-elif [ "$RECON_COUNT" -gt 1 ]; then
+elif [[ "$RECON_COUNT" -gt 1 ]]; then
     echo "BLOCKING: ${RECON_COUNT} reconciliation posts found — expected exactly 1."
     echo "          Phase 3.5 edits its post in place (gh api PATCH); it never re-posts."
     fail=1
@@ -739,7 +739,7 @@ else
         exit 2
     fi
     while IFS= read -r want; do
-        [ -z "$want" ] && continue
+        [[ -z "$want" ]] && continue
         # -F: fixed string, never a pattern. --: a value starting with a hyphen
         # can never be read as a grep option. Both verified by review.
         if ! printf '%s' "$RECON_BODY" | grep -iF -- "$want" >/dev/null; then
@@ -752,7 +752,7 @@ else
 fi
 
 # --- Verdict -----------------------------------------------------------------
-if [ "$fail" -eq 0 ]; then
+if [[ "$fail" -eq 0 ]]; then
     echo "✅ Review dispositions complete for PR #${PR} — every in-scope thread carries a decision."
     exit 0
 fi
