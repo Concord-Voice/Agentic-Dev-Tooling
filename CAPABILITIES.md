@@ -21,6 +21,16 @@ The `--agents-only` install works offline with Bash, jq and Python 3. It support
 
 For a standalone checkout, keep project files and referenced resources available inside the checkout or provision them when the environment is built. Claude supports project skill directories that are symlinks when their targets exist. An absolute link into one developer's machine cannot supply that skill to a fresh cloud checkout. [Claude skill discovery](https://code.claude.com/docs/en/skills#choose-where-skills-load) · [Antigravity discovery](https://antigravity.google/docs/customization-discovery/)
 
+## Pinned fleet workflows
+
+An enrolled host can resolve a fleet workflow from a verified tooling checkout with
+`python3 -I -B "$ADT/scripts/resolve-fleet-workflow.py" --cache "$PRIVATE_CACHE" --skill dev-lifecycle`.
+The single output path identifies the verified skill. Resolve every nested workflow, shared role table and packaged helper in the same edition. This lane retains the lifecycle stages, authoring checkpoints, exact-head review and post-merge monitoring. Security changes use static defensive review and benign regression tests. A missing required role, host restriction, source mismatch or unverified review keeps the corresponding step pending. Private overlays may supply independently verified, read-only defensive specialists under the shared role contract.
+
+When an enrolled Claude or Codex project has an authored role with the same name, the enrollment process can install the public role under `fleet-ROLE` while preserving the authored one. The public renderer accepts `--fleet-alias ROLE` for specific ordinary roles in an empty owner-only staging directory. Use `python3 -I -B "$ADT/scripts/resolve-fleet-workflow.py" --select-role ROLE --platform CLIENT --project "$(pwd -P)"` to obtain the verified native name and path. Dispatch that native name only after confirming the host bound the same file. For the host-reported source path, run `python3 -I -B "$ADT/scripts/resolve-fleet-workflow.py" --verify-role ROLE --platform CLIENT --profile ABSOLUTE_PATH`. A successful digest verifies the installed bytes. Confirm active host capabilities and import provenance separately.
+
+The resolver accepts the nine core lifecycle skills and weekly-deps. Bundled source hashes in `config/fleet-workflows/sources.json` lock each reviewed source and its line edits together. Re-review the edition when updating those source files. Each complete edition is stored under an owner-controlled cache. The standalone package continues to expose its independently selected workflows.
+
 ## Dispatch and permissions
 
 Use the host's native dispatch operation and the installed role name. For feedback classification, pass the sanitized report payload to `feedback-analyst` in an analysis session provisioned for that data. The Claude profile uses an explicit empty tool list, which Claude Code documents as a tool-free launch. [Claude tool-list behavior](https://code.claude.com/docs/en/errors#agent-would-be-spawned-with-zero-tools)
