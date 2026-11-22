@@ -27,6 +27,20 @@ Use the host's native dispatch operation and the installed role name. For feedba
 
 When a policy requires credential isolation, verify the host's actual credentials and tool access before dispatch. In particular, a Codex custom agent inherits its parent's permissions and MCP servers. Its supported feature switches can disable specific capabilities. A role file cannot independently enforce a read-only identity. [Codex custom agents](https://learn.chatgpt.com/docs/agent-configuration/subagents) · [Antigravity tool and permission inheritance](https://antigravity.google/docs/subagents/)
 
+For untrusted PRs, Codex review requires an independent worker before the caller collects the diff. Use Python 3.11+ and the trusted Codex CLI on a host with working filesystem confinement. Resolve `ADT` to the verified tooling checkout outside the PR. For example, the following checks the review environment before a trusted collector stages the requested PR.
+
+```bash
+set -eu
+worker="$ADT/scripts/codex-isolated-review.py"
+python3 -I -B "$worker" --role code-reviewer --check
+review_dir="$(mktemp -d)"
+trap 'rm -rf "$review_dir"' EXIT
+gh pr diff "$pr_number" --repo "$target_repo" --color=never > "$review_dir/input.diff"
+python3 -I -B "$worker" --role code-reviewer --input "$review_dir/input.diff"
+```
+
+The helper starts a separate Codex app server in an empty directory and checks its effective filesystem policy, approvals and MCP inventory before opening the input. It stages no repository checkout, hooks or connectors. The sandbox probe verifies that workspace writes and reads of a private sibling file are denied. The review uses the source role's model and effort with an existing ChatGPT subscription login. The preflight performs no inference. A failed check leaves the reviewer pending. The helper accepts six defensive reviewer names listed by `--help`; research with Context7 and payload-only feedback classification require their own independently verified capabilities.
+
 The GitHub review profile uses read and search tools. Supply a PR diff or relevant job failure evidence for the requested investigation. Automatic PR review is controlled by GitHub rulesets, and a failed workflow needs a configured trigger. Installing the profile alone schedules zero jobs. [GitHub custom agents](https://docs.github.com/en/copilot/concepts/customizations/custom-agents) · [GitHub automations](https://docs.github.com/en/copilot/concepts/agent-capabilities/agent-powered-workflows-and-operations/about-automations)
 
 Codex profiles translate the Claude source model and effort using the literal model and effort table rows. The renderer resolves starred model families against the reviewed Codex CLI 0.171.0 catalog snapshot so an offline install produces the same pins. Update the snapshot from `codex debug models --bundled` when releasing new family versions. A missing model or unsupported effort on the target account makes that role unavailable. The GitHub custom review agent retains the source Opus class with the `claude-opus-5.5` ID listed by Copilot CLI 1.0.115-5. GitHub controls the model and billing for its separate automatic PR review service. Antigravity’s bounded roles select its native `flash` tier and inherit the host’s supported effort. [Model equivalence table](plugins/core-lifecycle/skills/_shared/model-equivalence.md) · [GitHub cloud model availability](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/cloud-agent/changing-the-ai-model) · [Antigravity agent configuration](https://antigravity.google/docs/subagents/)

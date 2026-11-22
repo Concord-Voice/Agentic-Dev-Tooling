@@ -34,7 +34,7 @@ allowed-tools:
 ---
 
 <DISPATCH-GATE>
-Run each required named skill through the [nested skill contract](../_shared/nested-skills.md). The sub-skill owns its steps and checkpoints. Resume the current phase only after receiving its result.
+Run each required named skill through the [nested skill contract](../_shared/nested-skills.md). The sub-skill owns its steps and checkpoints. Resume the current phase only after receiving its result. On Codex, apply the [independent reviewer requirement](../_shared/pr-review-agent-dispatch.md#codex-review-of-untrusted-prs) before a phase retrieves untrusted PR material for a specialist.
 </DISPATCH-GATE>
 
 # Dev Lifecycle

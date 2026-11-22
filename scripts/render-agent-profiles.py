@@ -15,6 +15,13 @@ CODEX_ROLES = (
     "researcher", "scope-reviewer", "security-reviewer", "system-engineer",
     "test-writer", "ui-designer", "ux-designer",
 )
+CODEX_REVIEWERS = ("code-reviewer", "docs-reviewer", "frontend-reviewer", "migration-reviewer",
+                   "scope-reviewer", "security-reviewer")
+RESTRICTED_FEATURES = (
+    "\n[features]\nshell_tool = false\napps = false\nplugins = false\n"
+    "memories = false\nrequest_permissions_tool = false\n"
+    "\n[skills]\ninclude_instructions = false\n"
+)
 PROFILES = {
     "claude": (".claude/agents", ".md", CODEX_ROLES),
     "codex": (".codex/agents", ".toml", CODEX_ROLES),
@@ -77,13 +84,19 @@ def render_codex(source, header, body, description, tools):
         "the permissions of the parent session. The parent host must enforce any "
         "required isolation. Report unavailable operations.\n\n"
     )
-    if name == "researcher":
-        policy += ("Use the approved Context7 server or connector's native library resolution "
-                   "and documentation query tools for external library contracts. "
-                   "If unavailable, report the missing documentation checkpoint.\n\n")
-    elif name == "security-reviewer":
-        policy += ("Perform a defensive, read-only review of the supplied changes and "
-                   "recommend mitigations from the repository evidence.\n\n")
+    if name in CODEX_REVIEWERS:
+        description = "Trusted-input role. Untrusted PRs require the independent Codex review worker. " + description
+        policy += ("Use scripts/codex-isolated-review.py from the verified tooling owner for "
+                   "untrusted PR review. A project child inherits the session's permissions. "
+                   "Before fetching a diff, the caller must verify a separate review session.\n\n")
+        if name == "security-reviewer":
+            policy += "Perform a defensive, read-only review and recommend mitigations.\n\n"
+    elif name == "researcher":
+        description = "Use only in an independently restricted research session. " + description
+        policy += ("Check the host's actual MCP and filesystem authority before supplying source "
+                   "material. Use an independently restricted read-only session with only approved "
+                   "Context7 library resolution and documentation queries. If unavailable, report "
+                   "the missing documentation checkpoint before receiving untrusted inputs.\n\n")
     lines = (policy + body).split("\n")
     instructions = "\n".join(quote(line)[1:-1] for line in lines)
     content = (
@@ -92,14 +105,10 @@ def render_codex(source, header, body, description, tools):
         f"model_reasoning_effort = {quote(efforts[source_effort])}\n"
         f'developer_instructions = """\n{instructions}"""\n'
     )
-    if name == "feedback-analyst":
-        if tools != "[]":
-            raise ValueError("feedback-analyst must declare an empty tool list")
-        content += (
-            "\n[features]\nshell_tool = false\napps = false\nplugins = false\n"
-            "memories = false\nrequest_permissions_tool = false\n"
-            "\n[skills]\ninclude_instructions = false\n"
-        )
+    if name == "feedback-analyst" and tools != "[]":
+        raise ValueError("feedback-analyst must declare an empty tool list")
+    if name in CODEX_REVIEWERS or name == "feedback-analyst":
+        content += RESTRICTED_FEATURES
     elif name == "researcher":
         # The source uses Context7 through MCP. Connector support can be
         # required on this client, while the source grants no shell.

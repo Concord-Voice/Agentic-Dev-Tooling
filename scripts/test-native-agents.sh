@@ -50,6 +50,12 @@ for name, model, effort in [
     profile = tomllib.loads((codex / (name + ".toml")).read_text())
     assert (profile["model"], profile["model_reasoning_effort"]) == (model, effort)
 
+for name in ["code-reviewer", "docs-reviewer", "frontend-reviewer", "migration-reviewer",
+             "scope-reviewer", "security-reviewer"]:
+    reviewer = tomllib.loads((codex / (name + ".toml")).read_text())
+    assert reviewer["features"] == analyst["features"]
+    assert "independent Codex review worker" in reviewer["description"]
+    assert "scripts/codex-isolated-review.py" in reviewer["developer_instructions"]
 researcher = tomllib.loads((codex / "researcher.toml").read_text())
 assert "npx ctx7" not in researcher["developer_instructions"]
 assert not researcher["features"]["shell_tool"] and "apps" not in researcher["features"]
@@ -108,4 +114,5 @@ if "$root/install.sh" codex --agents-only --project "$root/unmapped" >"$root/err
 fi
 grep -q "no approved Codex translation" "$root/error.log"
 [[ ! -e "$root/unmapped/.codex/agents" ]]
+python3 -I -B scripts/test-codex-isolated-review.py
 echo ok
