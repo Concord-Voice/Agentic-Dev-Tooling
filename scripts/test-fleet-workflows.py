@@ -45,6 +45,22 @@ class FleetWorkflowTests(unittest.TestCase):
         for phase in range(1, 11):
             self.assertIn(f"## Phase {phase}:", text)
         self.assertIn("## Phase 7.5:", text)
+        self.assertNotIn("/superpowers:", text)
+        weekly = (edition / "weekly-deps/SKILL.md").read_text()
+        self.assertNotIn('RC_FILE="$(mktemp)', weekly)
+        self.assertIn('fleet_load_repo_config "$OWNER_REPO"', weekly)
+        enhanced = (edition / "enhanced-pr-review/SKILL.md").read_text()
+        self.assertIn('fleet_check_dispositions "$0"', enhanced)
+        self.assertIn('<<<"$RC_TRUSTED_CFG"', enhanced)
+        self.assertNotIn('$(git rev-parse --show-toplevel)/.claude/repo-config.json', enhanced)
+        coverage = edition / "enhanced-pr-review/review-coverage.sh"
+        subprocess.run(["bash", "-n", coverage], check=True)
+        for number, fixture in (("0", ""), ("11", "invalid-fixture")):
+            result = subprocess.run(["bash", coverage, number, "example/repo"],
+                                    env={**os.environ, "CV_COVERAGE_FIXTURE": fixture},
+                                    capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("live PR coverage required", result.stderr)
         review = (edition / "_shared/pr-review-agent-dispatch.md").read_text()
         self.assertIn("codex-isolated-review.py", review)
         self.assertTrue((edition / "weekly-deps/references/autonomous-mode.md").is_file())
@@ -52,6 +68,32 @@ class FleetWorkflowTests(unittest.TestCase):
         for loader in (entry, edition/"pr-creation/SKILL.md", edition/"weekly-deps/SKILL.md"):
             self.assertIn("${FLEET_SKILLS:?}", loader.read_text())
             self.assertNotIn("git show \"$RC_OID:scripts/repo-config.sh", loader.read_text())
+
+    def test_coverage_uses_exact_default_config(self):
+        entry = fleet.resolve(self.cache, "enhanced-pr-review")
+        helper = entry.with_name("review-coverage.sh")
+        gh = self.tmp / "gh"
+        gh.write_text("""
+#!/usr/bin/env bash
+case "$*" in
+  'api repos/acme/example/pulls/5')
+    echo '{"head":{"sha":"1111111111111111111111111111111111111111"},"user":{"login":"author"}}' ;;
+  'api graphql '*)
+    echo '{"data":{"repository":{"nameWithOwner":"acme/example","defaultBranchRef":{"target":{"oid":"2222222222222222222222222222222222222222","tree":{"oid":"3333333333333333333333333333333333333333"}}}}}}' ;;
+  'api repos/acme/example/git/trees/3333333333333333333333333333333333333333')
+    echo '{"truncated":false,"tree":[]}' ;;
+  'api --paginate --slurp repos/acme/example/'*)
+    echo '[[]]' ;;
+  *) exit 9 ;;
+esac
+""".lstrip())
+        gh.chmod(0o700)
+        env = {"PATH": str(self.tmp) + os.pathsep + os.environ["PATH"]}
+        for expected, code in (("2"*40, 1), ("4"*40, 2)):
+            result = subprocess.run(["bash", helper, "5", "acme/example", expected],
+                                    env=env, capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, code, result.stderr)
+        self.assertIn("cannot verify default-commit configuration", result.stderr)
 
     def test_repeat_and_concurrent_materialization(self):
         def get(_):
@@ -118,10 +160,10 @@ class FleetWorkflowTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             fleet.cache_root(Path("relative"))
         self.cache.symlink_to(self.tmp, target_is_directory=True)
-        with self.assertRaises(ValueError):
+        with self.assertRaises((OSError, ValueError)):
             fleet.cache_root(self.cache)
         if os.getuid() != 0:
-            with self.assertRaises(ValueError):
+            with self.assertRaises((OSError, ValueError)):
                 fleet.cache_root(self.cache / "child")
             self.assertFalse((self.tmp / "child").exists())
         self.cache.unlink()
@@ -133,10 +175,27 @@ class FleetWorkflowTests(unittest.TestCase):
         self.assertFalse((unsafe / "target").exists())
         self.cache.mkdir(mode=0o700)
         (self.cache / "fleet-workflows").symlink_to(self.tmp, target_is_directory=True)
-        with self.assertRaises(ValueError):
+        with self.assertRaises((OSError, ValueError)):
             fleet.cache_root(self.cache)
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             fleet.main(["--cache", str(self.cache), "--skill", "../another"])
+
+    def test_created_directory_requires_verified_descriptor_ownership(self):
+        from types import SimpleNamespace
+        seen = []
+        actual = os.fstat
+
+        def different_owner(fd):
+            st = actual(fd)
+            if (self.tmp / "new-parent").exists() and st.st_ino == (self.tmp / "new-parent").stat().st_ino:
+                seen.append(st.st_ino)
+                return SimpleNamespace(st_uid=os.getuid()+1, st_mode=st.st_mode)
+            return st
+
+        with patch.object(fleet.os, "fstat", side_effect=different_owner), self.assertRaises(ValueError):
+            fleet.cache_root(self.tmp / "new-parent/cache")
+        self.assertTrue(seen)
+        self.assertFalse((self.tmp / "new-parent/cache").exists())
 
     def test_changed_source_fails_before_materialization(self):
         with patch.object(fleet.Path, "read_bytes", return_value=b"changed"), self.assertRaises(ValueError):

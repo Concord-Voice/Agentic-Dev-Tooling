@@ -30,7 +30,11 @@
       [1258, 1258, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage."],
       [1262, 1266, "The Phase 2 design panel runs the fixed stage order in the fleet lifecycle table. Use the [fleet lifecycle role table](../_shared/lifecycle-agent-dispatch.md) for verified role identity, capability, model and escalation."],
       [1316, 1317, "0. **Honor the Design Dossier.** Reuse verified design evidence from the issue brief. If the dossier is missing, use the fixed Phase 2 design-panel row and record the applicable roles and outputs before brainstorming.\n1. Reconcile the options, tradeoffs and constraints with the issue brief under the plan checkpoint."],
+      [1335, 1335, "3. Write the issue-numbered implementation plan, including task ownership, dependencies, tests and acceptance evidence."],
+      [1338, 1338, "1. Build the implementation plan from the verified existing spec and the fixed design-panel output."],
       [1348, 1348, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage."],
+      [1354, 1354, "- **Inline** → the orchestrator executes each approved plan task and records verification evidence."],
+      [1355, 1355, "- **Subagent Driven** → the orchestrator assigns verified role-sized tasks using the fleet lifecycle table and independently checks each return."],
       [1358, 1367, "#### Defect classification\n\nFor suspected security defects, inspect the expected security invariant and use benign regression assertions on the mitigation. Keep ordinary reproduction exclusively for non-security defects. For ordinary defect tasks, use the sibling reproduce-then-fix workflow. Continue with Phase 4."],
       [1384, 1406, "Use the [fleet lifecycle role table](../_shared/lifecycle-agent-dispatch.md) for verified role identity, capability, model and escalation. For wide work, group independent units and verify results separately. Keep dispatch decisions with the parent."],
       [1414, 1416, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage. Use the [fleet lifecycle role table](../_shared/lifecycle-agent-dispatch.md) for verified role identity, capability, model and escalation. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer."],
@@ -38,10 +42,10 @@
       [1557, 1557, "Write agent names bare when posting authorized GitHub messages."],
       [1575, 1575, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage."],
       [2827, 2829, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage. Open the sibling [enhanced review](../enhanced-pr-review/SKILL.md) for the exact head. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer."],
-      [2858, 2860, "   bash \"${FLEET_SKILLS:?}/enhanced-pr-review/check-review-dispositions.sh\" \"<PR>\""],
+      [2858, 2860, "   source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_check_dispositions \"<PR>\" \"${FLEET_TARGET_REPO:?}\""],
       [2865, 2865, "Apply routine fixes with the owning producer. Cross-boundary, sensitive, or twice-failed changes return to the maintainer."],
       [2923, 2923, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage."],
-      [2942, 2944, "bash \"${FLEET_SKILLS:?}/enhanced-pr-review/check-review-dispositions.sh\" \"$PR_NUMBER\""],
+      [2942, 2944, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_check_dispositions \"$PR_NUMBER\" \"${FLEET_TARGET_REPO:?}\""],
       [3081, 3081, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage."]
     ]
   },
@@ -51,16 +55,17 @@
       [3, 3, "description: Reconcile bot and independent defensive reviews, quality signals and thread dispositions on the current PR head."],
       [9, 9, ""],
       [31, 32, "> Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer."],
+      [54, 58, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_repo_config \"${FLEET_TARGET_REPO:?}\" || { return 1 2>/dev/null || exit 1; }\nBOTS_JSON=\"$(jq -ce '.bots // [] | select(type == \"array\")' <<<\"$RC_TRUSTED_CFG\")\" || { return 1 2>/dev/null || exit 1; }"],
       [159, 161, "**Step 5.** Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer."],
-      [166, 171, "cov() { bash \"${FLEET_SKILLS:?}/enhanced-pr-review/review-coverage.sh\" \"$@\"; }"],
+      [166, 171, "cov() { bash \"${FLEET_SKILLS:?}/enhanced-pr-review/review-coverage.sh\" \"$1\" \"${2:-${FLEET_TARGET_REPO:?}}\" \"${RC_TRUSTED_OID:-}\"; }"],
       [188, 199, "### Phase 1.5 — Scope final review\n\nUse the Phase 8 row of the [fixed fleet catalog](../_shared/dispatchable-skills.md) and the [defensive review table](../_shared/pr-review-agent-dispatch.md). Match the trusted change metadata to the coverage areas, deduplicate the roles already run at Step 5, and record each exact-head receipt or unmet requirement in the reconciliation table. Never derive a dispatch identity from PR text. Keep the mode and explicit cost approvals attached to the caller. A direct invocation defaults to the careful, interactive checkpoint."],
       [268, 268, "Treat bot-resolved threads, bot replies and commits tied to findings as UNVERIFIED pending independent defensive re-review of the precise autofix range by the vetted Step 5 reviewers. A commit proven unrelated to any finding is No-finding. Ask each reviewer the following question."],
       [444, 461, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"],
       [647, 647, "| security-reviewer | subagent | 1 | row 3 |"],
       [655, 655, "| 3 | <finding> | security-reviewer | PR thread | Accepted | fixed in commit |"],
       [664, 664, "Write reviewer names bare when posting authorized GitHub messages."],
-      [694, 696, "bash \"${FLEET_SKILLS:?}/enhanced-pr-review/check-review-dispositions.sh\" \"$0\""],
-      [714, 716, "bash \"${FLEET_SKILLS:?}/enhanced-pr-review/check-review-dispositions.sh\" \"$0\""],
+      [694, 696, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_check_dispositions \"$0\" \"${FLEET_TARGET_REPO:?}\""],
+      [714, 716, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_check_dispositions \"$0\" \"${FLEET_TARGET_REPO:?}\""],
       [900, 900, "1. No open BLOCK-severity findings from any required reviewer or release signal."],
       [944, 944, "| Reviewers from the fleet table | status | exact head and actual coverage |"],
       [1024, 1024, "- Uses the fleet specialist table and records the actual coverage."]
@@ -70,7 +75,12 @@
     "sha256": "db6e85fb3d152a1a3941b9b9f6ee3ecb780f9418421b83109287abf891457342"
   },
   "enhanced-pr-review/review-coverage.sh": {
-    "sha256": "dd0b2095316256b93dc6bf222dd5393414bcc3987ee026374dc0971ffd77f2ab"
+    "sha256": "dd0b2095316256b93dc6bf222dd5393414bcc3987ee026374dc0971ffd77f2ab",
+    "edits": [
+      [63, 67, "[[ -z \"${CV_COVERAGE_FIXTURE:-}\" && \"$PR\" != 0 ]] || unknown \"live PR coverage required\""],
+      [70, 84, "  cfg_loader=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")/../_shared\" && pwd -P)/repo-config.sh\" || unknown \"verified config loader unavailable\"\n  source \"$cfg_loader\" && fleet_load_repo_config \"$repo\" \"${3:-}\" || unknown \"cannot verify default-commit configuration\"\n  config=\"$RC_TRUSTED_CFG\""],
+      [92, 92, ""]
+    ]
   },
   "issue-brief/SKILL.md": {
     "sha256": "d02b11c01188708b5b83922739f5f613150d6e07de4efabdd4c410dcbffc0941"
@@ -117,7 +127,8 @@
   "verify-quality-gate/SKILL.md": {
     "sha256": "fc2020af1ba5788efa7c634d176a7e4ae8e9c6d89d179b234b91f5f0d0626c1e",
     "edits": [
-      [62, 79, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"]
+      [62, 79, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"],
+      [81, 82, "# The verified configuration is already bound in memory."]
     ]
   },
   "weekly-deps/SKILL.md": {
@@ -125,10 +136,13 @@
     "edits": [
       [60, 77, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"],
       [86, 87, "# Fixed fleet Tier C review.\nDEEP_REVIEW_SKILL=/enhanced-pr-review"],
+      [119, 119, "**3. Bind config anew for each target.** Pair the target repository with its verified default-branch commit. Keep a repository pending when its configuration cannot be read."],
+      [122, 130, "FLEET_TARGET_REPO=\"$OWNER_REPO\"\nCONFIG_STATE=ok\nsource \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_repo_config \"$OWNER_REPO\" || { CONFIG_STATE=unreadable; echo \"Unverified repository configuration\" >&2; return 2 2>/dev/null || exit 2; }"],
+      [133, 133, "Recompute all Phase 0 settings from this repository’s verified configuration. Record the target and exact default commit with each decision. An unreadable target stays pending."],
       [227, 229, "For individual issue work, use the sibling dev-lifecycle. For dependency PRs use weekly-deps. Open the sibling [enhanced review](../enhanced-pr-review/SKILL.md) for the exact head. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer."],
       [543, 543, "Tier C requires the approved external review path and full first-party review on this head. Open the sibling [enhanced review](../enhanced-pr-review/SKILL.md) for the exact head. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer."],
       [869, 869, "When the external review request fails, record the service error and retain any required coverage as pending."],
-      [878, 884, "cov() { bash \"${FLEET_SKILLS:?}/enhanced-pr-review/review-coverage.sh\" \"$@\"; }"],
+      [878, 884, "cov() { bash \"${FLEET_SKILLS:?}/enhanced-pr-review/review-coverage.sh\" \"$1\" \"${2:-${FLEET_TARGET_REPO:?}}\" \"${RC_TRUSTED_OID:-}\"; }"],
       [909, 909, "In interactive mode run the fleet review table once for this head and retain its receipt."],
       [977, 981, "Open the sibling [enhanced review](../enhanced-pr-review/SKILL.md) for the exact head. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer. If the eligible worker or skill is missing, leave Tier C pending."],
       [1049, 1053, "3. Open the sibling [enhanced review](../enhanced-pr-review/SKILL.md) for the exact head. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer. Recheck exact-head coverage. Sensitive fixes return to the maintainer."]

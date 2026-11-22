@@ -60,34 +60,53 @@ def directory(path, *, private=False):
         raise ValueError("fleet cache requires a trusted directory")
 
 
-def trusted_parent(parent):
-    if not os.path.lexists(parent):
-        return
-    st = parent.lstat()
-    if stat.S_ISLNK(st.st_mode):
-        if st.st_uid != 0:
-            raise ValueError("linked parent of fleet cache")
-        return
-    public_sticky_root = st.st_uid == 0 and bool(st.st_mode & stat.S_ISVTX)
-    if st.st_uid not in (0, os.getuid()) or (st.st_mode & 0o022 and not public_sticky_root):
-        raise ValueError("untrusted parent of fleet cache")
+def cache_child(parent_fd, name):
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        return os.open(name, flags, dir_fd=parent_fd)
+    except FileNotFoundError:
+        try:
+            os.mkdir(name, 0o700, dir_fd=parent_fd)
+        except FileExistsError:
+            pass  # A concurrent creator still has to pass the descriptor checks.
+        return os.open(name, flags, dir_fd=parent_fd)
+
+
+def check_cache_component(st, level):
+    if level == "managed":
+        if st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) != 0o700:
+            raise ValueError("invalid private fleet directory")
+    elif level == "cache":
+        if st.st_uid != os.getuid() or st.st_mode & 0o022:
+            raise ValueError("untrusted cache directory")
+    else:
+        sticky_root = st.st_uid == 0 and bool(st.st_mode & stat.S_ISVTX)
+        if st.st_uid not in (0, os.getuid()) or (st.st_mode & 0o022 and not sticky_root):
+            raise ValueError("untrusted parent of fleet cache")
 
 
 def cache_root(cache):
-    if not cache.is_absolute() or cache != Path(os.path.abspath(cache)):
+    if not cache.is_absolute() or not cache.name or cache != Path(os.path.abspath(cache)):
         raise ValueError("fleet cache requires a normalized absolute path")
-    # macOS /tmp and /var are root-owned aliases. A user-controlled link
-    # in the supplied cache path has no authority to select another location.
-    for parent in cache.parents:
-        trusted_parent(parent)
-    for parent in cache.parent.resolve().parents:
-        trusted_parent(parent)
-    cache.mkdir(mode=0o700, parents=True, exist_ok=True)
-    directory(cache)
-    root = cache.resolve() / "fleet-workflows"
-    root.mkdir(mode=0o700, exist_ok=True)
-    directory(root, private=True)
-    return root
+    parts = cache.parts[1:]
+    # The conventional Darwin aliases reside directly under root. Accept just
+    # the OS-owned, known destinations; all descriptor opens below use NOFOLLOW.
+    if sys.platform == "darwin" and parts[0] in ("tmp", "var"):
+        alias = Path("/", parts[0])
+        if alias.is_symlink() and alias.lstat().st_uid == 0 and str(alias.readlink()) == "private/" + parts[0]:
+            parts = ("private", *parts)
+    components = [(name, "ancestor") for name in parts[:-1]]
+    components.extend(((parts[-1], "cache"), ("fleet-workflows", "managed")))
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for name, level in components:
+            child_fd = cache_child(fd, name)
+            os.close(fd)
+            fd = child_fd
+            check_cache_component(os.fstat(fd), level)
+    finally:
+        os.close(fd)
+    return Path("/", *parts, "fleet-workflows")
 
 
 def verify_file(path, expected):
