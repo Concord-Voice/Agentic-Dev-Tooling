@@ -1,5 +1,6 @@
 """Run a text-only Codex review after the independent parent attests its policy."""
 
+from functools import partial
 import json
 import os
 import queue
@@ -187,27 +188,30 @@ def _start(rpc, binary, cwd, role, deadline):
     return thread["id"]
 
 
+def _record_notification(message, *, thread_id, completed, finals):
+    params = message.get("params", {})
+    if params.get("threadId") != thread_id:
+        return
+    method = message["method"]
+    if method == "turn/completed":
+        turn = params["turn"]
+        completed[turn["id"]] = turn["status"]
+        return
+    if method not in ("item/started", "item/completed"):
+        return
+    item = params.get("item", {})
+    if item.get("type") not in ("userMessage", "reasoning", "agentMessage"):
+        raise RuntimeError("Codex attempted a non-text item during the review")
+    if method == "item/completed" and item.get("type") == "agentMessage":
+        if item.get("phase") in (None, "final_answer") and isinstance(item.get("text"), str):
+            finals[params["turnId"]] = item["text"]
+
+
 def _review(rpc, thread_id, role, payload):
     deadline = time.monotonic() + 600
     completed = {}
     finals = {}
-
-    def observe(message):
-        method = message["method"]
-        params = message.get("params", {})
-        if params.get("threadId") != thread_id:
-            return
-        if method in ("item/started", "item/completed"):
-            item = params.get("item", {})
-            if item.get("type") not in ("userMessage", "reasoning", "agentMessage"):
-                raise RuntimeError("Codex attempted a non-text item during the review")
-            if method == "item/completed" and item.get("type") == "agentMessage":
-                if item.get("phase") in (None, "final_answer") and isinstance(item.get("text"), str):
-                    finals[params["turnId"]] = item["text"]
-        elif method == "turn/completed":
-            turn = params["turn"]
-            completed[turn["id"]] = turn["status"]
-
+    observe = partial(_record_notification, thread_id=thread_id, completed=completed, finals=finals)
     turn = rpc.request("turn/start", {
         "threadId": thread_id, "environments": [], "model": role["model"],
         "effort": role["model_reasoning_effort"],
