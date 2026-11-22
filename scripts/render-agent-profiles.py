@@ -141,11 +141,18 @@ def render(source, platform):
         # shell calls never turn into a general-purpose shell grant.
         mapping = {"Read": "view_file", "Grep": "grep_search", "Glob": "find_by_name",
                    "Write": "write_to_file", "Edit": "replace_file_content"}
-        available = [mapping[t] for t in tools.split(", ") if t in mapping]
+        source_tools = [] if tools == "[]" else tools.split(", ")
+        available = [mapping[t] for t in source_tools if t in mapping]
+        omitted = [t for t in source_tools if t not in mapping]
         main_agent = "false" if name == "feedback-analyst" else "true"
         fields = f"tools: {json.dumps(available)}\nmainAgent: {main_agent}\nsubagent: true\nmodel: flash"
-        body = ("Use the assigned file tools on this bounded task. Return any operations "
-                "that require another role to the caller.\n\n" + body)
+        if omitted:
+            body = ("This client does not grant these source operations: " + ", ".join(omitted)
+                    + ". Return required commands to the caller for execution.\n\n" + body)
+        if name == "test-writer":
+            description = "Writes focused tests and hands their execution back to the caller."
+            body = ("Write the tests, identify the exact validation command and report them as "
+                    "unexecuted. The caller runs the tests and records the result.\n\n" + body)
     else:
         if value(header, "model") != "opus":
             raise ValueError(f"{source}: verify the new Copilot model pin for this role")

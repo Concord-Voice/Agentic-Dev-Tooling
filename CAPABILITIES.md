@@ -13,7 +13,7 @@ Choose a target for each client that will open the consumer checkout. Use a full
 |---|---|---|---|
 | Claude Code | Project rules in `.claude/rules/` | `.claude/skills/` | Markdown under `.claude/agents/`. The full install includes the Claude pack roster. |
 | Codex | `AGENTS.md` | `.agents/skills/` | TOML under `.codex/agents/` for design, implementation, defensive review, read-only research, documentation and feedback analysis. |
-| Antigravity | `AGENTS.md` | `.agents/skills/` | Markdown under `.agents/agents/` for code review, documentation, test writing and feedback analysis. |
+| Antigravity | `AGENTS.md` | `.agents/skills/` | Markdown under `.agents/agents/` for code review, documentation, test authoring and feedback analysis. The test writer returns its validation command to the caller for execution. |
 | GitHub Copilot | `.github/copilot-instructions.md` | The Copilot target leaves skill installation to the other project targets. Copilot can discover skills in the resulting `.claude/skills/` or `.agents/skills/`. | `.github/agents/code-reviewer.agent.md` for PR review and analysis of supplied CI or tooling failure evidence. |
 | Gemini CLI | `GEMINI.md` | — | — |
 

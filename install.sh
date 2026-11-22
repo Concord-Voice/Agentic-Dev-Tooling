@@ -24,10 +24,22 @@ need() { command -v "$1" >/dev/null || { echo "missing prerequisite: $1" >&2; ex
 
 init_protected() {
   PROTECT_ROOT="$1"
-  if [[ "$PROTECT_ROOT" = / || -L "$PROTECT_ROOT/.claude" ]]; then
+  TOOLING_DOT="$PROTECT_ROOT/.claude"
+  if [[ "$PROTECT_ROOT" = / ]]; then
     echo "install into a project directory with its own .claude directory" >&2; exit 1
   fi
-  PROTECT_FILE="$PROTECT_ROOT/.claude/agentic-protected-paths.json"
+  if [[ -L "$TOOLING_DOT" ]]; then
+    if [[ "$USER_SCOPE" != 1 || ! -d "$TOOLING_DOT" || ! -O "$TOOLING_DOT" ]]; then
+      echo "linked .claude requires --user and an existing user-owned target directory" >&2; exit 1
+    fi
+    # An explicit user install selects the existing dotfile directory. Use its
+    # physical path for every write and still reject links below that boundary.
+    TOOLING_DOT="$(cd -P "$TOOLING_DOT" && pwd -P)"
+    if [[ "$TOOLING_DOT" = / || "$TOOLING_DOT" = "$(cd -P "$PROTECT_ROOT" && pwd -P)" ]]; then
+      echo "linked .claude must select a dedicated configuration directory" >&2; exit 1
+    fi
+  fi
+  PROTECT_FILE="$TOOLING_DOT/agentic-protected-paths.json"
   if [[ -L "$PROTECT_FILE" ]] || { [[ -e "$PROTECT_FILE" ]] && [[ ! -f "$PROTECT_FILE" ]]; }; then
     echo "protected paths must be a regular file, not a symlink: $PROTECT_FILE" >&2; exit 1
   fi
@@ -43,7 +55,7 @@ init_protected() {
 protected() { # true when the copied item overlaps a protected path, even under --force
   local dst=$1 rel
   [[ -n "${PROTECT_FILE:-}" ]] && [[ -f "$PROTECT_FILE" ]] || return 1
-  rel="${dst#"$PROTECT_ROOT"/}"
+  rel="$(lock_key "$dst")"
   jq -e --arg p "$rel" '.paths | any(. as $entry | $entry == $p or ($p | startswith($entry + "/")) or ($entry | startswith($p + "/")))' "$PROTECT_FILE" >/dev/null
 }
 
@@ -55,19 +67,20 @@ check_parents() {
     if [[ -L "$path" ]]; then
       echo "destination traverses a symlink: $path" >&2; exit 1
     fi
+    [[ "$path" != "$TOOLING_DOT" ]] || return 0
     path="${path%/*}"
   done
 }
 
 init_lock() {
-  local root="$1" platform="$2" file=".agentic-dev-tooling.lock"
+  local platform="$1" file=".agentic-dev-tooling.lock"
   [[ "$platform" == claude ]] || file=".agentic-dev-tooling.$platform.lock"
-  LOCK="$root/.claude/$file"; LOCK_ROOT="$root"
+  LOCK="$TOOLING_DOT/$file"
   check_parents "$LOCK"
   if [[ -L "$LOCK" ]] || { [[ -e "$LOCK" ]] && [[ ! -f "$LOCK" ]]; }; then
     echo "install lock must be a regular file: $LOCK" >&2; exit 1
   fi
-  mkdir -p "$root/.claude"
+  mkdir -p "$TOOLING_DOT"
 }
 
 copy() { # copy $1 -> $2 unless exists and differs without --force
@@ -91,7 +104,12 @@ copy() { # copy $1 -> $2 unless exists and differs without --force
 LOCK=""
 # Symlinks count by target, so an adopter's added link reads as a local change.
 tree_hash() { (cd "$1" 2>/dev/null && find . \( -type f -o -type l \) | LC_ALL=C sort | while IFS= read -r f; do printf '%s ' "$f"; if [ -L "$f" ]; then echo "-> $(readlink "$f")"; else cksum < "$f"; fi; done) || cksum < "$1"; }
-lock_key() { printf '%s' "${1#"$LOCK_ROOT"/}"; }
+lock_key() {
+  case "$1" in
+    "$TOOLING_DOT"/*) printf '.claude/%s' "${1#"$TOOLING_DOT"/}" ;;
+    *) printf '%s' "${1#"$PROTECT_ROOT"/}" ;;
+  esac
+}
 lock_untouched() { [ -n "$LOCK" ] && [ -f "$LOCK" ] && [ "$(jq -r --arg k "$(lock_key "$1")" '.[$k] // ""' "$LOCK")" = "$(tree_hash "$1" | cksum)" ]; }
 lock_record() {
   [ -n "$LOCK" ] || return 0
@@ -114,8 +132,8 @@ install_claude() {
   need jq; local root="${PROJECT:-$PWD}"; [ "$USER_SCOPE" = 1 ] && root="$HOME"
   mkdir -p "$root"; root="$(cd "$root" && pwd)"
   init_protected "$root"
-  local dot="$root/.claude"
-  init_lock "$root" claude
+  local dot="$TOOLING_DOT"
+  init_lock claude
   for p in core-lifecycle guardrails release-ops reviewer-packs writing starter-memory; do
     [ -d "$HERE/plugins/$p/skills" ] && for s in "$HERE/plugins/$p/skills"/*/; do
       is_template_only_skill "$s" && continue
@@ -147,7 +165,11 @@ install_claude() {
     echo "note: --user scope skips scripts/repo-config.sh and .claude/rules/ (both project-level; install per-project with --project to get them)"
   fi
   # Merge hook wiring from base settings into settings.json.
-  local settings="$dot/settings.json"; mkdir -p "$dot"
+  local settings="$dot/settings.json" merged_settings
+  if [[ -L "$settings" ]]; then
+    echo "skip (local symlink): $settings"
+    return 0
+  fi
   if protected "$settings"; then
     echo "skip (protected): $settings"
     echo "claude install complete: $dot"
@@ -179,7 +201,8 @@ install_claude() {
   # relative commands resolve against whatever project is active at hook-run time, not
   # $HOME, so they're inert there. For --user we rewrite any ".claude/hooks/..." command
   # (base- or adopter-supplied) to the absolute path they were just installed at.
-  jq -s --arg abs_prefix "$dot/hooks/" --argjson userscope "$([ "$USER_SCOPE" = 1 ] && echo true || echo false)" '
+  merged_settings="$(mktemp "$dot/.settings.XXXXXXXX")"
+  if jq -s --arg abs_prefix "$root/.claude/hooks/" --argjson userscope "$([ "$USER_SCOPE" = 1 ] && echo true || echo false)" '
     # --user rewrote earlier commands to absolute paths, so compare in relative form.
     def norm: if type == "string" and startswith($abs_prefix) then ".claude/hooks/" + ltrimstr($abs_prefix) else . end;
     (.[0]) as $adopter | (.[1]) as $base |
@@ -222,8 +245,12 @@ install_claude() {
         )
       ))
     else $merged end
-  ' "$settings" "$base" > "$settings.tmp" \
-    && mv "$settings.tmp" "$settings"
+  ' "$settings" "$base" > "$merged_settings"; then
+    mv "$merged_settings" "$settings"
+  else
+    rm -f "$merged_settings"
+    return 1
+  fi
   [ "$WITH_FLEET" = 1 ] && rm -f "$base"
 
   [ "$had_existing_hooks" = "true" ] && \
@@ -242,7 +269,7 @@ install_agents_only() (
   need python3; need jq
   local root="${PROJECT:-$PWD}" stage
   mkdir -p "$root"; root="$(cd "$root" && pwd)"
-  init_protected "$root"; init_lock "$root" "$PLATFORM"
+  init_protected "$root"; init_lock "$PLATFORM"
   stage="$(mktemp -d)"
   trap 'rm -rf "$stage"' EXIT
   python3 "$HERE/scripts/render-agent-profiles.py" "$PLATFORM" "$stage"
@@ -253,7 +280,7 @@ install_agents_only() (
 install_rulesync_platform() {
   need npx; local local_root="${PROJECT:-$PWD}"
   mkdir -p "$local_root"; local_root="$(cd "$local_root" && pwd)"
-  init_protected "$local_root"; init_lock "$local_root" "$PLATFORM"
+  init_protected "$local_root"; init_lock "$PLATFORM"
 
   # rulesync target ids, verified empirically against rulesync@16.7.0's own
   # `generate --help` and `rulesync docs reference/supported-tools` -- NOT what

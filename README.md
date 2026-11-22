@@ -85,6 +85,8 @@ or copy `scripts/repo-config.sh` and `docs/rules/*.md` into your repo by hand â€
 otherwise the config-driven steps degrade to their defaults and rules-file
 references resolve to nothing.
 
+For a personal Claude install, `--user` accepts an existing `~/.claude` link to a user-owned configuration directory. Project installs require a real `.claude` directory. The installer checks descendant output directories for symlinks in both scopes and preserves linked settings files.
+
 #### Keeping a repo current
 
 Commit the installer's lock files alongside the installed tooling. On a later install,

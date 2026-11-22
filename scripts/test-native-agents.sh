@@ -64,6 +64,12 @@ for path in google.glob("*.md"):
     assert "run_command" not in tools
     if path.stem == "feedback-analyst":
         assert tools == []
+    if path.stem == "test-writer":
+        profile = path.read_text()
+        assert "replace_file_content" in tools and "write_to_file" in tools
+        assert "does not grant these source operations: Bash." in profile
+        assert "exact validation command" in profile and "unexecuted" in profile
+        assert "caller runs the tests" in profile
     if path.stem.endswith("-reviewer"):
         assert set(tools) == {"view_file", "grep_search", "find_by_name"}
 assert [p.name for p in github.iterdir()] == ["code-reviewer.agent.md"]
