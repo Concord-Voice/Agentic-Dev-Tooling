@@ -175,17 +175,26 @@ def resolve(cache, skill):
     return target / "skills" / skill / "SKILL.md"
 
 
-def verified_role(platform, name, profile):
-    renderer = runpy.run_path(str(ROOT / "scripts/render-agent-profiles.py"))
+def role_candidates(renderer, platform, name):
     directory_name, suffix, names = renderer["PROFILES"][platform]
     if name not in names:
         raise ValueError("unsupported platform role")
-    tail = Path(directory_name) / (name + suffix)
-    if not profile.is_absolute() or profile.parts[-len(tail.parts):] != tail.parts:
+    yield name, Path(directory_name, name + suffix), renderer["profile_bytes"]
+    if platform in ("claude", "codex") and name != "feedback-analyst":
+        alias = renderer["fleet_alias_name"](platform, name)
+        yield alias, Path(directory_name, alias + suffix), renderer["alias_bytes"]
+
+
+def verified_role(platform, name, profile):
+    renderer = runpy.run_path(str(ROOT / "scripts/render-agent-profiles.py"))
+    candidates = role_candidates(renderer, platform, name)
+    generate = next((body for _, tail, body in candidates
+                     if profile.parts[-len(tail.parts):] == tail.parts), None)
+    if not profile.is_absolute() or generate is None:
         raise ValueError("expected a host-reported native role path")
     if profile.resolve(strict=True) != profile:
         raise ValueError("linked or noncanonical role path")
-    expected = renderer["profile_bytes"](platform, name)
+    expected = generate(platform, name)
     st = profile.lstat()
     if (not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_mode & 0o022
             or st.st_uid not in (0, os.getuid()) or st.st_size != len(expected)
@@ -194,22 +203,42 @@ def verified_role(platform, name, profile):
     return hashlib.sha256(expected).hexdigest()
 
 
+def select_role(platform, name, project):
+    if not project.is_absolute() or project.resolve(strict=True) != project or not project.is_dir():
+        raise ValueError("expected a physical project directory")
+    renderer = runpy.run_path(str(ROOT / "scripts/render-agent-profiles.py"))
+    for native_name, relative, _ in role_candidates(renderer, platform, name):
+        profile = project / relative
+        try:
+            digest = verified_role(platform, name, profile)
+        except (OSError, ValueError):
+            continue
+        return {"native_name": native_name, "profile": str(profile), "sha256": digest}
+    raise ValueError("no verified native role binding")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--skill", choices=SKILLS)
     mode.add_argument("--verify-role")
+    mode.add_argument("--select-role")
+    parser.add_argument("--project", type=Path)
     parser.add_argument("--cache", type=Path)
     parser.add_argument("--platform", choices=("codex", "claude", "antigravity", "copilot"))
     parser.add_argument("--profile", type=Path)
     args = parser.parse_args(argv)
     try:
         if args.skill:
-            if args.cache is None or args.platform or args.profile:
+            if args.cache is None or args.platform or args.profile or args.project:
                 parser.error("--skill takes only --cache")
             print(resolve(args.cache, args.skill))
+        elif args.select_role:
+            if args.cache or args.profile or not args.project or not args.platform:
+                parser.error("--select-role requires --platform and --project")
+            print(json.dumps(select_role(args.platform, args.select_role, args.project)))
         else:
-            if args.cache or not args.platform or not args.profile:
+            if args.cache or args.project or not args.platform or not args.profile:
                 parser.error("--verify-role requires --platform and --profile")
             print(verified_role(args.platform, args.verify_role, args.profile))
     except (OSError, ValueError) as exc:

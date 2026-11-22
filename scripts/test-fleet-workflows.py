@@ -4,11 +4,13 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import tempfile
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -130,6 +132,51 @@ esac
         for args in (["--skill", "review-pr"], ["--verify-role", "architect"]):
             with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 fleet.main(args)
+
+    def test_collision_only_role_binding(self):
+        renderer_path = fleet.ROOT / "scripts/render-agent-profiles.py"
+        import runpy
+        renderer = runpy.run_path(str(renderer_path))
+        for platform in ("claude", "codex"):
+            stage = self.tmp / platform
+            stage.mkdir(mode=0o700)
+            for name in ("architect", "security-reviewer"):
+                self.assertIn(name, renderer["PROFILES"][platform][2])
+            command = [sys.executable, "-I", "-B", str(renderer_path), platform, str(stage),
+                       "--fleet-alias", "architect", "--fleet-alias", "security-reviewer"]
+            subprocess.run(command, check=True)
+            directory, suffix, _ = renderer["PROFILES"][platform]
+            root = stage / directory
+            self.assertEqual({p.name for p in root.iterdir()},
+                             {"fleet-architect" + suffix, "fleet-security-reviewer" + suffix})
+            canonical = root / ("architect" + suffix)
+            fallback = root / ("fleet-architect" + suffix)
+            canonical.write_text("benign project-owned architect")
+            args = ["--select-role", "architect", "--platform", platform, "--project", str(stage)]
+            with redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(fleet.main(args), 0)
+            selected = json.loads(out.getvalue())
+            self.assertEqual(selected["native_name"], "fleet-architect")
+            self.assertEqual(selected["profile"], str(fallback))
+            self.assertEqual(selected["sha256"], fleet.verified_role(platform, "architect", fallback))
+            self.assertEqual(canonical.read_text(), "benign project-owned architect")
+            # Compare the whole native file with only its declared identity normalized.
+            source = renderer["profile_bytes"](platform, "architect")
+            self.assertEqual(fallback.read_bytes().replace(b"fleet-architect", b"architect", 1), source)
+            self.assertTrue(subprocess.run(command, capture_output=True).returncode)
+            canonical.write_bytes(source)
+            self.assertEqual(fleet.select_role(platform, "architect", stage)["native_name"], "architect")
+            canonical.unlink()
+            fallback.write_text("foreign fallback")
+            with self.assertRaises(ValueError):
+                fleet.select_role(platform, "architect", stage)
+        with self.assertRaises(ValueError):
+            fleet.select_role("claude", "architect", Path("relative"))
+        for platform, role in (("copilot", "code-reviewer"), ("claude", "feedback-analyst")):
+            with self.assertRaises(ValueError):
+                renderer["fleet_alias_name"](platform, role)
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            fleet.main(["--select-role", "architect", "--platform", "claude"])
 
     def test_cache_drift(self):
         for kind in ("added", "removed", "body", "mode", "symlink", "directory", "hardlink"):

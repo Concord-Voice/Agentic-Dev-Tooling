@@ -2,6 +2,8 @@
 """Render the reviewed subset of package-owned Claude roles to a staging directory."""
 import argparse
 import json
+import os
+import stat
 from functools import lru_cache
 from pathlib import Path
 import re
@@ -189,17 +191,60 @@ def profile_bytes(platform, name):
     return source.read_bytes() if platform == "claude" else render(source, platform).encode()
 
 
+def fleet_alias_name(platform, name):
+    if platform not in ("claude", "codex") or name not in CODEX_ROLES or name == "feedback-analyst":
+        raise ValueError("unsupported fleet role alias")
+    return "fleet-" + name
+
+
+def alias_bytes(platform, name):
+    alias = fleet_alias_name(platform, name)
+    source = profile_bytes(platform, name)
+    if platform == "claude":
+        old = f"---\nname: {name}\n".encode()
+        new = f"---\nname: {alias}\n".encode()
+    else:
+        old = f'name = "{name}"\n'.encode()
+        new = f'name = "{alias}"\n'.encode()
+    if not source.startswith(old):
+        raise ValueError("unexpected canonical role identity")
+    return new + source[len(old):]
+
+
+def render_aliases(platform, staging, names):
+    if not staging.is_dir() or staging.is_symlink():
+        raise ValueError("fleet aliases require a private staging directory")
+    st = staging.stat()
+    if st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) != 0o700 or any(staging.iterdir()):
+        raise ValueError("fleet aliases require an empty owner-only staging directory")
+    directory, suffix, _ = PROFILES[platform]
+    files = {fleet_alias_name(platform, name) + suffix: alias_bytes(platform, name)
+             for name in dict.fromkeys(names)}
+    dest = staging / directory
+    dest.mkdir(parents=True)
+    for filename, payload in files.items():
+        (dest / filename).write_bytes(payload)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("platform", choices=PROFILES)
     parser.add_argument("destination", type=Path)
+    parser.add_argument("--fleet-alias", action="append", choices=CODEX_ROLES,
+                        help="render only the named fallback into an empty owner-only staging directory")
     args = parser.parse_args()
+    if args.fleet_alias:
+        try:
+            render_aliases(args.platform, args.destination, args.fleet_alias)
+        except ValueError as exc:
+            parser.error(str(exc))
+        return
+
     directory, suffix, names = PROFILES[args.platform]
     dest = args.destination / directory
     dest.mkdir(parents=True, exist_ok=True)
     for name in names:
         (dest / (name + suffix)).write_bytes(profile_bytes(args.platform, name))
-
 
 
 if __name__ == "__main__":
