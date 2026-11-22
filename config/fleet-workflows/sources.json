@@ -1,0 +1,141 @@
+{
+  "_shared/context7-docs-discipline.md": {
+    "sha256": "742cd202139f1837cada600650945850333e259de532b86c637169032e47bc37"
+  },
+  "_shared/model-equivalence.md": {
+    "sha256": "a7be94d3ea61a8459c1d92a02c51c09d4472747ae9fbcda5bbb7c5bf4aee1498",
+    "edits": [
+      [40, 40, ""]
+    ]
+  },
+  "ci-status/SKILL.md": {
+    "sha256": "ea2ab9aa17d0977815f226553cfb74dd9dda389aa4f895461dee795e900bcf32"
+  },
+  "dev-lifecycle/SKILL.md": {
+    "sha256": "f48e7406dfd12ca3e282a9fe3a970debc0ccc2ad83f8be4a2172c4d395bd13e8",
+    "edits": [
+      [13, 13, ""],
+      [51, 68, "> source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"],
+      [91, 91, "| Named-agent dispatch | Phases 1–4 and 8 | Use the [fleet lifecycle role table](../_shared/lifecycle-agent-dispatch.md) for verified role identity, capability, model and escalation. |"],
+      [100, 100, "Open the [fleet nested skill contract](../_shared/nested-skills.md) before handing off to another skill or profile."],
+      [113, 113, "For suspected security defects, inspect the expected security invariant and use benign regression assertions on the mitigation. Keep ordinary reproduction exclusively for non-security defects."],
+      [117, 117, "| Ordinary defect | Plan first, then use the sibling reproduction skill and hand back to Phase 4. Classify suspected security defects separately. |"],
+      [121, 121, "A direct defect handoff starts at Phase 4 so verification, coverage, documentation drift and the defensive security review still run."],
+      [767, 802, "## Catalog dispatch\n\nConsult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage. Open the [fleet nested skill contract](../_shared/nested-skills.md) before handing off to another skill or profile."],
+      [847, 847, "| A1 | Security or privacy label or sensitive domain | Include it in the admission report and preserve independent defensive review and Phase 9 approval. |"],
+      [900, 900, "test-writer as a separate dispatch, and independent defensive review where required — so handing an"],
+      [906, 906, "  binds on every task and no independent specialist is required)."],
+      [1067, 1069, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage. Use the [fleet lifecycle role table](../_shared/lifecycle-agent-dispatch.md) for verified role identity, capability, model and escalation."],
+      [1191, 1201, "Security-sensitive changes retain subsequent independent review, waiting and merge gates under every mode."],
+      [1258, 1258, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage."],
+      [1262, 1266, "The Phase 2 design panel runs the fixed stage order in the fleet lifecycle table. Use the [fleet lifecycle role table](../_shared/lifecycle-agent-dispatch.md) for verified role identity, capability, model and escalation."],
+      [1348, 1348, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage."],
+      [1358, 1367, "#### Defect classification\n\nFor suspected security defects, inspect the expected security invariant and use benign regression assertions on the mitigation. Keep ordinary reproduction exclusively for non-security defects. For ordinary defect tasks, use the sibling reproduce-then-fix workflow. Continue with Phase 4."],
+      [1384, 1406, "Use the [fleet lifecycle role table](../_shared/lifecycle-agent-dispatch.md) for verified role identity, capability, model and escalation. For wide work, group independent units and verify results separately. Keep dispatch decisions with the parent."],
+      [1414, 1416, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage. Use the [fleet lifecycle role table](../_shared/lifecycle-agent-dispatch.md) for verified role identity, capability, model and escalation. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer."],
+      [1557, 1557, "Write agent names bare when posting authorized GitHub messages."],
+      [1575, 1575, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage."],
+      [2827, 2829, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage. Open the sibling [enhanced review](../enhanced-pr-review/SKILL.md) for the exact head. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer."],
+      [2858, 2860, "   bash \"${FLEET_SKILLS:?}/enhanced-pr-review/check-review-dispositions.sh\" \"<PR>\""],
+      [2865, 2865, "Apply routine fixes with the owning producer. Cross-boundary, sensitive, or twice-failed changes return to the maintainer."],
+      [2923, 2923, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage."],
+      [2942, 2944, "bash \"${FLEET_SKILLS:?}/enhanced-pr-review/check-review-dispositions.sh\" \"$PR_NUMBER\""],
+      [3081, 3081, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage."]
+    ]
+  },
+  "enhanced-pr-review/SKILL.md": {
+    "sha256": "9c16da8ac6d0a5ea3fccd966823553cae8cf12c5f46898fc5ae99e4189eff5fd",
+    "edits": [
+      [3, 3, "description: Reconcile bot and independent defensive reviews, quality signals and thread dispositions on the current PR head."],
+      [9, 9, ""],
+      [31, 32, "> Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer."],
+      [159, 161, "**Step 5.** Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer."],
+      [166, 171, "cov() { bash \"${FLEET_SKILLS:?}/enhanced-pr-review/review-coverage.sh\" \"$@\"; }"],
+      [268, 268, "Treat bot-resolved threads, bot replies and commits tied to findings as UNVERIFIED pending independent defensive re-review of the precise autofix range by the vetted Step 5 reviewers. A commit proven unrelated to any finding is No-finding. Ask each reviewer the following question."],
+      [444, 461, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"],
+      [647, 647, "| security-reviewer | subagent | 1 | row 3 |"],
+      [655, 655, "| 3 | <finding> | security-reviewer | PR thread | Accepted | fixed in commit |"],
+      [664, 664, "Write reviewer names bare when posting authorized GitHub messages."],
+      [694, 696, "bash \"${FLEET_SKILLS:?}/enhanced-pr-review/check-review-dispositions.sh\" \"$0\""],
+      [714, 716, "bash \"${FLEET_SKILLS:?}/enhanced-pr-review/check-review-dispositions.sh\" \"$0\""],
+      [900, 900, "1. No open BLOCK-severity findings from any required reviewer or release signal."],
+      [944, 944, "| Reviewers from the fleet table | status | exact head and actual coverage |"],
+      [1024, 1024, "- Uses the fleet specialist table and records the actual coverage."]
+    ]
+  },
+  "enhanced-pr-review/check-review-dispositions.sh": {
+    "sha256": "db6e85fb3d152a1a3941b9b9f6ee3ecb780f9418421b83109287abf891457342"
+  },
+  "enhanced-pr-review/review-coverage.sh": {
+    "sha256": "dd0b2095316256b93dc6bf222dd5393414bcc3987ee026374dc0971ffd77f2ab"
+  },
+  "issue-brief/SKILL.md": {
+    "sha256": "d02b11c01188708b5b83922739f5f613150d6e07de4efabdd4c410dcbffc0941"
+  },
+  "issue-creation/SKILL.md": {
+    "sha256": "572458bb1c862aa8ce9ad514d6259eb24c6a490a43a320b548cfe83f38bc165c",
+    "edits": [
+      [34, 51, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"],
+      [101, 118, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"],
+      [631, 648, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"]
+    ]
+  },
+  "pr-creation/SKILL.md": {
+    "sha256": "e2b0d086eaab630ecc2a2217429e942020c52caffdadf3773a2865c7a864d41d",
+    "edits": [
+      [42, 43, "Load both helpers from the verified edition and use the exact default-branch commit for repository configuration."],
+      [50, 67, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"],
+      [69, 72, "source \"${FLEET_SKILLS:?}/pr-creation/lib.sh\" || { return 1 2>/dev/null || exit 1; }"]
+    ]
+  },
+  "pr-creation/lib.sh": {
+    "sha256": "b6bb4d72d598627db0fddfcadacd1614a925bc6bbdd4a877dde3eaa34b6b38b5"
+  },
+  "reproduce-then-fix/SKILL.md": {
+    "sha256": "e12960babe488f875d0979ee0392eb668252cbcc43e714bf312a493472f30e06",
+    "edits": [
+      [28, 28, "For suspected security defects, inspect the expected security invariant and use benign regression assertions on the mitigation. Keep ordinary reproduction exclusively for non-security defects. If applicable, return to the defensive lifecycle before generating a failing test. For an ordinary defect, commit a non-vacuous failing test before the implementation fix."],
+      [94, 94, "      NOT run: quality gate, coverage gate, documentation drift and defensive review."],
+      [220, 223, "Use the [fleet lifecycle role table](../_shared/lifecycle-agent-dispatch.md) for verified role identity, capability, model and escalation. After two failed hypotheses give the maintainer the evidence."],
+      [332, 332, "4. The independent defensive review for security-sensitive surfaces"]
+    ]
+  },
+  "review-pr/SKILL.md": {
+    "sha256": "4d7c0d56ab0fdd8be5a8d0f0c0bb10207d3ca3c9aa65f7e83bb710ab3aeda280",
+    "edits": [
+      [28, 899, "## Review steps\n\nVerify the effective review host, current base and head before fetching any PR-authored input. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer.\n\nRetain each reviewer receipt, relevant location and severity. Re-read both revisions before reporting. A change to either invalidates coverage."]
+    ]
+  },
+  "verify-quality-gate/SKILL.md": {
+    "sha256": "fc2020af1ba5788efa7c634d176a7e4ae8e9c6d89d179b234b91f5f0d0626c1e",
+    "edits": [
+      [62, 79, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"]
+    ]
+  },
+  "weekly-deps/SKILL.md": {
+    "sha256": "8a0af5e7dc7751418cdf34848179d75f26babb2217d3889670a4e4a7cd6709a1",
+    "edits": [
+      [60, 77, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"],
+      [86, 87, "# Fixed fleet Tier C review.\nDEEP_REVIEW_SKILL=/enhanced-pr-review"],
+      [227, 229, "For individual issue work, use the sibling dev-lifecycle. For dependency PRs use weekly-deps. Open the sibling [enhanced review](../enhanced-pr-review/SKILL.md) for the exact head. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer."],
+      [543, 543, "Tier C requires the approved external review path and full first-party review on this head. Open the sibling [enhanced review](../enhanced-pr-review/SKILL.md) for the exact head. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer."],
+      [869, 869, "When the external review request fails, record the service error and retain any required coverage as pending."],
+      [878, 884, "cov() { bash \"${FLEET_SKILLS:?}/enhanced-pr-review/review-coverage.sh\" \"$@\"; }"],
+      [909, 909, "In interactive mode run the fleet review table once for this head and retain its receipt."],
+      [977, 981, "Open the sibling [enhanced review](../enhanced-pr-review/SKILL.md) for the exact head. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer. If the eligible worker or skill is missing, leave Tier C pending."],
+      [1049, 1053, "3. Open the sibling [enhanced review](../enhanced-pr-review/SKILL.md) for the exact head. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer. Recheck exact-head coverage. Sensitive fixes return to the maintainer."]
+    ]
+  },
+  "weekly-deps/references/autonomous-mode.md": {
+    "sha256": "5f8d1ef23990c7b8d6277dc6fa2a01705ce4c02fddaf5eff2dcd5f609e93b232"
+  },
+  "weekly-deps/references/community-signal-lookup.md": {
+    "sha256": "8c37e8be13d108eb9c3074abc652bed0018d104efec66e40309ef2a91e8cc6be"
+  },
+  "weekly-deps/references/pinned-issue-digest.md": {
+    "sha256": "1b257e949800695edf3dc9a12f09a90e75626394a48b8f5e366824110c070b29"
+  },
+  "weekly-deps/references/security-sensitive-packages.md": {
+    "sha256": "e985c16e52b38d2e9f8f9ee72b3206ce3ed951d8dfcfa2fa2481fa8db8603e20"
+  }
+}

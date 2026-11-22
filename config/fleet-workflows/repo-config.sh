@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Sourced only from the verified fleet edition, with the exact default-branch OID.
+fleet_load_config() {
+  local oid="$1" entry
+  case "$oid" in ''|*[!0-9a-f]*) return 1 ;; esac
+  case "${#oid}" in 40|64) ;; *) return 1 ;; esac
+  git cat-file -e "$oid^{commit}" || return 1
+  entry="$(git ls-tree "$oid" -- .claude/repo-config.json)" || return 1
+  RC_TRUSTED_CFG='{}'
+  export RC_TRUSTED_STATE=absent
+  case "${entry%% *}" in
+    '') ;;
+    100644|100755)
+      RC_TRUSTED_CFG="$(git show "$oid:.claude/repo-config.json")" || return 1
+      jq -e 'type == "object"' >/dev/null <<<"$RC_TRUSTED_CFG" || return 1
+      RC_TRUSTED_STATE=present ;;
+    *) return 1 ;;
+  esac
+}
+rc_get() {
+  jq -r --arg fallback "${2:-}" "($1) | if . == null then \$fallback elif type == \"string\" then . else tostring end" <<<"$RC_TRUSTED_CFG"
+}
+rc_has() {
+  jq -e "($1) != null" >/dev/null <<<"$RC_TRUSTED_CFG"
+}
