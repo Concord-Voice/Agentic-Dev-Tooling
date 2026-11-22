@@ -38,6 +38,13 @@ for skill, start, end in (
     if "`feedback-analyst`" not in instructions or "**Explore**" in instructions:
         sys.exit(f"{skill}: external issue analysis needs an eligible role")
 
+adjacency = section(issue, "### Step 3 — Dispatch adjacency scan", "### Step 4")
+for boundary in ("separately isolated read-only collector", "before fetching issues", "trusted formatter"):
+    if boundary not in adjacency:
+        sys.exit(f"issue adjacency is missing its {boundary} boundary")
+if "In the parent session, set" in adjacency or "gh issue list" in adjacency:
+    sys.exit("raw issue retrieval leaked back into parent-session instructions")
+
 context7 = (core / "_shared/context7-docs-discipline.md").read_text()
 if 'ToolSearch  query: "select:' in context7:
     sys.exit("Context7 instructions require one client's tool prefix")
