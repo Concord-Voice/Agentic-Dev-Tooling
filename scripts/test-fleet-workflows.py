@@ -108,7 +108,8 @@ class NativeIssueIndexTests(unittest.TestCase):
         self.assertEqual(index_helper.reconcile(current, self.parent, children), current + row + "\r\n")
         self.assertEqual(index_helper.reconcile("Context", self.parent, children[:1]),
                          "Context\n\n## Sub-Issues\n" + row + "\n")
-        for body in ["## Sub-Issues\n### Backend\n- example/child#2", "## Sub-Issues\n## Sub-Issues\n", "## Sub-Issues\n- [ ] #2", "```\n",
+        for body in ["Sub-Issues\n----------\n- example/child#2", "## Sub-Issues <!-- hidden -->\n- #2",
+                     "## Sub-Issues\n### Backend\n- example/child#2", "## Sub-Issues\n## Sub-Issues\n", "## Sub-Issues\n- [ ] #2", "```\n",
                      "<!--private", "<pre>\n## Sub-Issues\n", "## Sub-Issues\n- #7\n- example/parent#7"]:
             with self.subTest(body=body), self.assertRaises(index_helper.Pending):
                 index_helper.reconcile(body, self.parent, children)

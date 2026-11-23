@@ -103,14 +103,24 @@ def continued_block(ending, line):
     return None
 
 
+def check_index_spelling(line, following):
+    if "sub-issues" not in line.casefold():
+        return
+    if re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", following.rstrip("\r\n")):
+        raise Pending("ambiguous Setext Sub-Issues heading")
+    if re.match(r"^ {0,3}#{1,6}(?:\s|$)", line) and line.strip() != "## Sub-Issues":
+        raise Pending("ambiguous Sub-Issues section")
+
+
 def markdown_headings(lines):
     ending = None
     headings = []
-    for i, raw in enumerate(lines):
+    for i, (raw, following) in enumerate(zip(lines, lines[1:] + [""])):
         line = raw.rstrip("\r\n")
         if ending is not None:
             ending = continued_block(ending, line)
             continue
+        check_index_spelling(line, following)
         ending = block_ending(line)
         if ending is not None or "<!--" in line:
             continue
