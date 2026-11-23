@@ -128,6 +128,12 @@ def _socket_filter():
         raise
 
 
+def _require_linux_binaries():
+    for path, package in ((LINUX_BWRAP, "bubblewrap"), (LINUX_GIT, "git")):
+        if not Path(path).is_file() or not os.access(path, os.X_OK):
+            raise RuntimeError(f"Install the distribution {package} package with an executable at {path}")
+
+
 def _sandbox(snapshot, objects, descriptors):
     if sys.platform == "darwin":
         # /usr/bin/git is an xcrun launcher which needs host services. Invoke a
@@ -140,9 +146,7 @@ def _sandbox(snapshot, objects, descriptors):
                          "-p", MAC_PROFILE, path], str(snapshot), str(objects), ())
         raise RuntimeError("Apple Git is unavailable for isolated evidence")
     if sys.platform == "linux":
-        for path, package in ((LINUX_BWRAP, "bubblewrap"), (LINUX_GIT, "git")):
-            if not Path(path).is_file() or not os.access(path, os.X_OK):
-                raise RuntimeError(f"Install the distribution {package} package with an executable at {path}")
+        _require_linux_binaries()
         policy = descriptors.enter_context(_socket_filter())
         command = [LINUX_BWRAP, "--seccomp", str(policy.fileno()), "--unshare-all", "--die-with-parent", "--new-session",
                    "--cap-drop", "ALL", "--ro-bind", LINUX_GIT, LINUX_GIT]
