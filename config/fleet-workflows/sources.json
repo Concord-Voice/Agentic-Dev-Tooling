@@ -74,10 +74,10 @@
     ]
   },
   "enhanced-pr-review/check-review-dispositions.sh": {
-    "sha256": "a8d00c9d2e2be0930203b29e453676426208928c37c4d9c9b8899d4f1663e147"
+    "sha256": "740078f80373e96fe7df00e591a9e80f0a682a197ab5532ed8fc040e2bfc2255"
   },
   "enhanced-pr-review/references/maintainer-decisions.md": {
-    "sha256": "c7660e4b9e7def056cab408ed46a0f82c56ebb732293817c578094bd2cc859e2"
+    "sha256": "c48e606e88b4654dec1948b5377a4b55157125994a7d2de996837806dd333e52"
   },
   "enhanced-pr-review/review-coverage.sh": {
     "sha256": "dd0b2095316256b93dc6bf222dd5393414bcc3987ee026374dc0971ffd77f2ab",

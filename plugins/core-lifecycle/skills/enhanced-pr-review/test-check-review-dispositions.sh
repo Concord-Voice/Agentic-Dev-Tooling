@@ -797,6 +797,9 @@ paginate_shim() {
 #!/bin/bash
 case "$1 $2" in
   "repo view") echo "example-org/example-repo"; exit 0 ;;
+  "pr view")
+    [[ "$*" == "pr view 999 --repo github.com/example-org/example-repo --json baseRefOid,headRefOid" ]] || exit 1
+    cat "$CV_TEST_PAGES/target.json"; exit $? ;;
   "api --include")
     [[ "$3" == "repos/example-org/example-repo/collaborators/teammate/permission" && "$4" == "--jq" && "$5" == ".permission" ]] || exit 1
     case "${TEST_MEMBER_PERMISSION:-}" in
@@ -1091,11 +1094,13 @@ oid=1111111111111111111111111111111111111111
 target=example-org/example-repo
 export TEST_MEMBER_PERMISSION=write
 source_node() {
-    jq -nc --arg id "$1" --arg login "$2" --arg association "$3" --arg type "$4" --arg body "$5" \
+    local id=$1 login=$2 association=$3 kind=$4 body=$5
+    jq -nc --arg id "$id" --arg login "$login" --arg association "$association" --arg type "$kind" --arg body "$body" \
        '{fullDatabaseId:$id,author:{__typename:$type,login:$login},authorAssociation:$association,body:$body,updatedAt:"2026-01-01T00:00:00Z",state:"COMMENTED"}'
 }
 fixture_page() {
-    jq -nc --arg sha "$oid" --arg key "$1" --argjson nodes "$2" \
+    local key=$1 nodes=$2
+    jq -nc --arg sha "$oid" --arg key "$key" --argjson nodes "$nodes" \
        '[{data:{repository:{pullRequest:{headRefOid:$sha,($key):{pageInfo:{hasNextPage:false},nodes:$nodes}}}}}]'
 }
 writer=$(source_node 101 teammate MEMBER User "Clarify the date in the guide")
@@ -1130,11 +1135,13 @@ for perm in read denied; do
     case $perm in
       read) [[ $got == 0 ]] && jq -e 'length==1 and (.[0].url | endswith("issuecomment-102"))' <<< "$src" >/dev/null ;;
       denied) [[ $got == 2 && -z "$src" ]] ;;
+      *) exit 1 ;;
     esac || { echo "FAIL: uncertain maintainer authority must not pass"; exit 1; }
 done
 unset TEST_MEMBER_PERMISSION
 formal_fixture() {
-    jq -nc --arg sha "$oid" --argjson aggregate "$1" --argjson states "$2" \
+    local aggregate=$1 states=$2
+    jq -nc --arg sha "$oid" --argjson aggregate "$aggregate" --argjson states "$states" \
       '[{data:{repository:{pullRequest:{headRefOid:$sha,reviewDecision:$aggregate,latestOpinionatedReviews:{pageInfo:{hasNextPage:false},nodes:[$states[]|{state:.}]}}}}}]'
 }
 formal_case() {
@@ -1151,6 +1158,84 @@ formal_case 'missing decision field is unknown' 2 "$(formal_fixture null '[]' | 
 formal_case 'moved head is unknown' 2 "$(formal_fixture null '[]' | jq '.[0].data.repository.pullRequest.headRefOid="other"')"
 formal_case 'partial connection is unknown' 2 "$(formal_fixture null '[]' | jq '.[0].data.repository.pullRequest.latestOpinionatedReviews.pageInfo.hasNextPage=true')"
 formal_case 'lookup failure is unknown' 2 'MISSING-FIXTURE-SENTINEL'
+# Exercise the exact ordinary-install commands shipped in the workflow. The
+# checkout retains a successful one-argument ledger and has a different roster
+# on its default revision than on the release revision targeted by the PR.
+installed_compatibility() (
+    set -e
+    local installed=${SCRIPT%/*} base old output status mode manifest
+    local target_dir="$TMP/ordinary-target"
+    mkdir -p "$target_dir/.claude/skills/enhanced-pr-review"
+    # shellcheck disable=SC2046
+    unset $(git rev-parse --local-env-vars)
+    cd "$target_dir"
+    git init -q --template=
+    old=.claude/skills/enhanced-pr-review/check-review-dispositions.sh
+    printf '%s\n' '#!/bin/bash' 'exit 0' > "$old"
+    git add "$old"
+    git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm default
+    git update-ref refs/remotes/origin/main HEAD
+    cp "$TMP/repo-config.json" .claude/repo-config.json
+    git add .claude/repo-config.json
+    git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm release
+    base=$(git rev-parse HEAD)
+    jq -nc --arg base "$base" --arg head "$oid" '{baseRefOid:$base,headRefOid:$head}' > "$TMP/pages/target.json"
+    formal_fixture null '[]' > "$TMP/pages/formal.json"
+    awk '/^# Installed supplemental check$/{emit=1;next} emit && /^```/{exit} emit{print}' \
+        "$installed/references/maintainer-decisions.md" > "$TMP/installed.bash"
+    [[ -s "$TMP/installed.bash" ]]
+    export REVIEW_SKILL_DIR="$installed" PR=999 TARGET_REPO="$target" REVIEWED_SHA="$oid"
+    export CV_TEST_PAGES="$TMP/pages" TEST_MEMBER_PERMISSION=write PATH="$TMP:$PATH"
+    manifest="$installed/../../../../config/fleet-workflows/sources.json"
+    REVIEW_GATE_SHA256=$(jq -er '."enhanced-pr-review/check-review-dispositions.sh".sha256' "$manifest")
+    export REVIEW_GATE_SHA256
+    # Deliberately set a conflicting override; the installed procedure clears it.
+    echo '{}' > "$TMP/unrelated-config.json"
+    export CV_REPO_CONFIG="$TMP/unrelated-config.json"
+    output=$(MODE=--maintainer-sources bash "$TMP/installed.bash")
+    jq -e '[.[].url | split("#")[1]] == ["issuecomment-101","issuecomment-102","pullrequestreview-105"]' <<<"$output" >/dev/null
+    output=$(MODE=--formal-state bash "$TMP/installed.bash")
+    jq -e --arg repo "$target" --arg head "$oid" '. == {repository:$repo,pr:"999",head:$head,state:"clear"}' <<<"$output" >/dev/null
+    fixture_page comments '[]' > "$TMP/pages/comments.json"
+    fixture_page reviews '[]' > "$TMP/pages/reviews.json"
+    output=$(MODE=--maintainer-sources bash "$TMP/installed.bash")
+    [[ "$output" == '[]' ]]
+    formal_fixture null '["CHANGES_REQUESTED"]' > "$TMP/pages/formal.json"
+    status=0
+    MODE=--formal-state bash "$TMP/installed.bash" && status=0 || status=$?
+    [[ $status == 1 ]]
+    jq -nc --arg head "$oid" '{headRefOid:$head,baseRefOid:"0000000000000000000000000000000000000000"}' > "$TMP/pages/target.json"
+    status=0
+    output=$(MODE=--maintainer-sources bash "$TMP/installed.bash") || status=$?
+    [[ $status == 2 && -z "$output" ]]
+    echo null > .claude/repo-config.json
+    git add .claude/repo-config.json
+    git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm malformed
+    base=$(git rev-parse HEAD)
+    jq -nc --arg head "$oid" --arg base "$base" '{headRefOid:$head,baseRefOid:$base}' > "$TMP/pages/target.json"
+    status=0
+    output=$(MODE=--maintainer-sources bash "$TMP/installed.bash") || status=$?
+    [[ $status == 2 && -z "$output" ]]
+    # This consumer's base still clears its original ledger, even with extra args.
+    /bin/bash "$old" "$PR"
+    /bin/bash "$old" "$PR" --formal-state "$target" "$oid"
+    export REVIEW_SKILL_DIR="$target_dir/${old%/*}"
+    for mode in --maintainer-sources --formal-state; do
+        status=0
+        output=$(MODE="$mode" bash "$TMP/installed.bash") || status=$?
+        [[ $status == 2 && -z "$output" ]]
+    done
+    # A legacy package even with its own matching digest cannot produce receipts.
+    REVIEW_GATE_SHA256=$(shasum -a 256 < "$old"); REVIEW_GATE_SHA256=${REVIEW_GATE_SHA256%% *}
+    for mode in --maintainer-sources --formal-state; do
+        status=0
+        output=$(MODE="$mode" bash "$TMP/installed.bash") || status=$?
+        [[ $status == 2 && -z "$output" ]]
+    done
+)
+installed_compatibility
+[[ $? == 0 ]] || { echo 'FAIL: ordinary installed supplemental check'; exit 1; }
+echo 'PASS: installed review with a legacy consumer ledger and a release-branch roster'
 echo 'PASS: linked maintainer source and current formal decision fixtures'
 
 echo ""

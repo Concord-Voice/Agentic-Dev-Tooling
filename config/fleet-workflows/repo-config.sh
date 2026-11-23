@@ -94,11 +94,11 @@ fleet_load_issue_config() {
 # Execute the bundled disposition gate against a private snapshot of the same
 # verified configuration. Free-form comments and HTTP errors stay in the child.
 fleet_check_dispositions() (
-  local pr="${1:-}" repo="${2:-}" expected='' dir gate scratch code
+  local pr="${1:-}" repo="${2:-}" mode="${3:-}" head="${4:-}" expected='' dir gate scratch code
   [[ "$pr" =~ ^[1-9][0-9]*$ ]] || return 2
   case $# in
     1|2) ;;
-    4) [[ "$3" == --maintainer-sources || "$3" == --formal-state ]] && [[ "$4" =~ ^[0-9a-f]{40}$ ]] || return 2 ;;
+    4) [[ "$mode" == --maintainer-sources || "$mode" == --formal-state ]] && [[ "$head" =~ ^[0-9a-f]{40}$ ]] || return 2 ;;
     *) return 2 ;;
   esac
   if [[ -z "$repo" ]]; then
@@ -118,8 +118,8 @@ fleet_check_dispositions() (
   export GH_REPO="$repo" CV_REPO_CONFIG="$scratch/config.json"
   if [[ $# == 4 ]]; then
     # Only the two fixed metadata modes can return output: canonical source links
-    # with timestamps, or a status code for the current formal review decision.
-    /bin/bash "$gate" "$pr" "$3" "$repo" "$4" 2>/dev/null
+    # with timestamps, or a clear receipt for the current formal review decision.
+    /bin/bash "$gate" "$pr" "$mode" "$repo" "$head" 2>/dev/null
     return $?
   fi
   if /bin/bash "$gate" "$pr" >/dev/null 2>&1; then

@@ -77,7 +77,7 @@ if [[ -z "$PR" ]]; then
 fi
 
 # Optional read-only operations used by the trusted review collector. Suppress raw
-# diagnostics in these modes; only validated links or an exit status leave the collector.
+# diagnostics in these modes; only validated links or a head-bound formal-state receipt leave the collector.
 MODE=${2:-}
 if [[ -n "$MODE" ]]; then
     [[ $# == 4 && "$PR" =~ ^[1-9][0-9]*$ && "$3" =~ ^[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+$ && "$4" =~ ^[0-9a-f]{40}$ ]] || exit 2
@@ -117,6 +117,8 @@ if [[ "$MODE" == --formal-state ]]; then
                 or any(.latestOpinionatedReviews.nodes[]; .state == "CHANGES_REQUESTED"))
             | if . then "blocked" else "clear" end end'); then exit 2; fi
     [[ "$verdict" == clear ]] || exit 1
+    jq -cn --arg repository "$TARGET" --arg pr "$PR" --arg head "$EXPECTED_HEAD" \
+        '{state:"clear",repository:$repository,pr:$pr,head:$head}' || exit 2
     exit 0
 fi
 
@@ -371,7 +373,7 @@ fi
 # branch the gate is judging: a one-line `.bots[]` diff could declare an alias
 # that satisfies coverage for every reviewer, and the PR would clear its own
 # review. The roster that governs a review must come from the branch being
-# merged INTO. `CV_REPO_CONFIG` overrides for tests only.
+# merged INTO. The fleet collector supplies its verified snapshot in CV_REPO_CONFIG.
 ROSTER_JSON='[]'
 ROSTER_SOURCE='(none — login-only matching)'
 if [[ -n "${CV_REPO_CONFIG:-}" ]]; then
@@ -388,9 +390,17 @@ elif git rev-parse --git-dir >/dev/null 2>&1; then
     # silently reads the wrong one, and on a default branch with no roster the
     # output is indistinguishable from a legitimately roster-less repo.
     # /dev-lifecycle knows this from `gh pr view --json baseRefName`.
-    BASE_REF="${CV_BASE_REF:-${GITHUB_BASE_REF:-}}"
-    [[ -n "$BASE_REF" ]] && BASE_REF="refs/remotes/origin/${BASE_REF#origin/}"   # full refname: a local branch or tag named origin/<x> cannot shadow it
-    if [[ -z "$BASE_REF" ]]; then
+    if [[ "$MODE" == --maintainer-sources ]]; then
+        export GIT_NO_REPLACE_OBJECTS=1
+        BASE_REF=$(gh pr view "$PR" --repo "$GH_REPO" --json baseRefOid,headRefOid |
+            jq -er --arg head "$EXPECTED_HEAD" 'select(.headRefOid == $head) | .baseRefOid
+               | select(type == "string" and test("\\A[0-9a-f]{40}\\z"))') || exit 2
+        parent_entry=$(git ls-tree --full-tree "$BASE_REF" -- .claude) || exit 2
+        [[ -z "$parent_entry" || "$parent_entry" == "040000 tree "* ]] || exit 2
+    elif [[ -n "${CV_BASE_REF:-${GITHUB_BASE_REF:-}}" ]]; then
+        BASE_REF="${CV_BASE_REF:-${GITHUB_BASE_REF:-}}"
+        BASE_REF="refs/remotes/origin/${BASE_REF#origin/}"
+    else
         BASE_REF=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null) \
             || BASE_REF="refs/remotes/origin/${CV_DEFAULT_BRANCH:-main}"
     fi
@@ -410,6 +420,9 @@ elif git rev-parse --git-dir >/dev/null 2>&1; then
            ! ROSTER_RAW=$(git cat-file blob "$ROSTER_SOURCE") || [[ -z "$ROSTER_RAW" ]]; then
             echo "STOP: cannot read the reviewer roster at ${ROSTER_SOURCE}." >&2
             exit 2
+        fi
+        if [[ "$MODE" == --maintainer-sources ]]; then
+            ROSTER_RAW=$(jq -ces 'select(length == 1) | .[0] | objects' <<<"$ROSTER_RAW") || exit 2
         fi
     fi
 else
