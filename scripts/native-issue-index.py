@@ -1,19 +1,25 @@
 """Keep user-authored issue text inside deterministic native-link operations."""
 import argparse
+import hashlib
 import json
+import os
 import re
+import string
 import subprocess
 import sys
+import tempfile
+import unicodedata
 
 OWNER = r"[A-Za-z0-9][A-Za-z0-9_.-]*"
 REPO = r"(?!\.{1,2}[/#])[A-Za-z0-9_.-]+"
 NUMBER = r"[1-9][0-9]*"
 URL = re.compile(rf"https://github\.com/({OWNER})/({REPO})/issues/({NUMBER})")
-BULLET = re.compile(rf"- (?:(?P<repo>{OWNER}/{REPO}))?#(?P<number>{NUMBER})(?:\s+—\s+.*)?")
+BULLET = re.compile(rf"- (?:(?P<repo>{OWNER}/{REPO}))?#(?P<number>{NUMBER})(?: +— +(?P<title>.+))?")
 INDEX_HEADING = "## Sub-Issues"
 ATX_HEADING = re.compile(r"^ {0,3}#{1,6}(?:\s|$)")
 COMMENT_END = re.compile(r"--!?>")
 META = "query($url:URI!){resource(url:$url){__typename ... on Issue{url fullDatabaseId parent{url}}}}"
+CHILD = "query($url:URI!){resource(url:$url){__typename ... on Issue{url title parent{url}}}}"
 BODY = "query($url:URI!){resource(url:$url){__typename ... on Issue{url body}}}"
 
 
@@ -87,7 +93,8 @@ def check_index_spelling(line, following):
         return
     if re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", following.rstrip("\r\n")):
         raise Pending("ambiguous Setext Sub-Issues heading")
-    if ATX_HEADING.match(line) and line.strip() != INDEX_HEADING:
+    # A heading nested under a list or blockquote cannot own a top-level index.
+    if re.match(r"^[ \t>+*0-9.)-]*#{1,6}(?:[ \t]|$)", line) and line.rstrip() != INDEX_HEADING:
         raise Pending("ambiguous Sub-Issues section")
 
 
@@ -105,7 +112,7 @@ def markdown_headings(lines):
             continue
         if re.match(r" {0,3}<(?:/?[A-Za-z]|[!?])", line):
             raise Pending("unrecognized HTML block")
-        if ATX_HEADING.match(line):
+        if line.startswith("#") and ATX_HEADING.match(line):
             headings.append(i)
     if ending is not None:
         raise Pending("unterminated Markdown block")
@@ -124,8 +131,8 @@ def index_bounds(lines, headings):
 
 
 def existing_children(lines, repo):
-    seen = set()
-    for line in lines:
+    seen = {}
+    for offset, line in enumerate(lines):
         if not line.strip():
             continue
         match = BULLET.fullmatch(line.rstrip("\r\n"))
@@ -134,36 +141,129 @@ def existing_children(lines, repo):
         key = ((match["repo"] or repo).lower(), match["number"])
         if key in seen:
             raise Pending("duplicate child index row")
-        seen.add(key)
+        seen[key] = (offset, match["title"])
     return seen
 
 
-def missing_rows(body, parent, urls):
+def append_child_rows(lines, bounds, additions, eol):
+    if not additions:
+        return "".join(lines)
+    end = bounds[1] if bounds else len(lines)
+    prefix = "".join(lines[:end])
+    suffix = "".join(lines[end:])
+    if prefix and not prefix.endswith("\n"):
+        prefix += eol
+    if bounds is None:
+        prefix += (eol if prefix else "") + INDEX_HEADING + eol
+    return prefix + eol.join(additions) + eol + (eol if suffix else "") + suffix
+
+
+def row_is_current(existing, title, escaped):
+    if existing is None or existing[1] is None:
+        return False
+    if existing[1] in (title, escaped):
+        return True
+    # A stale suffix may include operator annotations that must survive editing.
+    raise Pending("existing child row has additional or outdated text; reconcile manually")
+
+
+def plan_index(body, parent, titles):
     repo = "/".join(identity(parent)[:2])
     lines = body.splitlines(keepends=True)
     bounds = index_bounds(lines, markdown_headings(lines))
     rows = lines[slice(*bounds)] if bounds else []
     seen = existing_children(rows, repo)
-    missing = []
-    for url in urls:
+    missing = {}
+    additions = []
+    for url, title in titles.items():
         owner, child_repo, number = identity(url)
-        if (f"{owner}/{child_repo}".lower(), number) not in seen:
-            missing.append(f"- {owner}/{child_repo}#{number}")
-    return missing
+        child = (f"{owner}/{child_repo}".lower(), number)
+        # Escape Markdown punctuation only in the display text. The issue reference stays live.
+        escaped = re.sub(f"([{re.escape(string.punctuation)}])", r"\\\1", title)
+        existing = seen.get(child)
+        if row_is_current(existing, title, escaped):
+            continue
+        reference = f"- {owner}/{child_repo}#{number}"
+        row = f"{reference} — {escaped}"
+        missing[reference] = row
+        if existing is None:
+            additions.append(row)
+        else:
+            i = bounds[0] + existing[0]
+            original = lines[i]
+            lines[i] = row + original[len(original.rstrip("\r\n")):]
+    eol = "\r\n" if "\r\n" in body else "\n"
+    return append_child_rows(lines, bounds, additions, eol), missing
 
 
-def check_index(parent, urls):
+def verified_titles(parent, urls):
     owner = identity(parent)[0].lower()
     if not urls or len(set(urls)) != len(urls):
         raise Pending("list distinct approved children")
     inspect(parent)
+    titles = {}
     for url in urls:
-        if identity(url)[0].lower() != owner or inspect(url)["parent"] != parent:
+        if identity(url)[0].lower() != owner:
             raise Pending("child relationship is unverified")
-    rows = missing_rows(issue_body(parent), parent, urls)
-    if rows:
-        return {"status": "pending", "children": len(urls), "missing_rows": rows}
-    return {"status": "current", "children": len(urls)}
+        child = issue_record(url, CHILD)
+        if child["parent"] != {"url": parent}:
+            raise Pending("child relationship is unverified")
+        title = child["title"]
+        if (not isinstance(title, str) or not title.strip() or len(title.splitlines()) != 1
+                or any(unicodedata.category(char) in ("Cc", "Cs", "Zl", "Zp") for char in title)):
+            raise Pending("child title requires manual review")
+        titles[url] = title
+    return titles
+
+
+def private_preview_file(rows):
+    # Use the host temp location and an exclusive, owner-only file chosen by the helper.
+    preview = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix="fleet-index-",
+                                          suffix=".md", delete=False)
+    complete = False
+    try:
+        with preview:
+            for row in rows:
+                preview.write(row + "\n")
+            preview.flush()
+            info = os.fstat(preview.fileno())
+        path = os.path.realpath(preview.name)
+        # The host retains this receipt directly with the private intake, across sessions.
+        identity = f"{info.st_dev}:{info.st_ino}:{info.st_ctime_ns}"
+        complete = True
+        return {"preview_file": path, "preview_directory": os.path.dirname(path), "preview_identity": identity}
+    finally:
+        if not complete:
+            os.unlink(preview.name)
+
+
+def check_index(parent, urls, private_preview=False, confirmed_digest=None):
+    titles = verified_titles(parent, urls)
+    body = issue_body(parent)
+    proposed, rows = plan_index(body, parent, titles)
+    if not rows:
+        return {"status": "current", "children": len(urls)}
+    # Bind the prior body, proposed result, exact parent and approved child list.
+    digest = hashlib.sha256(json.dumps([parent, titles, body, proposed]).encode()).hexdigest()
+    if confirmed_digest is not None:
+        if digest != confirmed_digest:
+            raise Pending("index preview changed; obtain fresh exclusive confirmation")
+        owner, repo, number = identity(parent)
+        packet = json.dumps({"body": proposed}).encode()
+        try:
+            subprocess.run(["gh", "api", "--hostname", "github.com", "--method", "PATCH",
+                            f"repos/{owner}/{repo}/issues/{number}", "--input", "-", "--silent"],
+                           input=packet, capture_output=True, timeout=30, check=False)
+        except (OSError, subprocess.SubprocessError):
+            pass  # A lost receipt can follow a successful write. Always read back.
+        after_titles = verified_titles(parent, urls)
+        if after_titles != titles or issue_body(parent) != proposed:
+            raise Pending("index update unverified; reconcile before any further write")
+        return {"status": "current", "children": len(urls)}
+    receipt = {"status": "pending", "children": len(urls), "missing_rows": list(rows), "digest": digest}
+    if private_preview:
+        receipt.update(private_preview_file(rows.values()))
+    return receipt
 
 
 def main():
@@ -171,11 +271,21 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("inspect").add_argument("url")
     index = sub.add_parser("index")
+    index.add_argument("--private-preview", action="store_true", help="create an owner-only file of proposed rows")
     index.add_argument("parent")
     index.add_argument("children", nargs="+")
+    apply = sub.add_parser("apply-index", help="apply a preview under a confirmed exclusive editing window")
+    apply.add_argument("--exclusive-parent", required=True)
+    apply.add_argument("--confirmed-digest", required=True)
+    apply.add_argument("children", nargs="+")
     args = parser.parse_args()
     try:
-        record = inspect(args.url) if args.command == "inspect" else check_index(args.parent, args.children)
+        if args.command == "inspect":
+            record = inspect(args.url)
+        elif args.command == "index":
+            record = check_index(args.parent, args.children, private_preview=args.private_preview)
+        else:
+            record = check_index(args.exclusive_parent, args.children, confirmed_digest=args.confirmed_digest)
         print(json.dumps(record))
         if record.get("status") == "pending":
             sys.exit(2)
