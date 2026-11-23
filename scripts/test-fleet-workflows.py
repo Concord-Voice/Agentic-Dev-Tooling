@@ -35,19 +35,20 @@ class NativeIssueIndexTests(unittest.TestCase):
         self.parent_of_child = self.parent
 
     def transport(self, argv, **options):
-        self.assertEqual(argv[:4], ["gh", "api", "--hostname", "github.com"])
+        self.assertEqual(argv, ["gh", "api", "--hostname", "github.com", "graphql", "--input", "-"])
         self.assertTrue(options["capture_output"])
-        self.assertEqual(options["stdin"], subprocess.DEVNULL)
         self.calls.append(argv)
-        if "graphql" in argv:
-            url = argv[-1].removeprefix("url=")
-            parent = {"url": self.parent_of_child} if url == self.child and self.parent_of_child else None
-            data = {"data": {"resource": {"__typename": "Issue", "url": url, "parent": parent}}}
-        elif "--method" in argv:
-            self.fail("issue index inspection attempted a write")
+        packet = json.loads(options["input"])
+        url = packet["variables"]["url"]
+        issue = {"__typename": "Issue", "url": url}
+        if packet["query"] == index_helper.META:
+            issue["fullDatabaseId"] = "4000000000"
+            issue["parent"] = {"url": self.parent_of_child} if url == self.child and self.parent_of_child else None
         else:
-            url = self.parent if "/parent/" in argv[-1] else self.child
-            data = {"id": 4000000000, "html_url": url, "body": self.body}
+            self.assertEqual(packet["query"], index_helper.BODY)
+            self.assertEqual(url, self.parent)
+            issue["body"] = self.body
+        data = {"data": {"resource": issue}}
         return subprocess.CompletedProcess(argv, 0, json.dumps(data).encode(), b"")
 
     def run_cli(self, *args):
@@ -87,7 +88,7 @@ class NativeIssueIndexTests(unittest.TestCase):
         def concurrent(argv, **opts):
             old = self.body
             result = self.transport(argv, **opts)
-            if argv[-1] == index_helper.endpoint(self.parent) and len(self.calls) >= 5:
+            if json.loads(opts["input"])["query"] == index_helper.BODY:
                 self.body = old + "concurrent change\n"
             return result
         with patch.object(index_helper.subprocess, "run", concurrent):

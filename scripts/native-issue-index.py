@@ -13,7 +13,8 @@ BULLET = re.compile(rf"- (?:(?P<repo>{OWNER}/{REPO}))?#(?P<number>{NUMBER})(?:\s
 INDEX_HEADING = "## Sub-Issues"
 ATX_HEADING = re.compile(r"^ {0,3}#{1,6}(?:\s|$)")
 COMMENT_END = re.compile(r"--!?>")
-META = "query($url:URI!){resource(url:$url){__typename ... on Issue{url parent{url}}}}"
+META = "query($url:URI!){resource(url:$url){__typename ... on Issue{url fullDatabaseId parent{url}}}}"
+BODY = "query($url:URI!){resource(url:$url){__typename ... on Issue{url body}}}"
 
 
 class Pending(Exception):
@@ -27,44 +28,34 @@ def identity(url):
     return match.groups()
 
 
-def endpoint(url):
-    owner, repo, number = identity(url)
-    return f"repos/{owner}/{repo}/issues/{number}"
-
-
-def api(*args):
-    result = subprocess.run(["gh", "api", "--hostname", "github.com", *args],
-                            stdin=subprocess.DEVNULL, capture_output=True, timeout=30, check=False)
+def issue_record(url, query):
+    identity(url)
+    packet = json.dumps({"query": query, "variables": {"url": url}}).encode()
+    result = subprocess.run(["gh", "api", "--hostname", "github.com", "graphql", "--input", "-"],
+                            input=packet, capture_output=True, timeout=30, check=False)
     if result.returncode:
         raise Pending("GitHub request failed")
-    return json.loads(result.stdout) if result.stdout else None
-
-
-def inspect(url):
-    identity(url)
-    reply = api("graphql", "-f", "query=" + META, "-f", "url=" + url)
+    reply = json.loads(result.stdout)
     issue = reply["data"]["resource"]
     if reply.get("errors") or not isinstance(issue, dict) or issue["__typename"] != "Issue" or issue["url"] != url:
         raise Pending("issue identity could not be verified")
-    dbid = issue_record(url)["id"]
-    if type(dbid) is not int or dbid <= 0:
+    return issue
+
+
+def inspect(url):
+    issue = issue_record(url, META)
+    dbid = issue["fullDatabaseId"]
+    if not isinstance(dbid, str) or not re.fullmatch(r"[1-9][0-9]{0,19}", dbid):
         raise Pending("invalid issue database ID")
     parent = issue["parent"]
     if parent is not None:
         parent = parent["url"]
         identity(parent)
-    return {"url": url, "database_id": dbid, "parent": parent}
-
-
-def issue_record(url):
-    obj = api(endpoint(url))
-    if not isinstance(obj, dict) or obj.get("html_url") != url or "pull_request" in obj:
-        raise Pending("issue identity changed")
-    return obj
+    return {"url": url, "database_id": int(dbid), "parent": parent}
 
 
 def issue_body(url):
-    value = issue_record(url)["body"]
+    value = issue_record(url, BODY)["body"]
     if value is None:
         return ""
     if not isinstance(value, str):
