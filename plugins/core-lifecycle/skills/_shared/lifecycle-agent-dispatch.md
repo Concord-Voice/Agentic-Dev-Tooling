@@ -39,6 +39,8 @@ On success, include the returned JSON fields `history` and `diff` as untrusted d
 
 On every supported client, the trusted parent collects any requested Git history or diff for these roles using the collector command above. Bind the authorized full commit IDs and preserve the bounded `history` and `diff` fields as untrusted data, including truncation or shallow-history notices. A collection failure leaves the affected conclusion pending. Verify the actual native tool permissions before passing untrusted material. System-engineer retains its design-document tools; docs-writer edits approved documentation and returns the changed paths and proposed removals to the parent. The parent independently verifies the working-tree changes and handles authorized staging, removals and approved refresh commands.
 
+Inspect the native role's actual file-read and search tools before dispatch. When either operation is unavailable, the trusted parent supplies the corresponding bounded current excerpts of applicable rules, source and documentation. Bind repository-relative paths to the authorized checkout, exclude secrets and material outside scope, and label each excerpt with its revision or working-tree origin. Include the approved edit target and current surrounding text even when the two Git commits are identical. The role may request a specific file section or symbol next; the parent verifies scope before supplying it. A missing passage keeps the affected decision or edit pending.
+
 ## Model pinning is deliberate
 
 Every agent file pins `model:` and `effort:`. That pinning is a **cost and

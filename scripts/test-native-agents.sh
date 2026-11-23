@@ -70,6 +70,8 @@ for name, expected_tools in file_tools.items():
         for supplied in (body, profile["developer_instructions"]):
             assert "scripts/architect_git_evidence.py" in supplied and "untrusted data" in supplied
             assert "authorized base and head commits" in supplied
+            assert "An empty commit diff" in supplied and "approved target path" in supplied
+            assert "specific file and section or symbol" in supplied
             assert "Bash(" not in supplied
         for tool in expected_tools:
             assert tool in profile["developer_instructions"]
