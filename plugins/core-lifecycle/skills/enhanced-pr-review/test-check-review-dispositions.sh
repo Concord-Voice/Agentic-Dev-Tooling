@@ -144,6 +144,13 @@ run "ok: later disposition supersedes an earlier one" 0 \
 run "ok: human thread resolved by human needs no marker" 0 \
     "$(doc '{"id":"T","isResolved":true,"resolvedBy":{"login":"dev"},"path":"a/b.go","line":1,"comments":{"nodes":[{"author":{"__typename":"User","login":"dev"},"authorAssociation":"OWNER","body":"note to self"}]}}' "$BOT_TOP,$RECON")"
 
+human_resolved=$(doc "$(thread true second "$(human 'review note')")" "$BOT_TOP,$RECON")
+run "BLOCK: resolved human finding needs a trusted resolver" 1 "$(jq '.fixturePermissions.second="read"' <<< "$human_resolved")"
+run "ok: repository writer resolves a human finding" 0 "$(jq '.fixturePermissions.second="write"' <<< "$human_resolved")"
+
+bot_resolver=$(doc "$(thread true 'automation[bot]' "$(human 'review note'),$(human '<!-- cv-disposition:rejected evidence: documented behavior -->')")" "$BOT_TOP,$RECON")
+run "ok: a bot resolver keeps the authorized human disposition" 0 "$bot_resolver"
+
 run "BLOCK: unresolved human thread still needs a decision" 1 \
     "$(doc '{"id":"T","isResolved":false,"resolvedBy":null,"path":"a/b.go","line":1,"comments":{"nodes":[{"author":{"__typename":"User","login":"teammate"},"authorAssociation":"MEMBER","body":"is this right?"}]}}' "$BOT_TOP,$RECON")"
 

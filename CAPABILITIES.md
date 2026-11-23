@@ -29,6 +29,8 @@ The single output path identifies the verified skill. Resolve every nested workf
 
 When an enrolled Claude or Codex project has an authored role with the same name, the enrollment process can install the public role under `fleet-ROLE` while preserving the authored one. The public renderer accepts `--fleet-alias ROLE` for specific ordinary roles in an empty owner-only staging directory. Use `python3 -I -B "$ADT/scripts/resolve-fleet-workflow.py" --select-role ROLE --platform CLIENT --project "$(pwd -P)"` to obtain the verified native name and path. Dispatch that native name only after confirming the host bound the same file. For the host-reported source path, run `python3 -I -B "$ADT/scripts/resolve-fleet-workflow.py" --verify-role ROLE --platform CLIENT --profile ABSOLUTE_PATH`. A successful digest verifies the installed bytes. Confirm active host capabilities and import provenance separately.
 
+On macOS, the resolver checks extended ACLs on the open cache directories. The managed directory accepts access grants only for its owner or root. Shared ancestors may grant read-only access.
+
 On Windows, run the resolver with Linux Python in WSL and keep the cache in your Linux home directory.
 
 The resolver accepts the nine core lifecycle skills and weekly-deps. Bundled source hashes in `config/fleet-workflows/sources.json` lock each reviewed source and its line edits together. Re-review the edition when updating those source files. Each complete edition is stored under an owner-controlled cache. The standalone package continues to expose its independently selected workflows.

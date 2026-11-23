@@ -433,8 +433,8 @@ fi
 
 # --- Assertion 1 — thread coverage -------------------------------------------
 # A thread is IN SCOPE if it is unresolved or reviewer-authored (a bot, or a rostered machine account). A human-authored
-# thread a human already resolved is self-evidently decided; requiring a marker
-# there would be ceremony, not coverage.
+# thread can also be settled by its opener or by a verified repository writer.
+# Other resolvers need an authorized disposition.
 # A rostered machine USER account is a reviewer too (see `rostered` below), so its
 # resolved threads stay in scope and its own comments never count as a disposition.
 # Shared by Assertions 1 and 3 so the two cannot drift. A null login (a deleted
@@ -463,11 +463,18 @@ JQ_ROSTERED='
 # In a fixture, permissions are supplied alongside the simulated API response.
 if ! candidates=$(printf '%s' "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'
     .data.repository.pullRequest
-    | [.comments.nodes[]?, .reviewThreads.nodes[]?.comments.nodes[]?]
+    | . as $pr
+    | ([.comments.nodes[]?, .reviewThreads.nodes[]?.comments.nodes[]?]
     | map(select(.author.__typename == "User" and .authorAssociation == "MEMBER")
           | select(rostered(.author.login) | not)
           | select(.body | test("<!--\\s*cv-(disposition:|review-reconciliation\\s*-->)"))
-          | .author.login) | unique[]'); then
+          | .author.login))
+    + [$pr.reviewThreads.nodes[]? | select(.isResolved and .comments.nodes[0].author.__typename == "User")
+       | select(rostered(.comments.nodes[0].author.login) | not)
+       | select(.resolvedBy.login != .comments.nodes[0].author.login)
+       | .resolvedBy.login | select(type == "string" and length > 0)
+       | select(endswith("[bot]") or rostered(.) | not)]
+    | unique[]'); then
     echo "STOP: could not identify review decision authors." >&2
     exit 2
 fi
@@ -507,7 +514,10 @@ JQ_DECIDER='def decision_author:
 THREAD_ROWS=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" --argjson writers "$writers" "$JQ_ROSTERED$JQ_DECIDER"'
   def reviewer: .author.__typename == "Bot" or rostered(.author.login);
   .data.repository.pullRequest.reviewThreads.nodes[]
-  | select(.isResolved == false or (.comments.nodes[0] | reviewer))
+  | select(.isResolved == false or (.comments.nodes[0] | reviewer)
+           or ((.resolvedBy.login // "") as $resolver
+               | ($resolver != "" and ($resolver == .comments.nodes[0].author.login
+                  or ($writers | index($resolver) != null))) | not))
   | . as $t
   # The marker must come from a NON-bot author. A bot echoing a marker back into
   # the thread (quoting a reply, or an autofix agent mimicking the format) must

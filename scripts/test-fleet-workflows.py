@@ -160,6 +160,102 @@ class FleetWorkflowTests(unittest.TestCase):
                 verify.assert_not_called()
                 self.assertFalse(self.cache.exists())
 
+    def test_acl_reader_handles_native_results(self):
+        import ctypes
+        import errno
+        from unittest.mock import Mock
+
+        lib = Mock()
+        principal = ctypes.create_string_buffer(bytes(range(16)), 16)
+        lib.acl_get_fd.return_value = 123
+        lib.acl_get_qualifier.return_value = ctypes.addressof(principal)
+        lib.acl_free.return_value = 0
+
+        def tag_result(entry, out):
+            out._obj.value = tag
+            return 0
+
+        def rights_result(entry, out):
+            out._obj.value = mask
+            return 0
+
+        def next_entry(acl, index, out):
+            if index == 0:
+                out._obj.value = 1234
+                return 0
+            ctypes.set_errno(errno.EINVAL)
+            return -1
+
+        def identify(uid, out):
+            out[:] = bytes(range(16)) if owner else bytes(16)
+            return 0
+
+        lib.acl_get_entry.side_effect = next_entry
+        lib.acl_get_tag_type.side_effect = tag_result
+        lib.acl_get_permset_mask_np.side_effect = rights_result
+        lib.mbr_uid_to_uuid.side_effect = identify
+        with patch.object(sys, "platform", "darwin"), patch.object(ctypes, "CDLL", return_value=lib):
+            for tag, mask, owner, private, accepted in [
+                (2, 0xffff, False, True, True), (1, 2, False, False, True),
+                (1, 2, False, True, False), (1, 4, False, False, False),
+                (1, 4, True, True, True), (99, 0, False, False, False),
+            ]:
+                with self.subTest(tag=tag, mask=mask, owner=owner, private=private):
+                    if accepted:
+                        fleet.check_darwin_cache_acl(4, private=private)
+                    else:
+                        with self.assertRaises(ValueError):
+                            fleet.check_darwin_cache_acl(4, private=private)
+            lib.acl_get_fd.return_value = None
+            ctypes.set_errno(errno.ENOENT)
+            fleet.check_darwin_cache_acl(4)
+            ctypes.set_errno(errno.EACCES)
+            with self.assertRaises(OSError):
+                fleet.check_darwin_cache_acl(4)
+
+    @unittest.skipUnless(sys.platform == "darwin", "uses macOS filesystem ACLs")
+    def test_darwin_cache_acl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp).resolve()
+            folder = parent / "fixture"
+            folder.mkdir(mode=0o700)
+            fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                def grant(ace):
+                    subprocess.run(["/bin/chmod", "+a", ace, folder], check=True)
+                fleet.check_darwin_cache_acl(fd, private=True)
+                # A named owner entry can carry permissions on the owner's own directory.
+                import pwd
+                grant("user:" + pwd.getpwuid(os.getuid()).pw_name + " allow writeattr")
+                fleet.check_darwin_cache_acl(fd, private=True)
+                grant("group:everyone allow readattr")
+                fleet.check_darwin_cache_acl(fd)
+                with self.assertRaisesRegex(ValueError, "untrusted macOS cache ACL"):
+                    fleet.check_darwin_cache_acl(fd, private=True)
+                grant("group:everyone allow writeattr,directory_inherit")
+                with self.assertRaisesRegex(ValueError, "untrusted macOS cache ACL"):
+                    fleet.check_darwin_cache_acl(fd)
+                child = folder / "empty"
+                child.mkdir(mode=0o700)
+                child_fd = os.open(child, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    with self.assertRaisesRegex(ValueError, "untrusted macOS cache ACL"):
+                        fleet.check_darwin_cache_acl(child_fd)
+                finally:
+                    os.close(child_fd)
+            finally:
+                os.close(fd)
+
+    @unittest.skipUnless(sys.platform == "darwin", "uses macOS filesystem ACLs")
+    def test_resolver_checks_acl_before_creating_cache(self):
+        ancestor = self.tmp / "ancestor"
+        ancestor.mkdir(mode=0o700)
+        subprocess.run(["/bin/chmod", "+a", "group:everyone allow writeattr", ancestor], check=True)
+        cache = ancestor / "new-cache"
+        with self.assertRaisesRegex(ValueError, "untrusted macOS cache ACL"):
+            fleet.resolve(cache, "issue-creation")
+        self.assertFalse(cache.exists())
+
     def test_complete_closed_edition(self):
         output = io.StringIO()
         with redirect_stdout(output):
