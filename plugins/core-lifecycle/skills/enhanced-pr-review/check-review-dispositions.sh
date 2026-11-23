@@ -347,6 +347,10 @@ else
     ROSTER_RAW=''
 fi
 
+if [[ -z "$ROSTER_RAW" ]]; then
+    printf 'WARNING: no reviewer roster at %s. Only GitHub Bot accounts can be identified automatically.\n' "$ROSTER_SOURCE" >&2
+fi
+
 if [[ -n "$ROSTER_RAW" ]]; then
     # A malformed roster is a config error, not a reason to quietly fall back to
     # login-only: silent degradation blocks correctly-written posts while telling
@@ -579,10 +583,6 @@ if [[ -n "$THREAD_ROWS" ]]; then
                                         fail=1 ;;
                                     0:*)
                                         printf "BLOCKING: deferred to #%s resolved to an unexpected URL '%s' — %s\n" "$issue" "$ISSUE_OUT" "$loc" >&2
-                                        fail=1 ;;
-                                    *"Could not resolve"*|*"not found"*|*"Not Found"*|*"NOT_FOUND"*)
-                                        echo "BLOCKING: deferred to #${issue} but that issue does not exist — ${loc}" >&2
-                                        echo "          A follow-up that was never filed is an accepted finding." >&2
                                         fail=1 ;;
                                     *)  echo "STOP: could not verify issue #${issue} (${loc}): ${ISSUE_OUT}" >&2
                                         echo "      A transport or auth failure is not a missing issue. UNKNOWN, not clean." >&2

@@ -51,4 +51,14 @@ echo "{ not json" > "$TMP/.claude/repo-config.json"
   [ "$(rc_get '.default_branch' main)" = "main" ] || fail "malformed: default not returned"
 )
 
+for input in '' '  ' '{} {}'; do
+  printf '%s' "$input" > "$TMP/.claude/repo-config.json"
+  (
+    export RC_FILE="$TMP/.claude/repo-config.json"
+    source "$HERE/repo-config.sh"
+    [ "$(rc_get '.default_branch' main)" = main ] || fail "invalid document count: default"
+    if rc_has '.default_branch'; then fail "invalid document count: present"; fi
+  )
+done
+
 echo "ALL PASS"

@@ -151,6 +151,8 @@ Do not suggest code changes. Do not rewrite docs inline. Your output is a struct
 
 Warn-only pre-commit hooks detect documentation drift that diff analysis alone cannot catch — they compare committed doc content against live-repo truth. This section runs those hooks on demand and emits findings for any that fire.
 
+For an untrusted pull request, inspect the supplied diff and trusted CI evidence. Skip local hook execution and mark that part of the review unverified. Run the procedure below only in a trusted checkout with reviewed hook definitions and entry points.
+
 **Config gate:** Read `.claude/repo-config.json` → `.docs_map.drift`. If `.docs_map.drift` is `null`, absent, or the key does not exist, emit INFO: `"No drift config (.docs_map.drift is null) — skipping drift-hook scan"` and return. Do not attempt to locate any hook config.
 
 When `.docs_map.drift` is a non-null object, it must contain a `config` key pointing to the remediation config file (e.g., `".claude/hooks-config.json"`). That file maps hook ids to canonical remediation commands and is also consumed by the docs-writer agent (Mode 5).
