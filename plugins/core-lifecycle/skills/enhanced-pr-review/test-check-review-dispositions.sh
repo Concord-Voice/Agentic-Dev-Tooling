@@ -1175,8 +1175,10 @@ installed_compatibility() (
     local installed=${SCRIPT%/*} base old output status mode manifest
     local target_dir="$TMP/ordinary-target"
     mkdir -p "$target_dir/.claude/skills/enhanced-pr-review"
-    # shellcheck disable=SC2046
-    unset $(git rev-parse --local-env-vars)
+    local git_variable
+    while IFS= read -r git_variable; do
+        unset "$git_variable"
+    done < <(git rev-parse --local-env-vars)
     cd "$target_dir"
     git init -q --template=
     old=.claude/skills/enhanced-pr-review/check-review-dispositions.sh
