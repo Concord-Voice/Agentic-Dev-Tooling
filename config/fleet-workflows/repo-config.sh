@@ -80,6 +80,8 @@ fleet_load_repo_config() {
 # Bind the linkage policy to the authorized intake repository at its default revision.
 fleet_load_issue_config() {
   fleet_load_repo_config "$@" || return 1
+  # The calling issue-creation skill reads this result in the same shell.
+  # shellcheck disable=SC2034
   RC_ISSUE_LINKAGE=$(jq -er '
     if (has("issue_creation") | not) then "tasklist"
     elif (.issue_creation | type) != "object" then error("invalid issue_creation")
