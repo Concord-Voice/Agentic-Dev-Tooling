@@ -51,10 +51,15 @@ class NativeIssueIndexTests(unittest.TestCase):
         data = {"data": {"resource": issue}}
         return subprocess.CompletedProcess(argv, 0, json.dumps(data).encode(), b"")
 
-    def run_cli(self, *args):
+    def run_cli(self, *args, expect_pending=False):
         out, err = io.StringIO(), io.StringIO()
         with patch.object(sys, "argv", ["helper", *args]), redirect_stdout(out), redirect_stderr(err):
-            index_helper.main()
+            if expect_pending:
+                with self.assertRaises(SystemExit) as raised:
+                    index_helper.main()
+                self.assertEqual(raised.exception.code, 2)
+            else:
+                index_helper.main()
         self.assertEqual(err.getvalue(), "")
         self.assertNotIn("private", out.getvalue())
         return json.loads(out.getvalue())
@@ -63,8 +68,8 @@ class NativeIssueIndexTests(unittest.TestCase):
         with patch.object(index_helper.subprocess, "run", self.transport):
             self.assertEqual(self.run_cli("inspect", self.child),
                              {"url": self.child, "parent": self.parent, "database_id": 4000000000})
-            with self.assertRaisesRegex(SystemExit, "^parent index needs maintainer reconciliation$"):
-                self.run_cli("index", self.parent, self.child)
+            result = self.run_cli("index", self.parent, self.child, expect_pending=True)
+            self.assertEqual(result, {"status": "pending", "children": 1, "missing_rows": ["- example/child#2"]})
             self.assertEqual(self.body, self.original)
             self.body = self.original.replace("## Sub-Issues\n\n## Criteria",
                              "## Sub-Issues\n- example/child#2 — existing title\n\n## Criteria")
@@ -92,8 +97,8 @@ class NativeIssueIndexTests(unittest.TestCase):
                 self.body = old + "concurrent change\n"
             return result
         with patch.object(index_helper.subprocess, "run", concurrent):
-            with self.assertRaisesRegex(SystemExit, "^parent index needs maintainer reconciliation$"):
-                self.run_cli("index", self.parent, self.child)
+            result = self.run_cli("index", self.parent, self.child, expect_pending=True)
+            self.assertEqual(result, {"status": "pending", "children": 1, "missing_rows": ["- example/child#2"]})
         self.assertIn("concurrent change", self.body)
         self.assertFalse(any("PATCH" in args for args in self.calls))
 
@@ -113,7 +118,7 @@ class NativeIssueIndexTests(unittest.TestCase):
         for opener, closer in (("<![CDATA[", "]]>"), ("<?instruction", "?>"), ("<!DECLARATION", ">")):
             body = "\n".join([opener, "## Sub-Issues", "## Other", closer])
             with self.subTest(opener=opener), self.assertRaisesRegex(index_helper.Pending, "HTML"):
-                index_helper.missing_children(body, self.parent, [self.child])
+                index_helper.missing_rows(body, self.parent, [self.child])
 
     def test_headings_inside_html_comments(self):
         for end in ("-->", "--!>"):
@@ -125,13 +130,13 @@ class NativeIssueIndexTests(unittest.TestCase):
     def test_index_sections_and_same_number_across_repos(self):
         children = [self.child, self.parent.replace("/2", "/7")]
         current = "## Sub-Issues\r\n- #7 — Same repo\r\n"
-        self.assertEqual(index_helper.missing_children(current, self.parent, children), [self.child])
-        self.assertEqual(index_helper.missing_children("Context", self.parent, children), children)
+        self.assertEqual(index_helper.missing_rows(current, self.parent, children), ["- example/child#2"])
+        self.assertEqual(index_helper.missing_rows("Context", self.parent, children), ["- example/child#2", "- example/parent#7"])
         for body in ["Sub-Issues\n----------\n- example/child#2", "## Sub-Issues <!-- hidden -->\n- #2",
                      "## Sub-Issues\n### Backend\n- example/child#2", "## Sub-Issues\n## Sub-Issues\n", "## Sub-Issues\n- [ ] #2", "```\n",
                      "<!--private", "<pre>\n## Sub-Issues\n", "## Sub-Issues\n- #7\n- example/parent#7"]:
             with self.subTest(body=body), self.assertRaises(index_helper.Pending):
-                index_helper.missing_children(body, self.parent, children)
+                index_helper.missing_rows(body, self.parent, children)
 
 
 class FleetWorkflowTests(unittest.TestCase):

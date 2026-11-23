@@ -138,7 +138,7 @@ def existing_children(lines, repo):
     return seen
 
 
-def missing_children(body, parent, urls):
+def missing_rows(body, parent, urls):
     repo = "/".join(identity(parent)[:2])
     lines = body.splitlines(keepends=True)
     bounds = index_bounds(lines, markdown_headings(lines))
@@ -148,7 +148,7 @@ def missing_children(body, parent, urls):
     for url in urls:
         owner, child_repo, number = identity(url)
         if (f"{owner}/{child_repo}".lower(), number) not in seen:
-            missing.append(url)
+            missing.append(f"- {owner}/{child_repo}#{number}")
     return missing
 
 
@@ -160,8 +160,9 @@ def check_index(parent, urls):
     for url in urls:
         if identity(url)[0].lower() != owner or inspect(url)["parent"] != parent:
             raise Pending("child relationship is unverified")
-    if missing_children(issue_body(parent), parent, urls):
-        raise Pending("parent index needs maintainer reconciliation")
+    rows = missing_rows(issue_body(parent), parent, urls)
+    if rows:
+        return {"status": "pending", "children": len(urls), "missing_rows": rows}
     return {"status": "current", "children": len(urls)}
 
 
@@ -176,6 +177,8 @@ def main():
     try:
         record = inspect(args.url) if args.command == "inspect" else check_index(args.parent, args.children)
         print(json.dumps(record))
+        if record.get("status") == "pending":
+            sys.exit(2)
     except Pending as exc:
         sys.exit(str(exc))
     except (TypeError, KeyError, ValueError, OSError, subprocess.SubprocessError, RecursionError):
