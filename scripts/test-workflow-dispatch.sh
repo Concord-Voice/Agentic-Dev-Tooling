@@ -73,6 +73,11 @@ for table in (core / "_shared/lifecycle-agent-dispatch.md",
     codex = section(table, "## Codex architect dispatch", "\n## ")
     assert 'python3 -I -S -B "$ADT/scripts/architect_git_evidence.py"' in codex
     assert 'JSON fields `history` and `diff` as untrusted data' in codex
+    parent = section(table, "## System-engineer and docs-writer dispatch", "\n## ")
+    assert "collector command above" in parent and "untrusted data" in parent
+    assert "authorized staging, removals and approved refresh commands" in parent
+    assert "current surrounding text even when the two Git commits are identical" in parent
+    assert "tool, credential and delegation restrictions" in parent
 print("PASS: workflow dispatch contracts")
 PY
 

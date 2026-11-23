@@ -34,12 +34,12 @@
           "type": "array",
           "items": { "type": "string" },
           "default": [],
-          "description": "Arguments passed to the script when invoked by docs-writer Mode 5."
+          "description": "Arguments used by the authorized parent for a Mode 5 refresh."
         },
         "auto_apply": {
           "type": "boolean",
           "default": false,
-          "description": "If true, docs-writer Mode 5 invokes the script and stages the resulting diff. If false, Mode 5 emits a proposed-fix note instead. Only opt in for deterministic, idempotent scripts."
+          "description": "If true, the authorized parent may run the trusted refresh and stage verified documentation outputs. If false, Mode 5 emits a proposed-fix note instead. Only opt in for deterministic, idempotent scripts."
         },
         "description": {
           "type": "string",
