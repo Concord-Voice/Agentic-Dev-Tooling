@@ -67,7 +67,7 @@ Three rules make this skill work in ANY repo:
 </CONFIG>
 
 <DISPATCH-GATE>
-Run named skills through the [nested skill contract](../_shared/nested-skills.md). Dispatch named agents with the active client's delegation tool and the advertised role that implements the requested task. Keep each mandatory dispatch and checkpoint. If the required role or tool is unavailable, identify the blocked step before continuing dependent work.
+Run named skills through the [nested skill contract](../_shared/nested-skills.md). Dispatch named agents with the active client's delegation tool and the advertised role that implements the requested task. Keep each mandatory dispatch and checkpoint. If the required role or tool is unavailable, identify the blocked step before continuing dependent work. Follow [Claude architect dispatch](../_shared/lifecycle-agent-dispatch.md#claude-architect-dispatch) for every issue, PR or Git evidence handoff to the architect.
 </DISPATCH-GATE>
 
 <CHECKPOINT-DISCIPLINE>

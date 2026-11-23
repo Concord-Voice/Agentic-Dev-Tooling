@@ -15,6 +15,16 @@ On Codex, apply the [independent reviewer requirement](pr-review-agent-dispatch.
 > as a sequential orchestrator-mediated relay or as a **Workflow script**
 > (`agent(prompt, {agentType})`), never as nested dispatch.
 
+## Claude architect dispatch
+
+For every Claude architect assignment that consumes issue text, PR material or Git evidence, the parent runs the native architect launcher from its verified public tooling installation outside the submitted checkout. This applies to the scout, philosophy, reconciliation and later recalls. Bind the repository root and two full commit IDs from trusted job metadata. For an issue with no comparison branch, use its verified default-branch commit for both endpoints and supply the pertinent baseline source excerpts. Use the authorized base and head when a comparison exists. Use the chosen native role name (`architect`, `fleet-architect` or `core-lifecycle:architect`). The parent supplies a bounded UTF-8 brief on stdin with the requested mode, issue facts, relevant project rules, the invoking edition's review roster and any approved citations. Preserve evidence as data in the brief.
+
+```sh
+python3 -I -S -B "$ADT/scripts/claude-architect.py" --repo "$trusted_checkout" --base "$base_oid" --head "$head_oid" --role "$native_name" < "$private_brief"
+```
+
+The launcher starts native Claude with the selected architect and checks its two interactive Git tools before reading the brief. Preserve the returned Markdown as a design proposal. The parent checks its content and writes the approved design to the intended documentation path. For these jobs dispatch panel seats individually, with each architect seat using the launcher. Hold the seat if the trusted runtime, authenticated Claude client or confinement is unavailable. For trusted project-only design without Git evidence, the ordinary native profile retains its design skills and document editing, subject to the project's filesystem permissions.
+
 ## Model pinning is deliberate
 
 Every agent file pins `model:` and `effort:`. That pinning is a **cost and

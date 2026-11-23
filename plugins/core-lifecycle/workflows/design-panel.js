@@ -15,6 +15,7 @@ export const meta = {
 //   brief:       "<issue brief text>",   // required — the /issue-brief output
 //   backend:     true,                   // dispatch system-engineer
 //   frontend:    true,                   // dispatch ui-designer + ux-designer (as a PAIR)
+//   inputTrust:  "trusted-project",       // parent classification; issue/PR evidence uses individual seats
 //   philosophy:  "<text>",               // optional — skip Phase 1 if the architect already ran Mode 2
 //   libraryIds:  "/vercel/next.js, …",   // optional — Context7 ids the design must be current against
 // }
@@ -41,6 +42,10 @@ if (typeof a === 'string') {
 if (a === null || Array.isArray(a) || typeof a !== 'object') {
   const got = a === null ? 'null' : Array.isArray(a) ? 'array' : typeof a
   throw new Error(`design-panel: args must be an object (or its JSON string) — got ${got}`)
+}
+
+if (a.inputTrust !== 'trusted-project') {
+  throw new Error('design-panel: use the lifecycle role table to dispatch each seat for issue, PR or Git evidence')
 }
 
 const ISSUE = String(a.issue ?? 'unknown')

@@ -58,5 +58,16 @@ for skill, expected in ((issue, 1), (lifecycle, 2)):
         assert "dispatch a fresh researcher session" in step and "cit" in step
         assert "only the public library name, version and API question" in step
 assert "no checkout, source attachments or inherited conversation" in context7
+for skill in (issue, lifecycle):
+    gate = section(skill, "<DISPATCH-GATE>", "</DISPATCH-GATE>")
+    assert "lifecycle-agent-dispatch.md#claude-architect-dispatch" in gate
+for table in (core / "_shared/lifecycle-agent-dispatch.md",
+              plugins.parent / "config/fleet-workflows/lifecycle-agent-dispatch.md"):
+    dispatch = section(table, "## Claude architect dispatch", "\n## ")
+    assert 'python3 -I -S -B "$ADT/scripts/claude-architect.py"' in dispatch
+    assert '--role "$native_name"' in dispatch and '< "$private_brief"' in dispatch
+    if table.parent.name == "fleet-workflows":
+        assert '--source-sha256 "$selected_sha256"' in dispatch
+    assert "dispatch panel seats individually" in dispatch
 print("PASS: workflow dispatch contracts")
 PY
