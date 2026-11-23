@@ -10,12 +10,6 @@ jobs:
     name: guard, unit tests, install
     runs-on: ubuntu-latest
     steps:
-      - name: Install the Linux Git sandbox for native tests
-        run: |
-          if [ ! -x /usr/bin/bwrap ]; then
-            sudo apt-get update -qq
-            sudo apt-get install -y --no-install-recommends bubblewrap
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # publish-guard.sh scans the tree for deny-listed patterns (baseline:
