@@ -160,6 +160,49 @@ class FleetWorkflowTests(unittest.TestCase):
                 verify.assert_not_called()
                 self.assertFalse(self.cache.exists())
 
+    @unittest.skipUnless(sys.platform == "darwin", "uses macOS filesystem ACLs")
+    def test_darwin_cache_acl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp).resolve()
+            folder = parent / "fixture"
+            folder.mkdir(mode=0o700)
+            fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                def grant(ace):
+                    subprocess.run(["/bin/chmod", "+a", ace, folder], check=True)
+                fleet.check_darwin_cache_acl(fd, private=True)
+                # A named owner entry can carry permissions on the owner's own directory.
+                import pwd
+                grant("user:" + pwd.getpwuid(os.getuid()).pw_name + " allow writeattr")
+                fleet.check_darwin_cache_acl(fd, private=True)
+                grant("group:everyone allow readattr")
+                fleet.check_darwin_cache_acl(fd)
+                with self.assertRaisesRegex(ValueError, "untrusted macOS cache ACL"):
+                    fleet.check_darwin_cache_acl(fd, private=True)
+                grant("group:everyone allow writeattr,directory_inherit")
+                with self.assertRaisesRegex(ValueError, "untrusted macOS cache ACL"):
+                    fleet.check_darwin_cache_acl(fd)
+                child = folder / "empty"
+                child.mkdir(mode=0o700)
+                child_fd = os.open(child, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    with self.assertRaisesRegex(ValueError, "untrusted macOS cache ACL"):
+                        fleet.check_darwin_cache_acl(child_fd)
+                finally:
+                    os.close(child_fd)
+            finally:
+                os.close(fd)
+
+    @unittest.skipUnless(sys.platform == "darwin", "uses macOS filesystem ACLs")
+    def test_resolver_checks_acl_before_creating_cache(self):
+        ancestor = self.tmp / "ancestor"
+        ancestor.mkdir(mode=0o700)
+        subprocess.run(["/bin/chmod", "+a", "group:everyone allow writeattr", ancestor], check=True)
+        cache = ancestor / "new-cache"
+        with self.assertRaisesRegex(ValueError, "untrusted macOS cache ACL"):
+            fleet.resolve(cache, "issue-creation")
+        self.assertFalse(cache.exists())
+
     def test_complete_closed_edition(self):
         output = io.StringIO()
         with redirect_stdout(output):

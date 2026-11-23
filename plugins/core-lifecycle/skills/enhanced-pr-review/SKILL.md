@@ -629,7 +629,7 @@ This skill posts its own comment to the PR. It is the single artifact that recon
 
 ### 3.5.1 — Shape
 
-The first line is the marker; the gate keys on it and on the reviewer names in the body.
+The first line is the marker. The gate checks the reviewer names in the body. Before merging, manually compare the current top-level reviews and comments with the reconciliation post. Update the post for each new or edited finding, including a later report from a reviewer already named.
 
 ```markdown
 <!-- cv-review-reconciliation -->

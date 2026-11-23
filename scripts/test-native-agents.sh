@@ -50,6 +50,9 @@ for name, model, effort in [
     profile = tomllib.loads((codex / (name + ".toml")).read_text())
     assert (profile["model"], profile["model_reasoning_effort"]) == (model, effort)
 
+security = (claude / "security-reviewer.md").read_text()
+assert "tools: Read, Grep, Glob\n" in security and "Bash(" not in security
+assert "trusted base revision" in security and "independently confined read-only session" in security
 for name in ["code-reviewer", "docs-reviewer", "frontend-reviewer", "migration-reviewer",
              "scope-reviewer", "security-reviewer"]:
     reviewer = tomllib.loads((codex / (name + ".toml")).read_text())
