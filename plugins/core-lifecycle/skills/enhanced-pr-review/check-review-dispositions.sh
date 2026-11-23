@@ -347,10 +347,6 @@ else
     ROSTER_RAW=''
 fi
 
-if [[ -z "$ROSTER_RAW" ]]; then
-    printf 'WARNING: no reviewer roster at %s. Only GitHub Bot accounts can be identified automatically.\n' "$ROSTER_SOURCE" >&2
-fi
-
 if [[ -n "$ROSTER_RAW" ]]; then
     # A malformed roster is a config error, not a reason to quietly fall back to
     # login-only: silent degradation blocks correctly-written posts while telling
@@ -429,6 +425,10 @@ if [[ -n "$ROSTER_RAW" ]]; then
         echo "      Narrow it to one login (or use \"login\")." >&2
         exit 2
     fi
+fi
+
+if [[ "$ROSTER_JSON" == "[]" ]]; then
+    printf 'WARNING: no reviewer roster at %s. Only GitHub Bot accounts can be identified automatically.\n' "$ROSTER_SOURCE" >&2
 fi
 
 # --- Assertion 1 — thread coverage -------------------------------------------
