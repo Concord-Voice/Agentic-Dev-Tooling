@@ -10,6 +10,8 @@ PART = r"[A-Za-z0-9][A-Za-z0-9_.-]*"
 NUMBER = r"[1-9][0-9]*"
 URL = re.compile(rf"https://github\.com/({PART})/({PART})/issues/({NUMBER})")
 BULLET = re.compile(rf"- (?:(?P<repo>{PART}/{PART}))?#(?P<number>{NUMBER})(?:\s+—\s+.*)?")
+INDEX_HEADING = "## Sub-Issues"
+ATX_HEADING = re.compile(r"^ {0,3}#{1,6}(?:\s|$)")
 COMMENT_END = re.compile(r"--!?>")
 META = "query($url:URI!){resource(url:$url){__typename ... on Issue{url parent{url}}}}"
 
@@ -108,7 +110,7 @@ def check_index_spelling(line, following):
         return
     if re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", following.rstrip("\r\n")):
         raise Pending("ambiguous Setext Sub-Issues heading")
-    if re.match(r"^ {0,3}#{1,6}(?:\s|$)", line) and line.strip() != "## Sub-Issues":
+    if ATX_HEADING.match(line) and line.strip() != INDEX_HEADING:
         raise Pending("ambiguous Sub-Issues section")
 
 
@@ -126,7 +128,7 @@ def markdown_headings(lines):
             continue
         if re.match(r" {0,3}</?[A-Za-z]", line):
             raise Pending("unrecognized HTML block")
-        if re.match(r"^ {0,3}#{1,6}(?:\s|$)", line):
+        if ATX_HEADING.match(line):
             headings.append(i)
     if ending is not None:
         raise Pending("unterminated Markdown block")
@@ -134,15 +136,13 @@ def markdown_headings(lines):
 
 
 def index_bounds(lines, headings):
-    headers = [i for i in headings if lines[i].strip() == "## Sub-Issues"]
+    headers = [i for i in headings if lines[i].strip() == INDEX_HEADING]
     if len(headers) > 1:
         raise Pending("duplicate Sub-Issues section")
     if headers:
         start = headers[0] + 1
         following = (i for i in headings if i >= start and not lines[i].lstrip().startswith("###"))
         return start, next(following, len(lines))
-    if any("sub-issues" in lines[i].casefold() for i in headings):
-        raise Pending("ambiguous Sub-Issues section")
     return None
 
 
@@ -183,7 +183,7 @@ def reconcile(body, parent, children):
             lines.append(newline)
         if body:
             lines.append(newline)
-        lines.append("## Sub-Issues" + newline)
+        lines.append(INDEX_HEADING + newline)
         bounds = len(lines), len(lines)
     start, end = bounds
     additions = missing_bullets(children, existing_children(lines[start:end], repo))
