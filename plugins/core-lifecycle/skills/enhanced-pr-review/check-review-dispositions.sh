@@ -337,14 +337,27 @@ elif git rev-parse --git-dir >/dev/null 2>&1; then
         BASE_REF=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null) \
             || BASE_REF="refs/remotes/origin/${CV_DEFAULT_BRANCH:-main}"
     fi
-    if ROSTER_RAW=$(git show "${BASE_REF}:.claude/repo-config.json" 2>/dev/null); then
-        ROSTER_SOURCE="${BASE_REF}:.claude/repo-config.json"
-    else
+    # Only a successful tree lookup can establish that the base has no roster.
+    # A shallow clone may be missing the remote base ref or a required Git object.
+    if ! base_oid=$(git rev-parse --verify "${BASE_REF}^{commit}") ||
+       ! roster_entry=$(git ls-tree "$base_oid" -- .claude/repo-config.json); then
+        echo "STOP: cannot read the reviewer roster tree at ${BASE_REF}." >&2
+        exit 2
+    fi
+    if [[ -z "$roster_entry" ]]; then
         ROSTER_RAW=''
-        ROSTER_SOURCE="${BASE_REF} (no roster on the base branch)"
+        ROSTER_SOURCE="${base_oid} (no roster on the base branch)"
+    else
+        ROSTER_SOURCE="${base_oid}:.claude/repo-config.json"
+        if [[ "$roster_entry" != "100644 blob "* && "$roster_entry" != "100755 blob "* ]] ||
+           ! ROSTER_RAW=$(git cat-file blob "$ROSTER_SOURCE") || [[ -z "$ROSTER_RAW" ]]; then
+            echo "STOP: cannot read the reviewer roster at ${ROSTER_SOURCE}." >&2
+            exit 2
+        fi
     fi
 else
-    ROSTER_RAW=''
+    echo "STOP: a Git checkout is required to verify the base reviewer roster." >&2
+    exit 2
 fi
 
 if [[ -n "$ROSTER_RAW" ]]; then
