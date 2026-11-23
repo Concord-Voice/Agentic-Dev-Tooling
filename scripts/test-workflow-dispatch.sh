@@ -71,3 +71,33 @@ for table in (core / "_shared/lifecycle-agent-dispatch.md",
     assert "dispatch panel seats individually" in dispatch
 print("PASS: workflow dispatch contracts")
 PY
+
+# The workflow host evaluates the exported metadata separately and wraps the
+# remaining body in an async function. Run that body with only inert seat stubs.
+panel="$ROOT/plugins/core-lifecycle/workflows/design-panel.js"
+{
+  sed -n '1,/^}$/p' "$panel"
+  cat <<'JS'
+import assert from 'node:assert/strict'
+const calls = []
+const log = () => {}
+const phase = () => {}
+const parallel = tasks => Promise.all(tasks.map(task => task()))
+const agent = async (_prompt, seat) => {
+  calls.push(seat.label)
+  return seat.label
+}
+async function runPanel(args) {
+JS
+  sed '1,/^}$/d' "$panel"
+  cat <<'JS'
+}
+assert.match(meta.whenToUse, /inputTrust.*trusted-project/)
+const brief = {issue: 7, brief: 'fixture', backend: true}
+await assert.rejects(runPanel(brief), /dispatch each seat for issue, PR or Git evidence/)
+assert.deepEqual(calls, [])
+const design = await runPanel({...brief, inputTrust: 'trusted-project'})
+assert.deepEqual(calls, ['architect:philosophy', 'system-engineer', 'architect:synthesis'])
+assert.equal(design.finalSpec, 'architect:synthesis')
+JS
+} | node --input-type=module

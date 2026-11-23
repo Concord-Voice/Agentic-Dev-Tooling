@@ -1,7 +1,7 @@
 export const meta = {
   name: 'design-panel',
   description: 'Phase-2 Architecture & Design panel: architect philosophy → parallel specialists → frontend reconciliation → architect synthesis',
-  whenToUse: 'Invoked by /dev-lifecycle Phase 2 for any nontrivial design. Realizes the Architecture & Design team hierarchy, which subagents cannot express directly (a subagent cannot dispatch a subagent).',
+  whenToUse: 'Use for Phase 2 when the parent classifies the brief as trusted project material and sets inputTrust to trusted-project. For issue, PR or Git evidence, use the lifecycle role table to dispatch each seat individually and launch the isolated Claude architect.',
   phases: [
     { title: 'Philosophy', detail: 'architect drafts the design philosophy the panel builds against', model: 'opus' },
     { title: 'Panel', detail: 'system-engineer / ui-designer / ux-designer work the brief in parallel' },
@@ -12,7 +12,7 @@ export const meta = {
 
 // args: {
 //   issue:       "1234",                 // issue number (string or number)
-//   brief:       "<issue brief text>",   // required — the /issue-brief output
+//   brief:       "<project design brief>", // required — trusted project material
 //   backend:     true,                   // dispatch system-engineer
 //   frontend:    true,                   // dispatch ui-designer + ux-designer (as a PAIR)
 //   inputTrust:  "trusted-project",       // parent classification; issue/PR evidence uses individual seats
@@ -57,7 +57,7 @@ const BACKEND = a.backend !== false
 const FRONTEND = a.frontend === true
 const LIBS = a.libraryIds ? `\n\nContext7 library IDs in scope (fetch current docs before designing against them): ${a.libraryIds}` : ''
 
-if (!BRIEF) throw new Error('design-panel: args.brief is required (pass the /issue-brief output)')
+if (!BRIEF) throw new Error('design-panel: args.brief is required (pass the trusted project design brief)')
 if (!BACKEND && !FRONTEND) throw new Error('design-panel: at least one of args.backend / args.frontend must be true')
 
 const context = `## Issue #${ISSUE}\n\n${BRIEF}${LIBS}`

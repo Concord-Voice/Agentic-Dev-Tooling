@@ -12,7 +12,7 @@
     "sha256": "ea2ab9aa17d0977815f226553cfb74dd9dda389aa4f895461dee795e900bcf32"
   },
   "dev-lifecycle/SKILL.md": {
-    "sha256": "a7e0bbabe041f6be7e4a2b444cd9f32073aaddfc8a5a6cbd8ad09819355db342",
+    "sha256": "46c395986e98abb55de6ed38527bad9f9047c50df3ccd05e2d60de81dcdcad54",
     "edits": [
       [13, 13, ""],
       [51, 68, "> source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"],

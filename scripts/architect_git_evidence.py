@@ -16,6 +16,9 @@ import time
 
 BASE = "refs/heads/base"
 HEAD = "refs/heads/head"
+LINUX_GIT = "/usr/bin/git"
+LINUX_BWRAP = "/usr/bin/bwrap"
+LINUX_SNAPSHOT = "/evidence"
 HISTORY_LIMIT = 100
 MAX_GIT_ALLOCATION = 64 * 1024 * 1024
 OPERATIONS = {
@@ -137,17 +140,20 @@ def _sandbox(snapshot, objects, descriptors):
                          "-p", MAC_PROFILE, path], str(snapshot), str(objects), ())
         raise RuntimeError("Apple Git is unavailable for isolated evidence")
     if sys.platform == "linux":
+        for path, package in ((LINUX_BWRAP, "bubblewrap"), (LINUX_GIT, "git")):
+            if not Path(path).is_file() or not os.access(path, os.X_OK):
+                raise RuntimeError(f"Install the distribution {package} package with an executable at {path}")
         policy = descriptors.enter_context(_socket_filter())
-        command = ["/usr/bin/bwrap", "--seccomp", str(policy.fileno()), "--unshare-all", "--die-with-parent", "--new-session",
-                   "--cap-drop", "ALL", "--ro-bind", "/usr/bin/git", "/usr/bin/git"]
+        command = [LINUX_BWRAP, "--seccomp", str(policy.fileno()), "--unshare-all", "--die-with-parent", "--new-session",
+                   "--cap-drop", "ALL", "--ro-bind", LINUX_GIT, LINUX_GIT]
         for directory in ("/usr/lib", "/lib", "/lib64"):
             if Path(directory).is_dir():
                 command.extend(("--ro-bind", directory, directory))
-        command.extend(("--dev-bind", "/dev/null", "/dev/null",
-                        "--ro-bind", str(snapshot), "/evidence",
+        command.extend(("--dev-bind", os.devnull, os.devnull,
+                        "--ro-bind", str(snapshot), LINUX_SNAPSHOT,
                         "--ro-bind", str(objects), "/objects", "--remount-ro", "/",
-                        "--chdir", "/evidence", "--", "/usr/bin/git"))
-        return command, "/evidence", "/objects", (policy.fileno(),)
+                        "--chdir", LINUX_SNAPSHOT, "--", LINUX_GIT))
+        return command, LINUX_SNAPSHOT, "/objects", (policy.fileno(),)
     raise RuntimeError("Git evidence requires a supported operating system sandbox")
 
 
@@ -195,7 +201,7 @@ class Evidence:
             command, gitdir, objects, fds = _sandbox(self.snapshot, self.objects, descriptors)
             environment = {
                 "HOME": "/unavailable", "PATH": "/unavailable", "LC_ALL": "C",
-                "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+                "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                 "GIT_ATTR_NOSYSTEM": "1", "GIT_OPTIONAL_LOCKS": "0",
                 "GIT_NO_REPLACE_OBJECTS": "1", "GIT_NO_LAZY_FETCH": "1",
                 "GIT_ALLOW_PROTOCOL": "", "GIT_TERMINAL_PROMPT": "0",

@@ -16,7 +16,8 @@ SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 from architect_git_evidence import prepare_snapshot
 
-NAMES = ("architect", "fleet-architect", "core-lifecycle:architect")
+PLUGIN_ARCHITECT = "core-lifecycle:architect"
+NAMES = ("architect", "fleet-architect", PLUGIN_ARCHITECT)
 TOOLS = {"mcp__architect_git__history", "mcp__architect_git__diff"}
 LIMIT = 256 * 1024
 
@@ -52,7 +53,7 @@ def native_profile(root, name, source_digest=None):
     # The native CLI does not reliably apply the selected agent's effort to a
     # print-mode main session. Bind the reviewed runtime settings explicitly.
     limits = ["--model", profile["model"], "--effort", profile["effort"], "--max-turns", str(profile["maxTurns"])]
-    if name == "core-lifecycle:architect":
+    if name == PLUGIN_ARCHITECT:
         plugin = root / "core-lifecycle"
         (plugin / ".claude-plugin").mkdir(parents=True)
         (plugin / ".claude-plugin/plugin.json").write_text('{"name":"core-lifecycle","version":"0.1.0"}')
@@ -133,7 +134,7 @@ def preflight(process, name, server):
     if state != "connected" or {t.get("name") for t in exposed} != {"history", "diff"}:
         raise RuntimeError("The bound Git evidence tools are unavailable")
     usage = control(process, "get_context_usage")
-    expected_source = "plugin" if name == "core-lifecycle:architect" else "flagSettings"
+    expected_source = "plugin" if name == PLUGIN_ARCHITECT else "flagSettings"
     roles = [(agent["agentType"], agent["source"]) for agent in usage["agents"]]
     if roles != [(name, expected_source)]:
         raise RuntimeError("Claude did not bind the single explicit native role source")

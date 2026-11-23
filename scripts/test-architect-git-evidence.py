@@ -36,7 +36,7 @@ def linux_boundary_unavailable():
     return None
 
 
-class GitFixture(unittest.TestCase):
+class GitFixtureMixin:
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -69,7 +69,7 @@ class GitFixture(unittest.TestCase):
         return evidence.Evidence(self.snapshot)
 
 
-class GitEvidenceTests(GitFixture):
+class GitEvidenceTests(GitFixtureMixin, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         reason = linux_boundary_unavailable()
@@ -190,7 +190,7 @@ int main(void) {
             reader.read("diff")
 
 
-class BoundaryTests(GitFixture):
+class BoundaryTests(GitFixtureMixin, unittest.TestCase):
     def test_unavailable_linux_guest_refuses_snapshot(self):
         reason = linux_boundary_unavailable()
         if not reason:
@@ -207,7 +207,7 @@ class BoundaryTests(GitFixture):
         for platform in ("darwin", "linux"):
             with (self.subTest(platform=platform), patch.object(sys, "platform", platform),
                   patch.object(evidence, "_socket_filter", side_effect=tempfile.TemporaryFile),
-                  patch.object(Path, "is_file", return_value=True),
+                  patch.object(Path, "is_file", return_value=True), patch.object(os, "access", return_value=True),
                   patch.object(evidence, "_bounded_run", return_value="data") as runner,
                   patch.dict(os.environ, {"SSH_AUTH_SOCK": str(self.root / "agent")})):
                 self.assertEqual(reader.read("history"), "data")
@@ -226,6 +226,25 @@ class BoundaryTests(GitFixture):
                 else:
                     self.assertIn("(deny default)", command[command.index("-p") + 1])
                     self.assertEqual(fds, ())
+
+    def test_missing_or_nonexecutable_linux_prerequisite(self):
+        git, bwrap = self.root / "git", self.root / "bwrap"
+        for binary, package in ((git, "git"), (bwrap, "bubblewrap")):
+            for present in (True, False):
+                with (self.subTest(binary=binary.name, present=present), patch.object(sys, "platform", "linux"),
+                      patch.object(evidence, "LINUX_GIT", str(git)), patch.object(evidence, "LINUX_BWRAP", str(bwrap))):
+                    for fixture in (git, bwrap):
+                        fixture.touch()
+                        fixture.chmod(0o700)
+                    if present:
+                        binary.chmod(0o600)
+                    else:
+                        binary.unlink()
+                    with self.assertRaises(RuntimeError) as failure:
+                        self.prepare()
+                    self.assertIn(f"distribution {package} package", str(failure.exception))
+                    self.assertIn(str(binary), str(failure.exception))
+                    self.assertFalse(self.snapshot.exists())
 
     def test_rejects_invalid_metadata_and_unavailable_native_git(self):
         pointer = self.root / "pointer"

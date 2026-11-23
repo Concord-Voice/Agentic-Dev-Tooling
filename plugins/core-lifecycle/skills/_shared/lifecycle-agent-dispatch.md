@@ -178,8 +178,8 @@ Phase-8 findings into Phase-2 planning. Feed it into the spec, not just the log.
 ## Phase 2: PLAN
 
 Phase 2 is the **design panel**. Dispatch is fan-out-then-synthesize, and its
-canonical implementation is the `design-panel` Workflow (see § Workflow
-realization). Hand-dispatch only when a Workflow is unavailable.
+trusted project-only implementation is the `design-panel` Workflow with `inputTrust: "trusted-project"` (see § Workflow
+realization). For Claude issue, PR or Git evidence, dispatch each seat according to [Claude architect dispatch](#claude-architect-dispatch).
 
 | Condition (any match) | Agent | Stage |
 |---|---|---|
@@ -288,8 +288,8 @@ It does **not** replace its Phase-8 run — see the PR dispatch table.
 
 ## Workflow realization
 
-Subagents cannot dispatch subagents. The Phase-2 hierarchy is therefore encoded
-as a Workflow script, which the orchestrator invokes:
+For trusted project-only input, the orchestrator can express the Phase-2 hierarchy
+as a Workflow script. The orchestrator classifies the brief before dispatch:
 
 ```js
 phase('Design')
@@ -311,7 +311,7 @@ one is the exact failure that seat exists to prevent, and it has been a live def
 in a panel script before.
 
 The repo-local implementation lives at `.claude/workflows/design-panel.js` and
-is invoked by name. `install.sh` does not copy it (the source is
+is invoked by name for trusted project-only inputs. `install.sh` does not copy it (the source is
 `plugins/core-lifecycle/workflows/design-panel.js`); without it, dispatch the
 seats directly. Each `agent()` call resolves that agent file's pinned model,
 so one panel run has a deterministic, budgetable cost.
