@@ -609,7 +609,7 @@ gh api repos/${REPO}/pulls/$0/comments/{comment_id}/replies \
 
 The `/replies` endpoint works for any bot's comment regardless of which GitHub app posted it — the thread-reply contract is endpoint-level, not author-specific. Stage the body to a file: marker text contains `<`/`>` and shell-quoting a multi-line body with backticks is where this breaks.
 
-**Write the marker yourself.** The gate reads markers only from non-bot authors whose `authorAssociation` is `OWNER` or `MEMBER` — so a marker a bot posts, or one from a read-only collaborator or drive-by account, does not count. `COLLABORATOR` is deliberately excluded: GitHub returns it for read and triage access, so it is a *relationship*, not an authorization level.
+**Write the marker yourself.** The gate reads markers only from non-bot authors who own the repository or are organization members with verified write, maintain or admin access — so a marker a bot posts, or one from a read-only collaborator or drive-by account, does not count. `COLLABORATOR` is deliberately excluded: GitHub returns it for read and triage access, so it is a *relationship*, not an authorization level.
 
 ### Applying the fixes
 
@@ -797,7 +797,7 @@ Categorize on **the disposition**, then on the resolve flag — in that order.
 | Any row where the disposition is `deferred` | **Blocking until the issue is verified** to exist (`gh issue view`) and to be an issue rather than a PR. §2.5.4 already requires it to pre-exist; this confirms it actually does. |
 | **Additionally:** a Phase 1.7 footprint action whose disposition ≠ `Verified-correct` | **Blocking** — independent of this table. An autofix agent's *code change* needs re-review on its own merits; §6.0 precondition 9 owns that. A `cv-disposition` marker on the thread does not discharge it. |
 
-**A marker is only a marker when an authorized human wrote it.** The check reads markers from non-bot authors with an `OWNER`/`MEMBER` association only, so a bot quoting a reply back into the thread, an autofix agent emitting the format itself, or a drive-by account leaves the thread reading as undecided. That is deliberate: the artifact being verified is a *human decision*, and an agent that can mint its own dispositions verifies nothing.
+**A marker is only a marker when an authorized human wrote it.** The check reads markers from repository owners and organization members with verified write, maintain or admin access, so a bot quoting a reply back into the thread, an autofix agent emitting the format itself, or a drive-by account leaves the thread reading as undecided. That is deliberate: the artifact being verified is a *human decision*, and an agent that can mint its own dispositions verifies nothing.
 
 ### Step 4.3 — Report and gate
 
