@@ -47,7 +47,9 @@ never by touching a running deployment.
    IPC channel arguments, migration inputs, env-var-derived config, uploaded
    media, and anything crossing a trust boundary. Start from the surfaces named
    in **Focus Surfaces** below — that list is where this repository's
-   known-weak ground is.
+   known-weak ground is. If `docs/threat-model.md` exists, read it first. Start
+   with its "Weakest ground" and "Attack paths", and treat its "Security
+   objectives" as the invariants to break.
 2. **Trace forward to sinks.** Follow each input to where it does something
    dangerous: SQL, command execution, file paths, crypto key selection, an
    authorization decision, a log sink, an outbound request (SSRF), a deserialize.
