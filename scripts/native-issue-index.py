@@ -4,7 +4,6 @@ import json
 import re
 import subprocess
 import sys
-import unicodedata
 
 OWNER = r"[A-Za-z0-9][A-Za-z0-9_.-]*"
 REPO = r"(?!\.{1,2}[/#])[A-Za-z0-9_.-]+"
@@ -64,26 +63,13 @@ def issue_record(url):
     return obj
 
 
-def issue_text(url, field):
-    value = issue_record(url)[field]
-    if value is None and field == "body":
+def issue_body(url):
+    value = issue_record(url)["body"]
+    if value is None:
         return ""
     if not isinstance(value, str):
         raise Pending("issue text unavailable")
     return value
-
-
-def plain_title(title):
-    # Encode punctuation to prevent mentions, links and embedded Markdown in the index.
-    chars = []
-    for char in title:
-        if char.isalnum():
-            chars.append(char)
-        elif char.isspace() or unicodedata.category(char).startswith("C"):
-            chars.append(" ")
-        else:
-            chars.append(f"&#{ord(char)};")
-    return " ".join("".join(chars).split())
 
 
 def block_ending(line):
@@ -161,40 +147,18 @@ def existing_children(lines, repo):
     return seen
 
 
-def missing_bullets(children, seen):
-    additions = []
-    for url, title in children:
-        owner, child_repo, number = identity(url)
-        name = f"{owner}/{child_repo}"
-        key = (name.lower(), number)
-        if key not in seen:
-            additions.append(f"- {name}#{number} — {plain_title(title)}")
-            seen.add(key)
-    return additions
-
-
-def reconcile(body, parent, children):
+def missing_children(body, parent, urls):
     repo = "/".join(identity(parent)[:2])
     lines = body.splitlines(keepends=True)
     bounds = index_bounds(lines, markdown_headings(lines))
-    newline = "\r\n" if "\r\n" in body else "\n"
-    if bounds is None:
-        if body and not body.endswith("\n"):
-            lines.append(newline)
-        if body:
-            lines.append(newline)
-        lines.append(INDEX_HEADING + newline)
-        bounds = len(lines), len(lines)
-    start, end = bounds
-    additions = missing_bullets(children, existing_children(lines[start:end], repo))
-    if not additions:
-        return body
-    while end > start and not lines[end - 1].strip():
-        end -= 1
-    before = "".join(lines[:end])
-    if not before.endswith("\n"):
-        before += newline
-    return before + newline.join(additions) + newline + "".join(lines[end:])
+    rows = lines[slice(*bounds)] if bounds else []
+    seen = existing_children(rows, repo)
+    missing = []
+    for url in urls:
+        owner, child_repo, number = identity(url)
+        if (f"{owner}/{child_repo}".lower(), number) not in seen:
+            missing.append(url)
+    return missing
 
 
 def check_index(parent, urls):
@@ -202,16 +166,12 @@ def check_index(parent, urls):
     if not urls or len(set(urls)) != len(urls):
         raise Pending("list distinct approved children")
     inspect(parent)
-    children = []
     for url in urls:
         if identity(url)[0].lower() != owner or inspect(url)["parent"] != parent:
             raise Pending("child relationship is unverified")
-        children.append((url, issue_text(url, "title")))
-    body = issue_text(parent, "body")
-    revised = reconcile(body, parent, children)
-    if revised == body:
-        return {"status": "current", "children": len(children)}
-    raise Pending("parent index needs maintainer reconciliation")
+    if missing_children(issue_body(parent), parent, urls):
+        raise Pending("parent index needs maintainer reconciliation")
+    return {"status": "current", "children": len(urls)}
 
 
 def main():

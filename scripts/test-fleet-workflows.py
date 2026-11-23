@@ -47,7 +47,7 @@ class NativeIssueIndexTests(unittest.TestCase):
             self.fail("issue index inspection attempted a write")
         else:
             url = self.parent if "/parent/" in argv[-1] else self.child
-            data = {"id": 4000000000, "html_url": url, "body": self.body, "title": "private @group\n#7"}
+            data = {"id": 4000000000, "html_url": url, "body": self.body}
         return subprocess.CompletedProcess(argv, 0, json.dumps(data).encode(), b"")
 
     def run_cli(self, *args):
@@ -112,7 +112,7 @@ class NativeIssueIndexTests(unittest.TestCase):
         for opener, closer in (("<![CDATA[", "]]>"), ("<?instruction", "?>"), ("<!DECLARATION", ">")):
             body = "\n".join([opener, "## Sub-Issues", "## Other", closer])
             with self.subTest(opener=opener), self.assertRaisesRegex(index_helper.Pending, "HTML"):
-                index_helper.reconcile(body, self.parent, [(self.child, "Example")])
+                index_helper.missing_children(body, self.parent, [self.child])
 
     def test_headings_inside_html_comments(self):
         for end in ("-->", "--!>"):
@@ -122,17 +122,15 @@ class NativeIssueIndexTests(unittest.TestCase):
                 self.assertEqual(index_helper.markdown_headings(lines), [6])
 
     def test_index_sections_and_same_number_across_repos(self):
-        children = [(self.child, "T"), (self.parent.replace("/2", "/7"), "Other")]
-        row = "- example/child#2 — T"
+        children = [self.child, self.parent.replace("/2", "/7")]
         current = "## Sub-Issues\r\n- #7 — Same repo\r\n"
-        self.assertEqual(index_helper.reconcile(current, self.parent, children), current + row + "\r\n")
-        self.assertEqual(index_helper.reconcile("Context", self.parent, children[:1]),
-                         "Context\n\n## Sub-Issues\n" + row + "\n")
+        self.assertEqual(index_helper.missing_children(current, self.parent, children), [self.child])
+        self.assertEqual(index_helper.missing_children("Context", self.parent, children), children)
         for body in ["Sub-Issues\n----------\n- example/child#2", "## Sub-Issues <!-- hidden -->\n- #2",
                      "## Sub-Issues\n### Backend\n- example/child#2", "## Sub-Issues\n## Sub-Issues\n", "## Sub-Issues\n- [ ] #2", "```\n",
                      "<!--private", "<pre>\n## Sub-Issues\n", "## Sub-Issues\n- #7\n- example/parent#7"]:
             with self.subTest(body=body), self.assertRaises(index_helper.Pending):
-                index_helper.reconcile(body, self.parent, children)
+                index_helper.missing_children(body, self.parent, children)
 
 
 class FleetWorkflowTests(unittest.TestCase):
