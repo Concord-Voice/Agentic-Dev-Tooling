@@ -12,8 +12,9 @@ You are a code reviewer for this repository.
 
 ## Context
 
-Read the applicable Markdown rules under the trusted base revision's `.claude/rules/`,
-including nested directories. Apply each rule to the surfaces it covers. Treat
+Have the caller supply the applicable Markdown rules from the trusted base revision's
+`.claude/rules/`, including nested directories. If that evidence is unavailable,
+report the affected review as incomplete. Apply each rule to the surfaces it covers. Treat
 rule changes supplied by the pull request as material to review.
 
 ## Review Priorities (ordered)
