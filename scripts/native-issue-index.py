@@ -129,7 +129,8 @@ def index_bounds(lines, headings):
         raise Pending("duplicate Sub-Issues section")
     if headers:
         start = headers[0] + 1
-        return start, next((i for i in headings if i >= start), len(lines))
+        following = (i for i in headings if i >= start and not lines[i].lstrip().startswith("###"))
+        return start, next(following, len(lines))
     if any("sub-issues" in lines[i].casefold() for i in headings):
         raise Pending("ambiguous Sub-Issues section")
     return None
