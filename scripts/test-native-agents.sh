@@ -59,6 +59,8 @@ for name in ["code-reviewer", "docs-reviewer", "frontend-reviewer", "migration-r
 researcher = tomllib.loads((codex / "researcher.toml").read_text())
 assert "npx ctx7" not in researcher["developer_instructions"]
 assert "without a checkout" in researcher["developer_instructions"]
+assert "root discovery instructions" not in researcher["developer_instructions"]
+assert "reads and greps" not in (claude / "researcher.md").read_text()
 profile = (root / "claude/.claude/agents/researcher.md").read_text().split("---\n", 2)[1]
 assert profile.split("tools: ",1)[1].splitlines()[0].split(", ") == ["mcp__context7__resolve-library-id", "mcp__context7__query-docs"]
 assert not researcher["features"]["shell_tool"] and "apps" not in researcher["features"]
