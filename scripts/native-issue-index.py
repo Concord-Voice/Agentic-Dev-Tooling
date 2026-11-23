@@ -72,69 +72,76 @@ def issue_text(url, field):
 
 def plain_title(title):
     # Encode punctuation to prevent mentions, links and embedded Markdown in the index.
-    return " ".join("".join(c if c.isalnum() or c == " " else
-                            " " if c.isspace() or unicodedata.category(c).startswith("C")
-                            else f"&#{ord(c)};" for c in title).split())
+    chars = []
+    for char in title:
+        if char.isalnum():
+            chars.append(char)
+        elif char.isspace() or unicodedata.category(char).startswith("C"):
+            chars.append(" ")
+        else:
+            chars.append(f"&#{ord(char)};")
+    return " ".join("".join(chars).split())
+
+
+def block_ending(line):
+    opening = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+    if opening:
+        fence = opening[1]
+        return re.compile(r"^ {0,3}" + fence[0] + "{" + str(len(fence)) + r",}[ \t]*$")
+    if "<!--" in line and "-->" not in line.split("<!--", 1)[1]:
+        return re.compile("-->")
+    return None
 
 
 def markdown_headings(lines):
-    fence = None
-    comment = False
+    ending = None
     headings = []
     for i, raw in enumerate(lines):
         line = raw.rstrip("\r\n")
-        if fence:
-            if re.fullmatch(r" {0,3}" + fence[0] + "{" + str(len(fence)) + r",}[ \t]*", line):
-                fence = None
+        if ending is not None:
+            if ending.search(line):
+                ending = None
             continue
-        if comment:
-            if "-->" in line:
-                comment = False
+        ending = block_ending(line)
+        if ending is not None or "<!--" in line:
             continue
-        if "<!--" in line:
-            comment = "-->" not in line.split("<!--", 1)[1]
-            continue
-        opening = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
-        if opening:
-            fence = opening[1]
-        elif re.match(r" {0,3}</?[A-Za-z]", line):
+        if re.match(r" {0,3}</?[A-Za-z]", line):
             raise Pending("unrecognized HTML block")
-        elif re.match(r"^ {0,3}#{1,6}(?:\s|$)", line):
+        if re.match(r"^ {0,3}#{1,6}(?:\s|$)", line):
             headings.append(i)
-    if fence or comment:
+    if ending is not None:
         raise Pending("unterminated Markdown block")
     return headings
 
 
-def reconcile(body, parent, children):
-    repo = "/".join(identity(parent)[:2])
-    lines = body.splitlines(keepends=True)
-    headings = markdown_headings(lines)
+def index_bounds(lines, headings):
     headers = [i for i in headings if lines[i].strip() == "## Sub-Issues"]
-    if not headers:
-        if any("sub-issues" in lines[i].casefold() for i in headings):
-            raise Pending("ambiguous Sub-Issues section")
-        newline = "\r\n" if "\r\n" in body else "\n"
-        separator = "" if not body else newline if body.endswith("\n") else newline * 2
-        return reconcile(body + separator + "## Sub-Issues" + newline, parent, children)
-    if len(headers) != 1:
-        raise Pending("one unambiguous Sub-Issues section required")
-    start = headers[0] + 1
+    if len(headers) > 1:
+        raise Pending("duplicate Sub-Issues section")
+    if headers:
+        start = headers[0] + 1
+        return start, next((i for i in headings if i >= start), len(lines))
+    if any("sub-issues" in lines[i].casefold() for i in headings):
+        raise Pending("ambiguous Sub-Issues section")
+    return None
+
+
+def existing_children(lines, repo):
     seen = set()
-    end = start
-    while end < len(lines):
-        line = lines[end].rstrip("\r\n")
-        if end in headings:
-            break
-        if line.strip():
-            match = BULLET.fullmatch(line)
-            if not match:
-                raise Pending("unrecognized child index row")
-            key = ((match["repo"] or repo).lower(), match["number"])
-            if key in seen:
-                raise Pending("duplicate child index row")
-            seen.add(key)
-        end += 1
+    for line in lines:
+        if not line.strip():
+            continue
+        match = BULLET.fullmatch(line.rstrip("\r\n"))
+        if not match:
+            raise Pending("unrecognized child index row")
+        key = ((match["repo"] or repo).lower(), match["number"])
+        if key in seen:
+            raise Pending("duplicate child index row")
+        seen.add(key)
+    return seen
+
+
+def missing_bullets(children, seen):
     additions = []
     for url, title in children:
         owner, child_repo, number = identity(url)
@@ -143,14 +150,31 @@ def reconcile(body, parent, children):
         if key not in seen:
             additions.append(f"- {name}#{number} — {plain_title(title)}")
             seen.add(key)
+    return additions
+
+
+def reconcile(body, parent, children):
+    repo = "/".join(identity(parent)[:2])
+    lines = body.splitlines(keepends=True)
+    bounds = index_bounds(lines, markdown_headings(lines))
+    newline = "\r\n" if "\r\n" in body else "\n"
+    if bounds is None:
+        if body and not body.endswith("\n"):
+            lines.append(newline)
+        if body:
+            lines.append(newline)
+        lines.append("## Sub-Issues" + newline)
+        bounds = len(lines), len(lines)
+    start, end = bounds
+    additions = missing_bullets(children, existing_children(lines[start:end], repo))
     if not additions:
         return body
-    insert = end
-    while insert > start and not lines[insert-1].strip():
-        insert -= 1
-    newline = "\r\n" if lines[start-1].endswith("\r\n") else "\n"
-    before = "".join(lines[:insert])
-    return before + ("" if before.endswith("\n") else newline) + newline.join(additions) + newline + "".join(lines[insert:])
+    while end > start and not lines[end - 1].strip():
+        end -= 1
+    before = "".join(lines[:end])
+    if not before.endswith("\n"):
+        before += newline
+    return before + newline.join(additions) + newline + "".join(lines[end:])
 
 
 def update_index(parent, urls):
