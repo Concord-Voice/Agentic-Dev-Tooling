@@ -472,7 +472,8 @@ if ! candidates=$(printf '%s' "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$J
     + [$pr.reviewThreads.nodes[]? | select(.isResolved and .comments.nodes[0].author.__typename == "User")
        | select(rostered(.comments.nodes[0].author.login) | not)
        | select(.resolvedBy.login != .comments.nodes[0].author.login)
-       | .resolvedBy.login | select(type == "string" and length > 0) | select(rostered(.) | not)]
+       | .resolvedBy.login | select(type == "string" and length > 0)
+       | select(endswith("[bot]") or rostered(.) | not)]
     | unique[]'); then
     echo "STOP: could not identify review decision authors." >&2
     exit 2

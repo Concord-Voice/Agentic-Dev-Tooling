@@ -80,6 +80,21 @@ def trusted_darwin_acl_principal(lib, entry):
     return False
 
 
+def check_darwin_acl_entry(lib, entry, allowed):
+    import ctypes as c
+
+    tag = c.c_int()
+    if lib.acl_get_tag_type(entry, c.byref(tag)) or tag.value not in (1, 2):
+        raise ValueError("unrecognized macOS cache ACL entry")
+    if tag.value == 2:  # ACL_EXTENDED_DENY
+        return
+    rights = c.c_uint64()
+    if lib.acl_get_permset_mask_np(entry, c.byref(rights)):
+        raise ValueError("cannot read macOS cache ACL permissions")
+    if rights.value & ~allowed and not trusted_darwin_acl_principal(lib, entry):
+        raise ValueError("untrusted macOS cache ACL grant")
+
+
 def check_darwin_cache_acl(fd, *, private=False):
     """Validate the Darwin extended ACL on the open directory, including inherited grants."""
     if sys.platform != "darwin":
@@ -104,18 +119,7 @@ def check_darwin_cache_acl(fd, *, private=False):
     try:
         while lib.acl_get_entry(c.c_void_p(acl), index, c.byref(entry)) == 0:
             index = -1  # ACL_NEXT_ENTRY
-            tag = c.c_int()
-            rights = c.c_uint64()
-            if lib.acl_get_tag_type(entry, c.byref(tag)) or tag.value not in (1, 2):
-                raise ValueError("unrecognized macOS cache ACL entry")
-            if tag.value == 2:  # ACL_EXTENDED_DENY
-                continue
-            if lib.acl_get_permset_mask_np(entry, c.byref(rights)):
-                raise ValueError("cannot read macOS cache ACL permissions")
-            if not rights.value & ~allowed:
-                continue
-            if not trusted_darwin_acl_principal(lib, entry):
-                raise ValueError("untrusted macOS cache ACL grant")
+            check_darwin_acl_entry(lib, entry, allowed)
         # Darwin documents EINVAL after the last entry of a valid ACL.
         if c.get_errno() != errno.EINVAL:
             raise OSError(c.get_errno(), "cannot finish reading macOS cache ACL")
