@@ -56,6 +56,9 @@ assert "trusted base revision" in security and "independently confined read-only
 for name in ["code-reviewer", "docs-reviewer", "frontend-reviewer", "migration-reviewer",
              "scope-reviewer", "security-reviewer"]:
     reviewer = tomllib.loads((codex / (name + ".toml")).read_text())
+    claude_reviewer = (claude / (name + ".md")).read_text()
+    assert "tools: Read, Grep, Glob\n" in claude_reviewer and "Bash(" not in claude_reviewer
+    assert "independently confined read-only session" in claude_reviewer
     assert reviewer["features"] == analyst["features"]
     assert "independent Codex review worker" in reviewer["description"]
     assert "scripts/codex-isolated-review.py" in reviewer["developer_instructions"]
