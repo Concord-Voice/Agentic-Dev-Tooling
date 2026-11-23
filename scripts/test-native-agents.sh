@@ -16,6 +16,9 @@ for platform in claude codex antigravity copilot; do
   [[ ! -e "$root/$platform/.agents/mcp_config.json" ]]
 done
 
+mkdir -m 700 "$root/codex-alias"
+python3 -I -B scripts/render-agent-profiles.py codex "$root/codex-alias" --fleet-alias architect
+
 python3 - "$root" <<'PY'
 import json
 from pathlib import Path
@@ -37,6 +40,15 @@ for path in codex.glob("*.toml"):
 architect = tomllib.loads((codex / "architect.toml").read_text())["developer_instructions"]
 assert "## Turn Budget" not in architect
 assert "## Output Format" in architect
+for path in (codex / "architect.toml", root / "codex-alias/.codex/agents/fleet-architect.toml"):
+    role = tomllib.loads(path.read_text())
+    assert role["name"] == path.stem
+    assert role["features"] == {"shell_tool": False, "code_mode": False, "request_permissions_tool": False}
+    instructions = role["developer_instructions"]
+    assert "mcp__architect_git" not in instructions and "Git evidence on Claude" not in instructions
+    assert "scripts/architect_git_evidence.py" in instructions
+    assert "parent supplies Git history and diff as untrusted data" in instructions
+    assert "Edit(docs/**)" in instructions
 analyst = tomllib.loads((codex / "feedback-analyst.toml").read_text())
 assert analyst["features"] == {key: False for key in (
     "apps", "shell_tool", "plugins", "memories", "request_permissions_tool"

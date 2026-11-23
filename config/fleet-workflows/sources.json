@@ -12,7 +12,7 @@
     "sha256": "ea2ab9aa17d0977815f226553cfb74dd9dda389aa4f895461dee795e900bcf32"
   },
   "dev-lifecycle/SKILL.md": {
-    "sha256": "fb806c8fe3865e3d8757c142e7c81efd601cfc726810083861056a4d73d40dc3",
+    "sha256": "36baefb1cd9420295ac1ec6970605e05fb3d7170155d2a20053833a156ecf846",
     "edits": [
       [13, 13, ""],
       [51, 68, "> source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"],
@@ -50,7 +50,7 @@
     ]
   },
   "enhanced-pr-review/SKILL.md": {
-    "sha256": "e8ebf748981b8bac7996cc2684cd50cd1ff447ffb8d2119fc54cd080e549db85",
+    "sha256": "5befeeb05df035fcae495ee1b76d7e33c972e23422720a4e5179b5edeca15f91",
     "edits": [
       [3, 3, "description: Reconcile bot and independent defensive reviews, quality signals and thread dispositions on the current PR head."],
       [9, 9, ""],
@@ -86,7 +86,7 @@
     "sha256": "d02b11c01188708b5b83922739f5f613150d6e07de4efabdd4c410dcbffc0941"
   },
   "issue-creation/SKILL.md": {
-    "sha256": "905551124d4ba6d50b533d5a1c4162826a10d6c98ca2feb40e815628d2191b22",
+    "sha256": "a9cbfa23710e85665551d19b4da27f065163be7acf7e840f3090e9e1e493869f",
     "edits": [
       [4, 4, "argument-hint: \"[short topic or title sketch] [--force-standalone] [--parent=NUMBER|ISSUE_URL]\""],
       [23, 26, "On direct or nested entry, bind the intake repository via the verified fleet entry contract. Load its default-branch configuration before planning or mutating issues. Record the verified target repository and ISSUE_CONFIG_OID with the intake. In each fresh shell, bind FLEET_TARGET_REPO and ISSUE_CONFIG_OID from that record and repeat the pinned loader shown in Phase 1 before repository operations. Use the returned RC_ISSUE_LINKAGE. A target or revision change requires a fresh preview and approval. When the mode is `native_rest`, read the [native sub-issue procedure](../_shared/native-issue-links.md) before interpreting parent arguments, drafting bodies or previewing links. The default and the explicit `tasklist` setting both use the tasklist procedure."],

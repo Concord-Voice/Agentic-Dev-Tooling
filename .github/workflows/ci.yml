@@ -47,6 +47,8 @@ jobs:
       # slowest harness, so it runs in its own job (below) to keep unit-test
       # feedback fast.
       - name: unit tests
+        env:
+          ARCHITECT_REQUIRE_LINUX_SANDBOX: '1'
         run: |
           set -euo pipefail
           bash scripts/test-publish-guard.sh

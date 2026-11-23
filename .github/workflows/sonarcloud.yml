@@ -29,6 +29,8 @@ jobs:
         with:
           persist-credentials: false
       - name: Measure integration coverage
+        env:
+          ARCHITECT_REQUIRE_LINUX_SANDBOX: '1'
         run: |
           python3 -m venv "$RUNNER_TEMP/sync-coverage-venv"
           "$RUNNER_TEMP/sync-coverage-venv/bin/python" -m pip install --no-deps 'coverage @ https://files.pythonhosted.org/packages/ec/16/114df1c291c22cac3b0c127a73e0af5c12ed7bbb6558d310429a0ae24023/coverage-7.10.7-py3-none-any.whl#sha256=f7941f6f2fe6dd6807a1208737b8a0cbcf1cc6d7b07d24998ad2d63590868260'
