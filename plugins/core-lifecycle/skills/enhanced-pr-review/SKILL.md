@@ -83,7 +83,7 @@ A few properties of this resolution:
 - Fields are bound to vars (`$b`, `$m`, `$bl`, `$mk`) **before** the predicate so the inner `contains`/`ascii_downcase` pipes don't rebind `.` away from the roster entry. The marker test uses `contains` (literal substring) rather than `test` (regex) — markers are HTML comments and must not be interpreted as regex.
 - Entries are evaluated in roster order; put the more specific (`.login`+`.marker`) entries before any broad `.match` that could also catch the shared login.
 
-**Step 2** — Fetch bot-authored inline comments:
+**Step 2** — Collect [linked maintainer decisions](references/maintainer-decisions.md) for top-level comments and formal reviews in the trusted read-only collector even if there are no inline threads. Then fetch bot-authored inline comments:
 
 ```bash
 gh api --paginate repos/${REPO}/pulls/$0/comments \
@@ -621,7 +621,7 @@ The `/replies` endpoint works for any bot's comment regardless of which GitHub a
 
 ## Phase 3.5 — The reconciliation post (REQUIRED when any reviewer spoke, one per PR)
 
-This skill posts its own comment to the PR. It is the single artifact that reconciles **every** review signal — each bot's findings, each specialist subagent's findings, and the decision on each — into one record that lives with the PR rather than in terminal scrollback.
+Record a linked written decision for each actionable maintainer finding per [linked maintainer decisions](references/maintainer-decisions.md). This skill posts its own comment to the PR. It is the single artifact that reconciles **every** review signal — each bot's findings, each specialist subagent's findings, and the decision on each — into one record that lives with the PR rather than in terminal scrollback.
 
 **It posts regardless of merge-readiness.** A review whose outcome is "three findings deferred and one still under discussion" needs this record more than a clean one does, not less. This is why the reconciliation post is here and not folded into Phase 6: Phase 6's artifact is gated behind the §6.0 honesty gate and only ever appears on a PR that is *ready*, so a PR that stalls would carry no record of what was decided at all.
 
@@ -696,7 +696,7 @@ case "$GATE_REF" in refs/remotes/origin/?*) GATE_SH="$(git show "$GATE_REF:.clau
 if [ -n "$GATE_SH" ]; then bash -c "$GATE_SH" check-review-dispositions "$0"; else echo "UNKNOWN: no gate script on $GATE_REF" >&2; (exit 3); fi
 ```
 
-Exit 0 means every in-scope thread carries a decision, every deferral names an issue that exists, and the reconciliation post accounts for every reviewer that spoke. Exit 1 → the blocking list is printed. Exit 2 means the check could not be made — treat that as UNKNOWN, never as clean. Any other exit (3 when no gate script could be read from the default branch, or a crash) → UNKNOWN, never clean.
+Exit 0 means every in-scope thread carries a decision, every deferral names an issue that exists, and the reconciliation post accounts for every bot or rostered machine reviewer that spoke. Exit 1 → the blocking list is printed. Exit 2 means the check could not be made — treat that as UNKNOWN, never as clean. Any other exit (3 when no gate script could be read from the default branch, or a crash) → UNKNOWN, never clean.
 
 **The gate runs from the default branch, never from this checkout.** A PR can edit the checkout's copy, for example by adding `exit 0` at the top, and a gate the PR controls verifies nothing. So every invocation reads the script from `refs/remotes/origin/HEAD` with `git show` and runs that copy. The full refname matters: a short `origin/main` resolves to a local branch or a fetched tag of that name before the remote-tracking ref, and a PR can supply either, the same trust rule the gate already applies to the roster. A PR that changes the gate is therefore judged by the previous gate, and its own version takes effect after it merges.
 
@@ -706,7 +706,7 @@ Exit 0 means every in-scope thread carries a decision, every deferral names an i
 
 ## Phase 4 — Pre-merge thread resolution check
 
-This phase runs **after** all fix commits land and CI is green. It gates `/dev-lifecycle` Phase 9 (MERGE-READY) on one invariant: **every in-scope review conversation carries a recorded human decision** — a Phase 3.5 disposition marker — and the reconciliation post accounts for every reviewer that spoke.
+After fix commits and green CI, verify qualifying inline thread dispositions and bot reconciliation, then separately check the [linked written decisions for actionable maintainer findings](references/maintainer-decisions.md).
 
 Run the check; it is the gate, and the rest of this phase is how to read and clear its output:
 
@@ -895,14 +895,14 @@ That artifact serves the repo's **required-review rule**. When the repo declares
 
 ### 6.0 — The honesty gate (preconditions)
 
-The approval artifact may be emitted ONLY if ALL of the following hold. If ANY fails, emit the **NOT-READY** summary (§6.4) naming the blocker(s) and STOP. There is no pressure — time, exhaustion, sunk-cost, "I already read it myself", a chat thumbs-up — that lowers this bar. A consolidated approval is a factual claim about the PR's state; emitting one while a blocker is live is a false statement in a durable, auditable record.
+Before approving, refresh the linked human decisions and require a clear current formal review state using [linked maintainer decisions](references/maintainer-decisions.md). The approval artifact may be emitted ONLY if ALL of the following hold. If ANY fails, emit the **NOT-READY** summary (§6.4) naming the blocker(s) and STOP. There is no pressure — time, exhaustion, sunk-cost, "I already read it myself", a chat thumbs-up — that lowers this bar. A consolidated approval is a factual claim about the PR's state; emitting one while a blocker is live is a false statement in a durable, auditable record.
 
 1. **No open `BLOCK`-severity rows** in the Phase 3 table (a subagent BLOCK such as a security-reviewer BLOCK or a PROVEN red-team finding, release-signal BLOCKING per §2.6 when `.release_signal` is configured, any other subagent blocking-merge finding).
 2. **No blocking bot's most-recent verdict is `⚠ Changes Suggested` / `❌ Blocked` / `CHANGES_REQUESTED`** — for every bot marked `"blocking": true` in `.bots[]`, its latest verdict must be `✅ Approved` / passing, OR the finding was fixed AND the bot re-reviewed the fix commit (re-fetch Phase 1 Step 4; do not trust a stale verdict).
 3. **Every blocking Quality-Gate / SAST check = passed.** A `PENDING` / queued / not-yet-reported check is **NOT** a pass. Wait for the result; never approve ahead of a gate that has not reported.
 4. **All required CI checks green** — `gh pr checks $0` shows zero `fail` and zero `pending` in the required set. **Pending ≠ green.** Report the actual state, never the assumed-imminent one.
 5. **(Only when `.release_signal` is configured)** the release signal = ALL CLEAR or SATISFIED, or an explicitly-approved defer per §2.6.4. When `.release_signal` is absent, this precondition does not exist — skip it.
-6. **The disposition ledger is complete** — the disposition gate, run from the default branch per §3.5.3, exits 0 at the current HEAD: every in-scope conversation carries a decision, every deferral names an issue that exists, and exactly one Phase 3.5 reconciliation post accounts for every reviewer that spoke. Re-run it here if the Phase 4 result isn't fresh; when Phase 6 is invoked directly rather than via `/dev-lifecycle` Step 9.1.5 there is no prior run to consume, so run it. **Exit 2 fails this precondition** — an unverifiable ledger is not a clean one.
+6. **The disposition ledger is complete** — the disposition gate, run from the default branch per §3.5.3, exits 0 at the current HEAD: qualifying inline threads carry dispositions, their deferrals cite existing issues, and bot speakers are covered by the Phase 3.5 reconciliation post. Re-run it here if the Phase 4 result isn't fresh; when Phase 6 is invoked directly rather than via `/dev-lifecycle` Step 9.1.5 there is no prior run to consume, so run it. **Exit 2 fails this precondition** — an unverifiable ledger is not a clean one.
 7. **Every `Fix`-marked finding is actually resolved** — verify by reading `gh pr diff $0` / the fix-commit SHAs, not by asserting it. A finding you intended to fix but didn't push is still open.
 8. **HEAD is the commit being approved** — no unpushed local fixes. The artifact references the current HEAD SHA. If the active ruleset dismisses stale reviews on push (the common configuration), **any later push dismisses the approval** — so Phase 6 is genuinely the last step before merge. If a fix still needs to land, you are not in Phase 6 yet.
 9. **No UNVERIFIED autonomous-agent (autofix) action remains** (Phase 1.7). Every footprint action carries a disposition; every non-`Verified-correct`, non-`No-finding` disposition has a landed Fix commit (verify by diff per precondition 7). This precondition is about the autofix agent's **change**, and precondition 6 is about the **decision record**; they are independent and both must hold. A `cv-disposition` marker on a thread does not discharge this one — an agent's unreviewed commit needs re-review on its merits no matter how well the thread was answered. A manufactured green — the agent resolved a thread it did not fix, a reviewer bot re-approved a cosmetic change, or a failing test was deleted/skipped to green CI — does NOT satisfy this gate. If any footprint action is still `UNVERIFIED`, this precondition FAILS. A **`No-finding`** disposition (a benign non-autofix commit that §1.7.2 tied to no finding and no thread) is informational and does NOT block. When Phase 1.7 reported `Autofix footprint: none detected`, this precondition is trivially satisfied.

@@ -443,6 +443,18 @@ class FleetWorkflowTests(unittest.TestCase):
         self.assertIn('fleet_check_dispositions "$0"', enhanced)
         self.assertIn('<<<"$RC_TRUSTED_CFG"', enhanced)
         self.assertNotIn('$(git rev-parse --show-toplevel)/.claude/repo-config.json', enhanced)
+        for root in (edition, fleet.ROOT / fleet.CORE):
+            review = (root / "enhanced-pr-review/SKILL.md").read_text()
+            lifecycle = (root / "dev-lifecycle/SKILL.md").read_text()
+            reference = "references/maintainer-decisions.md"
+            self.assertIn(reference, review.split("**Step 3**", 1)[0])
+            self.assertIn(reference, review.split("### 6.0", 1)[1].split("### 6.1", 1)[0])
+            self.assertIn(reference, lifecycle.split("## Phase 8: FINAL", 1)[1].split("## Phase 9:", 1)[0])
+            self.assertIn(reference, lifecycle.split("### Step 9.2", 1)[1])
+            rules = (root / "enhanced-pr-review" / reference).read_text()
+            for term in ("--maintainer-sources", "--formal-state", "each actionable finding",
+                         "no special human-comment marker", "new or edited entries"):
+                self.assertIn(term, rules)
         coverage = edition / "enhanced-pr-review/review-coverage.sh"
         subprocess.run(["bash", "-n", coverage], check=True)
         for number, fixture in (("0", ""), ("11", "invalid-fixture")):

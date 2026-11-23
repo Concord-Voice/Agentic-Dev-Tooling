@@ -2816,7 +2816,7 @@ The roster is the one that drifts *silently* — prose is read by a human who no
 
 ## Phase 8: FINAL REVIEW (auto-run + checkpoint)
 
-**Prerequisite:** Phase 7.5 must have completed with all **REQUIRED** bots ARRIVED (or EXHAUSTED). Optional reviewers never gate this — 7.5's own decision table proceeds without them, and wording this as "all expected" contradicts that split and would stall Phase 8 on a bot nobody waits for. If Phase 7.5 reports a STOP-on-anomaly, this phase MUST NOT run until either the bot arrives or the developer explicitly authorizes skipping the wait.
+Collect both human non-thread surfaces and reconcile each actionable finding with its source URL and written decision under the sibling [maintainer decision procedure](../enhanced-pr-review/references/maintainer-decisions.md). **Prerequisite:** Phase 7.5 must have completed with all **REQUIRED** bots ARRIVED (or EXHAUSTED). Optional reviewers never gate this — 7.5's own decision table proceeds without them, and wording this as "all expected" contradicts that split and would stall Phase 8 on a bot nobody waits for. If Phase 7.5 reports a STOP-on-anomaly, this phase MUST NOT run until either the bot arrives or the developer explicitly authorizes skipping the wait.
 
 **Mode-Aware Gate (per Phase 1.5):** Review-dispatch via `/enhanced-pr-review` ALWAYS runs regardless of mode — it is read-only triage, and the gate never suppresses the review itself. What the gate covers is the **review outcome**: accepting the triage table and authorizing fix-application.
 
@@ -2975,7 +2975,7 @@ All reviews addressed (verified: N bot threads resolved, 0 blocking). PR #<N> is
 [squash-merge / rebase-merge / I'll handle it]
 ```
 
-If squash-merge: `gh pr merge <PR> --squash --subject "<title> (#<PR>)"` with a body summarizing the changes.
+Immediately before merging, refresh the manual decisions and require exit 0 from the sibling [current formal review check](../enhanced-pr-review/references/maintainer-decisions.md) on the exact reviewed SHA. Use `--match-head-commit "$REVIEWED_SHA"` for the authorized merge. If squash-merge: `gh pr merge <PR> --match-head-commit "$REVIEWED_SHA" --squash --subject "<title> (#<PR>)"` with a body summarizing the changes.
 If manual: print the command and exit.
 
 ### Agent-side state-file cleanup (best-effort)

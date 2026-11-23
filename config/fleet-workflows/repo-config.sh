@@ -95,7 +95,12 @@ fleet_load_issue_config() {
 # verified configuration. Free-form comments and HTTP errors stay in the child.
 fleet_check_dispositions() (
   local pr="${1:-}" repo="${2:-}" expected='' dir gate scratch code
-  [[ "$pr" =~ ^[1-9][0-9]*$ && $# -le 2 ]] || return 2
+  [[ "$pr" =~ ^[1-9][0-9]*$ ]] || return 2
+  case $# in
+    1|2) ;;
+    4) [[ "$3" == --maintainer-sources || "$3" == --formal-state ]] && [[ "$4" =~ ^[0-9a-f]{40}$ ]] || return 2 ;;
+    *) return 2 ;;
+  esac
   if [[ -z "$repo" ]]; then
     repo=$(unset GH_REPO; gh repo view --json nameWithOwner --jq .nameWithOwner) || return 2
   fi
@@ -111,8 +116,14 @@ fleet_check_dispositions() (
   printf '%s\n' "$RC_TRUSTED_CFG" > "$scratch/config.json" || return 2
   unset CV_REVIEW_FIXTURE CV_SKIP_EXISTENCE_CHECKS CV_BASE_REF CV_DEFAULT_BRANCH GITHUB_BASE_REF BASH_ENV ENV
   export GH_REPO="$repo" CV_REPO_CONFIG="$scratch/config.json"
+  if [[ $# == 4 ]]; then
+    # Only the two fixed metadata modes can return output: canonical source links
+    # with timestamps, or a status code for the current formal review decision.
+    /bin/bash "$gate" "$pr" "$3" "$repo" "$4" 2>/dev/null
+    return $?
+  fi
   if /bin/bash "$gate" "$pr" >/dev/null 2>&1; then
-    printf '%s\n' 'Review dispositions verified.'
+    printf '%s\n' 'Inline and bot review dispositions verified.'
     return 0
   else
     code=$?

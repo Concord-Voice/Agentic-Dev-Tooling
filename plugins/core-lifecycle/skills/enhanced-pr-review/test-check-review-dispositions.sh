@@ -810,6 +810,7 @@ q=""
 for a in "$@"; do case "$a" in query=*) q="$a" ;; esac; done
 case "$q" in
   *"node(id:"*)        f=threadcomments ;;
+  *latestOpinionatedReviews*) f=formal ;;
   *reviewThreads*)     f=threads ;;
   *"reviews(first"*)   f=reviews ;;
   *)                   f=comments ;;
@@ -1081,6 +1082,76 @@ LONG_FIXTURE=$(jq -cn --argjson reviewer "$BOT_TOP" '
          body:("<!-- cv-review-reconciliation -->\n| Gitar |\n" + ("padding evidence\n" * 8192))}
     ]},reviews:{nodes:[]}}}}}')
 run "large reconciliation body keeps an early reviewer match" 0 "$LONG_FIXTURE"
+
+# Use the live pagination/permission shim for the two metadata-only operations.
+# No inline threads, a writer comment and review, plus ordinary status and bot traffic.
+paginate_shim
+mkdir -p "$TMP/pages"
+oid=1111111111111111111111111111111111111111
+target=example-org/example-repo
+export TEST_MEMBER_PERMISSION=write
+source_node() {
+    jq -nc --arg id "$1" --arg login "$2" --arg association "$3" --arg type "$4" --arg body "$5" \
+       '{fullDatabaseId:$id,author:{__typename:$type,login:$login},authorAssociation:$association,body:$body,updatedAt:"2026-01-01T00:00:00Z",state:"COMMENTED"}'
+}
+fixture_page() {
+    jq -nc --arg sha "$oid" --arg key "$1" --argjson nodes "$2" \
+       '[{data:{repository:{pullRequest:{headRefOid:$sha,($key):{pageInfo:{hasNextPage:false},nodes:$nodes}}}}}]'
+}
+writer=$(source_node 101 teammate MEMBER User "Clarify the date in the guide")
+status=$(source_node 102 owner OWNER User "Build finished")
+machine=$(source_node 103 gitar-bot MEMBER User "Automated status")
+bot=$(source_node 104 bot MEMBER Bot "Build result")
+review=$(source_node 105 teammate COLLABORATOR User "The new wording also needs a reference")
+fixture_page reviewThreads '[]' > "$TMP/pages/threads.json"
+fixture_page comments "[$writer,$status,$machine,$bot]" > "$TMP/pages/comments.json"
+fixture_page reviews "[$review]" > "$TMP/pages/reviews.json"
+meta_run() {
+    local mode=$1
+    shift
+    CV_TEST_PAGES="$TMP/pages" PATH="$TMP:$PATH" "$SCRIPT" 999 "$mode" "$target" "${1:-$oid}"
+}
+src=$(meta_run --maintainer-sources); got=$?
+if [[ $got != 0 ]] || ! jq -e --arg p "https://github.com/$target/pull/999#" '
+    [.[].url] == [($p+"issuecomment-101"),($p+"issuecomment-102"),($p+"pullrequestreview-105")]
+    and all(.[]; keys == ["updatedAt","url"])' <<< "$src" >/dev/null; then
+    echo "FAIL: source inventory must return writer and owner links only, without raw comments"; exit 1
+fi
+# A second page can carry a decision source added without a head change.
+fixture_page comments "[$status]" | jq --argjson writer "$writer"   '.[0] as $first | [($first | .data.repository.pullRequest.comments.pageInfo={hasNextPage:true,endCursor:"c"}), ($first | .data.repository.pullRequest.comments.nodes=[$writer])]' > "$TMP/pages/comments.json"
+src=$(meta_run --maintainer-sources); got=$?
+[[ $got == 0 ]] && jq -e 'length==3 and (.[1].url|endswith("issuecomment-101"))' <<< "$src" >/dev/null || exit 1
+fixture_page comments "[$writer,$status,$machine,$bot]" > "$TMP/pages/comments.json"
+src=$(meta_run --maintainer-sources 2222222222222222222222222222222222222222); got=$?
+[[ $got == 2 && -z "$src" ]] || exit 1
+for perm in read denied; do
+    export TEST_MEMBER_PERMISSION=$perm
+    src=$(meta_run --maintainer-sources); got=$?
+    case $perm in
+      read) [[ $got == 0 ]] && jq -e 'length==1 and (.[0].url | endswith("issuecomment-102"))' <<< "$src" >/dev/null ;;
+      denied) [[ $got == 2 && -z "$src" ]] ;;
+    esac || { echo "FAIL: uncertain maintainer authority must not pass"; exit 1; }
+done
+unset TEST_MEMBER_PERMISSION
+formal_fixture() {
+    jq -nc --arg sha "$oid" --argjson aggregate "$1" --argjson states "$2" \
+      '[{data:{repository:{pullRequest:{headRefOid:$sha,reviewDecision:$aggregate,latestOpinionatedReviews:{pageInfo:{hasNextPage:false},nodes:[$states[]|{state:.}]}}}}}]'
+}
+formal_case() {
+    local name=$1 want=$2 data=$3
+    printf '%s' "$data" > "$TMP/pages/formal.json"
+    meta_run --formal-state >/dev/null; local got=$?
+    [[ "$got" == "$want" ]] || { echo "FAIL: $name (expected $want, got $got)"; exit 1; }
+}
+formal_case 'no applicable aggregate rule' 0 "$(formal_fixture null '[]')"
+formal_case 'current writer requests changes' 1 "$(formal_fixture null '["CHANGES_REQUESTED"]')"
+formal_case 'GitHub aggregate still blocks' 1 "$(formal_fixture '"CHANGES_REQUESTED"' '[]')"
+formal_case 'new approval supersedes earlier opinion' 0 "$(formal_fixture '"APPROVED"' '["APPROVED","DISMISSED"]')"
+formal_case 'missing decision field is unknown' 2 "$(formal_fixture null '[]' | jq 'del(.[0].data.repository.pullRequest.reviewDecision)')"
+formal_case 'moved head is unknown' 2 "$(formal_fixture null '[]' | jq '.[0].data.repository.pullRequest.headRefOid="other"')"
+formal_case 'partial connection is unknown' 2 "$(formal_fixture null '[]' | jq '.[0].data.repository.pullRequest.latestOpinionatedReviews.pageInfo.hasNextPage=true')"
+formal_case 'lookup failure is unknown' 2 'MISSING-FIXTURE-SENTINEL'
+echo 'PASS: linked maintainer source and current formal decision fixtures'
 
 echo ""
 echo "passed: $pass   failed: $fail"
