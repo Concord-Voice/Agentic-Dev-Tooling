@@ -146,6 +146,20 @@ class FleetWorkflowTests(unittest.TestCase):
         self.tmp = Path(tmp.name).resolve()
         self.cache = self.tmp / "cache"
 
+    def test_missing_posix_ownership_stops_before_cache_or_role_lookup(self):
+        for args in (["--cache", str(self.cache), "--skill", "dev-lifecycle"],
+                     ["--project", str(self.tmp), "--platform", "codex", "--select-role", "architect"],
+                     ["--profile", str(self.tmp), "--platform", "claude", "--verify-role", "architect"]):
+            with self.subTest(args=args), patch.object(os, "getuid", None, create=True), \
+                    patch.object(fleet, "edition") as edition, patch.object(fleet, "select_role") as select, \
+                    patch.object(fleet, "verified_role") as verify, redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(fleet.main(args), 1)
+                self.assertIn("inside WSL", err.getvalue())
+                edition.assert_not_called()
+                select.assert_not_called()
+                verify.assert_not_called()
+                self.assertFalse(self.cache.exists())
+
     def test_complete_closed_edition(self):
         output = io.StringIO()
         with redirect_stdout(output):
