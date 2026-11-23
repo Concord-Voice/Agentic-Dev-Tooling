@@ -174,6 +174,26 @@ class NativeIssueIndexTests(unittest.TestCase):
                 self.assertEqual(list(rows.values()), [row])
                 self.assertEqual(index_helper.plan_index(candidate, self.parent, titles), (candidate, {}))
 
+    def test_annotated_rows_and_nested_sections_keep_parent_unchanged(self):
+        examples = (
+            "## Sub-Issues\n- example/child#2 — existing title (owner note)",
+            "## Sub-Issues\n- example/child#2 — previous title",
+            "- Operator checklist\n  ## Sub-Issues\n  - pending",
+            "- Outer list\n    ## Sub-Issues",
+            "- ## Sub-Issues",
+            "> ## Sub-Issues",
+            "## Sub-Issues\n- #77 — Existing\n  ## Nested details",
+        )
+        with patch.object(index_helper.subprocess, "run", self.transport):
+            for body in examples:
+                with self.subTest(body=body):
+                    self.body = body
+                    with self.assertRaises(SystemExit):
+                        self.run_cli("apply-index", "--exclusive-parent", self.parent,
+                                     "--confirmed-digest", "unused", self.child)
+                    self.assertEqual(self.body, body)
+            self.assertFalse(any("PATCH" in argv for argv in self.calls))
+
     def test_dot_prefixed_repository_names(self):
         for repo in (".github", ".dotfiles"):
             url = f"https://github.com/example/{repo}/issues/2"
@@ -373,6 +393,40 @@ class FleetWorkflowTests(unittest.TestCase):
             self.assertIn("${FLEET_SKILLS:?}", loader.read_text())
             self.assertNotIn("git show \"$RC_OID:scripts/repo-config.sh", loader.read_text())
 
+    def test_served_lifecycle_approval_matrix_and_dispatch_contract(self):
+        entry = fleet.resolve(self.cache, "dev-lifecycle")
+        dev = entry.read_text()
+        shared = entry.parent.parent / "_shared"
+        matrix = dev.split("### Mode-to-gate matrix (canonical)", 1)[1].split("\n\n", 2)[1]
+        rows = [[col.strip() for col in line.strip("|").split("|")] for line in matrix.splitlines()]
+        self.assertEqual(rows[0], ["Phase", "In-the-Loop", "On-the-Loop", "Automated End-to-End"])
+        gate, auto = "**Gate**", "Auto"
+        self.assertEqual(rows[2:], [
+            ["1 UNDERSTAND", auto, auto, auto], ["2 PLAN", gate, gate, auto],
+            ["3 EXECUTE", auto, auto, auto], ["4 VALIDATE", auto, auto, auto],
+            ["5 COMMIT+DRAFT PR", gate, auto, auto], ["6 CI MONITOR", auto, auto, auto],
+            ["7 READY", gate, auto, auto], ["7.5 WAIT FOR BOT REVIEWS", "Auto†", "Auto†", "Auto†"],
+            ["8 FINAL REVIEW", auto, gate, auto], ["9 MERGE-READY", gate, gate, gate],
+        ])
+        for marker in ("suggested mode is always `On-the-Loop`", "confirmed persisted mode-state file ALWAYS wins",
+                       "retain subsequent independent review, waiting and merge gates under every mode"):
+            self.assertIn(marker, dev)
+        phase3 = dev.split("\n## Phase 3:", 1)[1].split("\n## Phase 4:", 1)[0]
+        self.assertIn("../_shared/lifecycle-agent-dispatch.md", phase3)
+        self.assertIn("Keep dispatch decisions with the parent", phase3)
+        phase4 = dev.split("\n## Phase 4:", 1)[1].split("\n## Phase 5:", 1)[0]
+        self.assertIn("count-drift probe", phase4)
+        self.assertIn(".docs.counts_script", phase4)
+        issue = fleet.resolve(self.cache, "issue-creation").read_text()
+        for skill in (dev, issue):
+            self.assertIn("../_shared/context7-docs-discipline.md", skill)
+        self.assertIn("The rule (MANDATORY)", (shared / "context7-docs-discipline.md").read_text())
+        self.assertIn("record the earlier attempts and return the decision to the maintainer",
+                      (shared / "lifecycle-agent-dispatch.md").read_text())
+        catalog = (shared / "dispatchable-skills.md").read_text()
+        self.assertIn("Only the entries here can transfer control", catalog)
+        self.assertIn("billed or manual approval attached to the original step remains binding", catalog)
+
     def test_issue_linkage_policy_reaches_direct_and_nested_intake(self):
         entry = fleet.resolve(self.cache, "issue-creation")
         skill = entry.read_text()
@@ -391,6 +445,13 @@ class FleetWorkflowTests(unittest.TestCase):
         self.assertIn("version epic governed by a REST-only rule", skill)
         lifecycle = fleet.resolve(self.cache, "dev-lifecycle").read_text()
         self.assertIn(".epic_linkage.version_epics` is absent or true", lifecycle)
+        feature = lifecycle.split("### Parent-epic linkage check", 1)[1].split("#### Version-epic linkage", 1)[0]
+        self.assertIn("fleet_load_issue_config", feature)
+        self.assertIn("parent tasklist edit first", feature)
+        self.assertIn("REST only as the fallback", feature)
+        self.assertIn("native_rest", feature)
+        self.assertIn("nested new-issue intake independently binds its own target", feature)
+        self.assertNotIn("never a `- [ ] #N` tasklist", feature)
         creation = skill.split("## Phase 7:", 1)[1].split("## Phase 8:", 1)[0]
         self.assertLess(creation.index("separate Phase 7 absorption decision"),
                         creation.index('--method POST "repos/$RC_TRUSTED_REPO/issues"'))
@@ -402,33 +463,63 @@ class FleetWorkflowTests(unittest.TestCase):
 
     def test_create_request_from_preview_files_through_rendered_shell(self):
         entry = fleet.resolve(self.cache, "issue-creation")
-        shell = entry.read_text().split("jq -en --rawfile title", 1)[1].split("\n```", 1)[0]
-        shell = "jq -en --rawfile title" + shell
+        text = entry.read_text()
+        control = 'case "${ISSUE_CREATE_CHOICE:-}" in'
+        shell = control + text.split(control, 1)[1].split("\n```", 1)[0]
+        template = 'cat "$ISSUE_DRAFT/before-rows.md"'
+        prepare = template + text.split(template, 1)[1].split("\n```", 1)[0]
         title = 'Read "design" ($5) [draft]'
         body = "Overview\n\n* Draft body\n"
         (self.tmp / "title.txt").write_text(title + "\n")
-        (self.tmp / "body.md").write_text(body)
+        ending = "\n## Acceptance criteria\n- [ ] Preserve this independent criterion\n"
+        body = body + "## Sub-Issues\n"
+        rows = "- [ ] #8 — Existing child\n"
+        (self.tmp / "before-rows.md").write_text(body)
+        (self.tmp / "child-rows.md").write_text(rows)
+        (self.tmp / "after-rows.md").write_text(ending)
+        shared = self.tmp / "_shared"
+        shared.mkdir()
+        (shared / "repo-config.sh").write_text('fleet_load_issue_config() { [[ "$1" == example/test && "$2" == fixture ]]; }\n')
+        env = {**os.environ, "ISSUE_DRAFT": str(self.tmp), "RC_TRUSTED_REPO": "example/test",
+               "FLEET_SKILLS": str(self.tmp), "FLEET_TARGET_REPO": "example/test", "ISSUE_CONFIG_OID": "fixture"}
+        subprocess.run(["bash", "-c", prepare], env=env, check=True)
         labels = ["type: feature", "area: cli"]
         (self.tmp / "labels.json").write_text(json.dumps(labels))
         # The fake API echoes only file data, just like an issue-creation response.
         fake = """gh() {
+          echo call >> "$ISSUE_DRAFT/calls"
           [[ "$*" == "api --hostname github.com --method POST repos/example/test/issues --input $ISSUE_DRAFT/create.json" ]] || return 1
           jq '. + {html_url:"https://github.com/example/test/issues/7", number:7,
                    labels: [.labels[] | {name:.}], milestone: (if .milestone then {number:.milestone} else null end)}' "$ISSUE_DRAFT/create.json"
         }
 """
-        env = {**os.environ, "ISSUE_DRAFT": str(self.tmp), "RC_TRUSTED_REPO": "example/test"}
-        for number in ("", "23"):
-            with self.subTest(number=number):
-                result = subprocess.run(["bash", "-c", fake + shell], env={**env, "MILESTONE_NUMBER": number},
+        for mode, number in (("create", ""), ("absorb", "23"), ("parent-only", "23")):
+            with self.subTest(mode=mode):
+                path = self.tmp / ("parent-only.md" if mode == "parent-only" else "body.md")
+                oid = subprocess.check_output(["git", "hash-object", "--no-filters", "--", path], text=True).strip()
+                approved = {**env, "MILESTONE_NUMBER": number, "ISSUE_CREATE_CHOICE": mode, "APPROVED_BODY_OID": oid}
+                log = self.tmp / "calls"
+                log.unlink(missing_ok=True)
+                result = subprocess.run(["bash", "-c", fake + shell], env=approved,
                                         capture_output=True, text=True, check=True)
+                self.assertEqual(log.read_text().splitlines(), ["call"])
                 self.assertEqual(json.loads(result.stdout), {"url": "https://github.com/example/test/issues/7",
                                  "number": 7, "metadata_matches": True})
                 request = json.loads((self.tmp / "create.json").read_bytes())
-                self.assertEqual(request, {"title": title, "body": body, "labels": labels,
-                                           **({"milestone": int(number)} if number else {})})
+                self.assertEqual(request, {"title": title, "body": body + ("" if mode == "parent-only" else rows) + ending,
+                                           "labels": labels, **({"milestone": int(number)} if number else {})})
+        log.unlink()
+        for mode in ("cancel", "missing-decision"):
+            result = subprocess.run(["bash", "-c", fake + shell], env={**env, "ISSUE_CREATE_CHOICE": mode},
+                                    capture_output=True)
+            self.assertEqual(result.returncode == 0, mode == "cancel")
+            self.assertFalse(log.exists())
+        result = subprocess.run(["bash", "-c", fake + shell], env={**approved, "APPROVED_BODY_OID": "changed"},
+                                capture_output=True)
+        self.assertIn(b"Selected preview changed", result.stderr)
+        self.assertFalse(log.exists())
         (self.tmp / "title.txt").write_text("first\nsecond")
-        result = subprocess.run(["bash", "-c", fake + shell], env=env, capture_output=True)
+        result = subprocess.run(["bash", "-c", fake + shell], env=approved, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(b"Invalid issue draft", result.stderr)
 

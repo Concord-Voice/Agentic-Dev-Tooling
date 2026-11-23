@@ -7,6 +7,7 @@ import re
 import string
 import subprocess
 import sys
+import unicodedata
 
 OWNER = r"[A-Za-z0-9][A-Za-z0-9_.-]*"
 REPO = r"(?!\.{1,2}[/#])[A-Za-z0-9_.-]+"
@@ -91,7 +92,8 @@ def check_index_spelling(line, following):
         return
     if re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", following.rstrip("\r\n")):
         raise Pending("ambiguous Setext Sub-Issues heading")
-    if ATX_HEADING.match(line) and line.strip() != INDEX_HEADING:
+    # A heading nested under a list or blockquote cannot own a top-level index.
+    if re.match(r"^[ \t>+*0-9.)-]*#{1,6}(?:[ \t]|$)", line) and line.rstrip() != INDEX_HEADING:
         raise Pending("ambiguous Sub-Issues section")
 
 
@@ -109,7 +111,7 @@ def markdown_headings(lines):
             continue
         if re.match(r" {0,3}<(?:/?[A-Za-z]|[!?])", line):
             raise Pending("unrecognized HTML block")
-        if ATX_HEADING.match(line):
+        if line.startswith("#") and ATX_HEADING.match(line):
             headings.append(i)
     if ending is not None:
         raise Pending("unterminated Markdown block")
@@ -157,8 +159,11 @@ def plan_index(body, parent, titles):
         # Escape Markdown punctuation only in the display text. The issue reference stays live.
         escaped = re.sub(f"([{re.escape(string.punctuation)}])", r"\\\1", title)
         existing = seen.get(child)
-        if existing is not None and existing[1] in (title, escaped):
-            continue
+        if existing is not None and existing[1] is not None:
+            if existing[1] in (title, escaped):
+                continue
+            # The suffix may contain an operator annotation as well as an older title.
+            raise Pending("existing child row has additional or outdated text; reconcile manually")
         reference = f"- {owner}/{child_repo}#{number}"
         row = f"{reference} — {escaped}"
         missing[reference] = row
@@ -195,7 +200,8 @@ def verified_titles(parent, urls):
         if child["parent"] != {"url": parent}:
             raise Pending("child relationship is unverified")
         title = child["title"]
-        if not isinstance(title, str) or not title.strip() or len(title.splitlines()) != 1 or not title.isprintable():
+        if (not isinstance(title, str) or not title.strip() or len(title.splitlines()) != 1
+                or any(unicodedata.category(char) in ("Cc", "Cs", "Zl", "Zp") for char in title)):
             raise Pending("child title requires manual review")
         titles[url] = title
     return titles
