@@ -106,7 +106,8 @@ test_base_roster_lookup() (
     git add .claude/repo-config.json &&
         git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm roster &&
         git update-ref refs/remotes/origin/main HEAD || exit 1
-    run "verified base loads its configured reviewer" 1 "$(doc '' '{"author":{"__typename":"User","login":"ci-machine"},"body":"Review complete"}')"
+    mkdir nested && cd nested || exit 1
+    run "configured base roster applies from a subdirectory" 1 "$(doc '' '{"author":{"__typename":"User","login":"ci-machine"},"body":"Review complete"}')"
     [[ "$fail" == 0 ]]
 )
 if test_base_roster_lookup; then pass=$((pass + 3)); else fail=$((fail + 1)); fi

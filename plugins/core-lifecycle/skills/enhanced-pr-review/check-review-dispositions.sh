@@ -340,7 +340,7 @@ elif git rev-parse --git-dir >/dev/null 2>&1; then
     # Only a successful tree lookup can establish that the base has no roster.
     # A shallow clone may be missing the remote base ref or a required Git object.
     if ! base_oid=$(git rev-parse --verify "${BASE_REF}^{commit}") ||
-       ! roster_entry=$(git ls-tree "$base_oid" -- .claude/repo-config.json); then
+       ! roster_entry=$(git ls-tree --full-tree "$base_oid" -- .claude/repo-config.json); then
         echo "STOP: cannot read the reviewer roster tree at ${BASE_REF}." >&2
         exit 2
     fi
