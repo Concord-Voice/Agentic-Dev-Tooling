@@ -155,7 +155,7 @@ def render(source, platform):
     # Keep the skill references at the client's native install path.
     if platform in ("antigravity", "codex"):
         body = body.replace(".claude/skills/", ".agents/skills/")
-    if name != "feedback-analyst":
+    if name not in {"feedback-analyst", "researcher"}:
         body = ("Apply the checkout's own rules and project configuration first. When this "
                 "checkout uses a thin tooling install, follow its root discovery instructions "
                 "to the pinned tooling source for missing generic docs/rules and scripts/repo-config.sh. "
