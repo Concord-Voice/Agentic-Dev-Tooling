@@ -1,7 +1,9 @@
 """Fixed, sandboxed Git evidence queries for a trusted local commit pair."""
 
+import argparse
 from contextlib import ExitStack
 import errno
+import json
 import os
 from pathlib import Path
 import re
@@ -11,6 +13,7 @@ import stat
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 
 
@@ -28,6 +31,9 @@ OPERATIONS = {
              "--submodule=short", BASE, HEAD, "--"),
 }
 MAX_OUTPUT = 256 * 1024
+SHALLOW_FILE = "shallow"
+MAX_SHALLOW_BYTES = 1024 * 41
+SHALLOW_NOTICE = "[Shallow checkout. Earlier ancestry may be unavailable.]\n"
 TIMEOUT = 10
 MAC_PROFILE = """
 (version 1)
@@ -41,15 +47,20 @@ MAC_PROFILE = """
 """
 
 
-def _metadata(path):
-    # Only trusted checkout administrative pointers and private snapshot metadata.
+def _read_regular(path, limit):
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as stream:
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
             raise ValueError("expected a regular Git metadata file")
-        data = stream.read(4097)
-    if len(data) > 4096:
-        raise ValueError("Git metadata path is too long")
+        data = stream.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("Git metadata exceeds its size limit")
+    return data
+
+
+def _metadata(path):
+    # Only trusted checkout administrative pointers and private snapshot metadata.
+    data = _read_regular(path, 4096)
     result = os.fsdecode(data.removesuffix(b"\n"))
     if not result or any(ord(c) < 32 for c in result):
         raise ValueError("invalid Git metadata path")
@@ -72,11 +83,23 @@ def _object_directory(repository):
     return objects.resolve(strict=True)
 
 
+def _copy_shallow(common, snapshot):
+    try:
+        data = _read_regular(common / SHALLOW_FILE, MAX_SHALLOW_BYTES)
+    except FileNotFoundError:
+        return []
+    boundaries = data.removesuffix(b"\n").split(b"\n")
+    if not all(re.fullmatch(rb"[0-9a-f]{40}", oid) for oid in boundaries):
+        raise ValueError("invalid shallow Git boundary")
+    (snapshot / SHALLOW_FILE).write_bytes(b"\n".join(boundaries) + b"\n")
+    return [oid.decode("ascii") for oid in boundaries]
+
+
 def prepare_snapshot(repository, base, head, snapshot):
     """Create a private bare view; caller owns its new path and its lifetime.
 
-    repository is a trusted local checkout root. Only its object store is made
-    available to Git. No refs, config, hooks, indexes or working files are copied.
+    repository is a trusted local checkout root. Git can read its object store
+    and the two approved refs. Shallow ancestry is preserved in the private view.
     """
     if not all(isinstance(oid, str) and re.fullmatch(r"[0-9a-f]{40}", oid)
                for oid in (base, head)):
@@ -91,7 +114,15 @@ def prepare_snapshot(repository, base, head, snapshot):
         (snapshot / BASE).write_text(base + "\n", encoding="ascii")
         (snapshot / HEAD).write_text(head + "\n", encoding="ascii")
         (snapshot / "object-directory").write_bytes(os.fsencode(objects) + b"\n")
-        Evidence(snapshot).check()
+        boundaries = _copy_shallow(objects.parent, snapshot)
+        reader = Evidence(snapshot)
+        reader.check()
+        if boundaries:
+            # Reject missing objects, blobs and tag IDs named as commit boundaries.
+            commits = reader._git(("rev-list", "--no-walk=unsorted",
+                                   *(oid + "^{commit}" for oid in boundaries), "--"))
+            if set(commits.splitlines()) != set(boundaries):
+                raise ValueError("shallow boundaries must name local commit objects")
     except BaseException:
         shutil.rmtree(snapshot)
         raise
@@ -232,5 +263,40 @@ class Evidence:
             entries = output.split("\n", HISTORY_LIMIT)
             if len(entries) > HISTORY_LIMIT and entries[-1]:
                 entries[-1] = f"[History truncated at {HISTORY_LIMIT} commits.]\n"
-                return "\n".join(entries)
+                output = "\n".join(entries)
+            if (self.snapshot / SHALLOW_FILE).exists():
+                output += SHALLOW_NOTICE
+        if len(output.encode("utf-8")) > MAX_OUTPUT:
+            raise RuntimeError("formatted Git evidence exceeds output limit")
         return output
+
+
+def collect(repository, base, head):
+    """Produce one bounded JSON document or fail before publishing any evidence."""
+    if not repository.is_absolute():
+        raise ValueError("provide an absolute trusted checkout root")
+    with tempfile.TemporaryDirectory(prefix="adt-git-evidence-", dir="/tmp") as directory:
+        snapshot = Path(directory) / "evidence"
+        prepare_snapshot(repository, base, head, snapshot)
+        reader = Evidence(snapshot)
+        evidence = {operation: reader.read(operation) for operation in OPERATIONS}
+    document = json.dumps(evidence, separators=(",", ":"), ensure_ascii=True) + "\n"
+    if len(document) > MAX_OUTPUT:
+        raise ValueError("combined Git evidence exceeds 256 KiB. Choose a narrower commit range")
+    return document
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("--repo", required=True, type=Path)
+    parser.add_argument("--base", required=True)
+    parser.add_argument("--head", required=True)
+    args = parser.parse_args()
+    try:
+        sys.stdout.write(collect(args.repo, args.base, args.head))
+    except (OSError, RuntimeError, ValueError) as error:
+        sys.exit(f"Git evidence unavailable: {error}")
+
+
+if __name__ == "__main__":
+    main()

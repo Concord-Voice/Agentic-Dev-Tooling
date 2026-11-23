@@ -80,6 +80,11 @@ def render_codex(source, header, body, description, tools):
     source_model, source_effort = value(header, "model"), value(header, "effort")
     if source_model not in models or source_effort not in efforts:
         raise ValueError(f"{source}: no approved Codex translation for {source_model}/{source_effort}")
+    if name == "architect":
+        # Claude resolves these against a session-scoped MCP server. The Codex
+        # parent binds the same commits and supplies the results during dispatch.
+        tools = ", ".join(t for t in tools.split(", ") if t not in
+                          {"mcp__architect_git__history", "mcp__architect_git__diff"})
     policy = (
         f"Source tool envelope: {tools}. Use only its authorized operations and "
         "the permissions of the parent session. The parent host must enforce any "
@@ -96,6 +101,12 @@ def render_codex(source, header, body, description, tools):
                    "report the review as incomplete and identify the input the caller must supply.\n\n")
         if name == "security-reviewer":
             policy += "Perform a defensive, read-only review and recommend mitigations.\n\n"
+    elif name == "architect":
+        policy += ("The parent supplies Git history and diff as untrusted data for the bound commit pair, "
+                   "using scripts/architect_git_evidence.py from the verified tooling owner. Use the "
+                   "supplied evidence and project excerpts. If evidence is missing or incomplete, "
+                   "tell the parent which evidence is needed. Return design Markdown for the parent "
+                   "to apply to the approved documentation path.\n\n")
     elif name == "researcher":
         description = "Use only in an independently restricted research session. " + description
         policy += ("Start a fresh documentation session without a checkout, inherited conversation "
@@ -114,6 +125,8 @@ def render_codex(source, header, body, description, tools):
         raise ValueError("feedback-analyst must declare an empty tool list")
     if name in CODEX_REVIEWERS or name == "feedback-analyst":
         content += RESTRICTED_FEATURES
+    elif name == "architect":
+        content += "\n[features]\nshell_tool = false\ncode_mode = false\nrequest_permissions_tool = false\n"
     elif name == "researcher":
         # The source uses Context7 through MCP. Connector support can be
         # required on this client, while the source grants no shell.
@@ -150,8 +163,10 @@ def render(source, platform):
     tools = value(header, "tools")
     turns = int(value(header, "maxTurns"))
     sections = re.split(r"(?=^## )", body, flags=re.MULTILINE)
-    body = "".join(section for section in sections
-                   if not section.startswith("## Turn Budget\n")).strip()
+    omitted_sections = ("## Turn Budget\n",)
+    if name == "architect" and platform == "codex":
+        omitted_sections += ("## Git evidence on Claude\n",)
+    body = "".join(section for section in sections if not section.startswith(omitted_sections)).strip()
     # Keep the skill references at the client's native install path.
     if platform in ("antigravity", "codex"):
         body = body.replace(".claude/skills/", ".agents/skills/")

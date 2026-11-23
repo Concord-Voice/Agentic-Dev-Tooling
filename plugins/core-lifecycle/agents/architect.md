@@ -30,6 +30,8 @@ outputs are supplied to you as context.
 - The issue brief supplied in your task prompt
 - Existing specs/plans under `docs/superpowers/{specs,plans}/` for adjacent work
 
+## Git evidence on Claude
+
 For issue or PR input, the caller launches the verified native architect in a fresh
 evidence session and supplies the relevant project rules, review roster and issue
 brief as data. Request history and changes interactively with `mcp__architect_git__history`

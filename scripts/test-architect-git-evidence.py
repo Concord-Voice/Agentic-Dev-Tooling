@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Run against the real OS sandbox with small, local synthetic Git objects."""
 
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stdout
+import io
+import json
 from pathlib import Path
 import os
 import struct
@@ -92,6 +94,57 @@ class GitEvidenceTests(GitFixtureMixin, unittest.TestCase):
             self.assertNotIn("working copy only", diff)
         self.assertFalse((self.snapshot / "config").exists())
         self.assertEqual(list((self.snapshot / "objects").iterdir()), [])
+
+    def test_shallow_linked_checkout_uses_copied_boundaries(self):
+        # Fetch only the tips of two branches. The intermediate parent of the
+        # newer tip is absent, just as in a depth-one CI checkout.
+        self.git("branch", "older", self.base)
+        self.file.write_text("third\n")
+        self.git("commit", "-qam", "third fixture")
+        self.head = self.git("rev-parse", "HEAD")
+        shallow = self.root / "shallow-clone"
+        self.git("clone", "--no-local", "--depth=1", "--no-single-branch", str(self.repo), str(shallow))
+        self.repo = shallow
+        linked = self.root / "shallow-worktree"
+        self.git("worktree", "add", "--detach", str(linked), self.head)
+        self.repo = linked
+        expected_history = self.git("log", "--format=%H %s", self.base + ".." + self.head)
+        reader = self.prepare()
+        self.assertEqual(reader.read("history"), expected_history + "\n" + evidence.SHALLOW_NOTICE)
+        self.assertIn("-first\n+third\n", reader.read("diff"))
+        private_boundary = self.snapshot / "shallow"
+        self.assertFalse(private_boundary.is_symlink())
+        self.assertEqual(private_boundary.read_bytes(), (shallow / ".git/shallow").read_bytes())
+
+    def test_shallow_boundary_must_be_local_commit(self):
+        (self.repo / ".git/shallow").write_text(self.git("rev-parse", "HEAD:tracked") + "\n")
+        with self.assertRaises((RuntimeError, ValueError)):
+            self.prepare()
+        self.assertFalse(self.snapshot.exists())
+
+    def test_parent_cli_returns_one_document_or_no_evidence(self):
+        command = [sys.executable, "-I", "-S", "-B", evidence.__file__, "--repo",
+                   str(self.repo), "--base", self.base, "--head"]
+        def run(head):
+            return subprocess.run([*command, head], capture_output=True, text=True, timeout=30)
+
+        result = run(self.head)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        record = json.loads(result.stdout)
+        self.assertEqual(set(record), {"history", "diff"})
+        self.assertIn("head fixture", record["history"])
+        self.assertIn("-first\n+second\n", record["diff"])
+        invalid = run("HEAD")
+        self.assertNotEqual(invalid.returncode, 0)
+        self.assertEqual(invalid.stdout, "")
+
+        # Individually valid evidence can exceed the wire budget after JSON escaping.
+        self.file.write_text('"' * 132000 + "\n")
+        self.git("commit", "-qam", "quoted fixture")
+        too_large = run(self.git("rev-parse", "HEAD"))
+        self.assertNotEqual(too_large.returncode, 0)
+        self.assertIn("combined Git evidence", too_large.stderr)
+        self.assertEqual(too_large.stdout, "")
 
     def test_history_distinguishes_exactly_100_from_101_commits(self):
         # fast-import creates the tiny synthetic history in one Git process.
@@ -191,6 +244,38 @@ int main(void) {
 
 
 class BoundaryTests(GitFixtureMixin, unittest.TestCase):
+    def test_collector_validates_checkout_and_holds_both_results_until_success(self):
+        with self.assertRaisesRegex(ValueError, "absolute"):
+            evidence.collect(Path("relative"), self.base, self.head)
+        argv = ["architect_git_evidence.py", "--repo", str(self.repo), "--base", self.base, "--head", self.head]
+        for replies, expected in ((["history", "diff"], {"history": "history", "diff": "diff"}),
+                                  (["history", RuntimeError("diff failed")], None),
+                                  (["history", '"' * 132000], None)):
+            stream = io.StringIO()
+            with (patch.object(sys, "argv", argv), patch.object(evidence, "prepare_snapshot"),
+                  patch.object(evidence, "Evidence") as reader, redirect_stdout(stream)):
+                reader.return_value.read.side_effect = replies
+                if expected is None:
+                    with self.assertRaises(SystemExit):
+                        evidence.main()
+                    self.assertEqual(stream.getvalue(), "")
+                else:
+                    evidence.main()
+                    self.assertEqual(json.loads(stream.getvalue()), expected)
+
+    def test_malformed_or_unreadable_shallow_metadata_refuses_snapshot(self):
+        source = self.repo / ".git/shallow"
+        for content in (b"", b"invalid\n", b"0" * (evidence.MAX_SHALLOW_BYTES + 1)):
+            source.write_bytes(content)
+            with self.assertRaises(ValueError):
+                self.prepare()
+            self.assertFalse(self.snapshot.exists())
+        source.unlink()
+        source.symlink_to(self.root / "absent")
+        with self.assertRaises(OSError):
+            self.prepare()
+        self.assertFalse(self.snapshot.exists())
+
     def test_unavailable_linux_guest_refuses_snapshot(self):
         reason = linux_boundary_unavailable()
         if not reason:
