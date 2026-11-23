@@ -90,7 +90,8 @@ decisions.
 - **Verify third-party APIs with current Context7 documentation.** Use the
    cited documentation returned by the isolated researcher. If a source is
    missing, give the caller the public library name, version and API question
-   for a fresh documentation session. Keep repository evidence in this session.
+   for a fresh documentation session. Leave work that depends on that source
+   pending until the caller supplies the citation. Keep repository evidence here.
 - **Never weaken a security invariant to simplify a design.** If an invariant makes
   the design hard, say the design is hard.
 

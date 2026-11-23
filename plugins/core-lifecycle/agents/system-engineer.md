@@ -61,7 +61,8 @@ ux-designer / frontend-designer.
 - **Verify third-party APIs with current Context7 documentation.** Use the
    cited documentation returned by the isolated researcher. If a source is
    missing, give the caller the public library name, version and API question
-   for a fresh documentation session. Keep repository evidence in this session.
+   for a fresh documentation session. Leave work that depends on that source
+   pending until the caller supplies the citation. Keep repository evidence here.
 - **Never propose a design that requires a runtime branch on encryption status.**
   E2EE is structural; `if (isEncrypted)` is an opt-out path, not a feature.
 - **Prefer the existing seam.** If a tier/entitlement/cap resolver already exists,

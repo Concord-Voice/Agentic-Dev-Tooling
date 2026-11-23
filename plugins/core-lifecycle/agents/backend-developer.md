@@ -47,7 +47,8 @@ Violating one invalidates your work regardless of whether the code is correct:
 3. **Verify third-party APIs with current Context7 documentation.** Use the
    cited documentation returned by the isolated researcher. If a source is
    missing, give the caller the public library name, version and API question
-   for a fresh documentation session. Keep repository evidence in this session.
+   for a fresh documentation session. Leave work that depends on that source
+   pending until the caller supplies the citation. Keep repository evidence here.
 4. **Report honestly.** If tests fail, say so with output. If you skipped a step,
    say that. "Fix applied, awaiting verification" — never "fixed" without evidence.
 
