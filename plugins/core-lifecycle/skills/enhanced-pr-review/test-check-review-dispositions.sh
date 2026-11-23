@@ -681,12 +681,12 @@ esac
 SHIM
     chmod +x "$TMP/gh"
 }
-run_shim() { # run_shim <name> <expected-exit> <fixture> <issue-view-behavior>
+run_shim() { # run_shim <name> <expected-exit> <fixture> <issue-view-behavior> [output-substring]
     local name="$1" want="$2" json="$3"
     gh_shim "$4"
     printf '%s' "$json" > "$TMP/f.json"
     local out; out=$(CV_REVIEW_FIXTURE="$TMP/f.json" PATH="$TMP:$PATH" "$SCRIPT" 999 2>&1); local got=$?
-    if [ "$got" -eq "$want" ]; then printf '  ok   %-52s (exit %d)\n' "$name" "$got"; pass=$((pass+1))
+    if [[ "$got" -eq "$want" && "$out" == *"${5:-}"* ]]; then printf '  ok   %-52s (exit %d)\n' "$name" "$got"; pass=$((pass+1))
     else printf '  FAIL %-52s (want %d, got %d)\n' "$name" "$want" "$got"; printf '%s\n' "$out" | sed 's/^/         | /'; fail=$((fail+1)); fi
 }
 
@@ -706,6 +706,10 @@ run_shim "Assertion 2: transport failure is exit 2, not a false BLOCK" 2 "$DEFER
 # `gh issue view` succeeds on a PR number, so a deferral could name a PR.
 run_shim "Assertion 2: deferred ref is a PR, not an issue -> block" 1 "$DEFER_DOC" \
     'echo "https://github.com/example-org/example-repo/pull/1234"; exit 0'
+
+run_shim "Assertion 2: unexpected URL preserves the diagnostic text" 1 "$DEFER_DOC" \
+    'printf "%s\n" "unexpected   URL [fixture] 100%"' \
+    "resolved to an unexpected URL 'unexpected   URL [fixture] 100%'"
 
 # --- Live-path fail-closed, second stage -------------------------------------
 # The earlier shim fails on the FIRST gh call, so only the repo-resolution guard
