@@ -34,18 +34,17 @@ class NativeIssueIndexTests(unittest.TestCase):
         self.calls = []
         self.parent_of_child = self.parent
 
-    def transport(self, argv, *, input, **options):
+    def transport(self, argv, **options):
         self.assertEqual(argv[:4], ["gh", "api", "--hostname", "github.com"])
         self.assertTrue(options["capture_output"])
+        self.assertEqual(options["stdin"], subprocess.DEVNULL)
         self.calls.append(argv)
         if "graphql" in argv:
             url = argv[-1].removeprefix("url=")
             parent = {"url": self.parent_of_child} if url == self.child and self.parent_of_child else None
             data = {"data": {"resource": {"__typename": "Issue", "url": url, "parent": parent}}}
-        elif "PATCH" in argv:
-            self.assertIn("--silent", argv)
-            self.body = json.loads(input)["body"]
-            return subprocess.CompletedProcess(argv, 0, b"", b"")
+        elif "--method" in argv:
+            self.fail("issue index inspection attempted a write")
         else:
             url = self.parent if "/parent/" in argv[-1] else self.child
             data = {"id": 4000000000, "html_url": url, "body": self.body, "title": "private @group\n#7"}
@@ -63,11 +62,13 @@ class NativeIssueIndexTests(unittest.TestCase):
         with patch.object(index_helper.subprocess, "run", self.transport):
             self.assertEqual(self.run_cli("inspect", self.child),
                              {"url": self.child, "parent": self.parent, "database_id": 4000000000})
-            self.assertEqual(self.run_cli("index", self.parent, self.child), {"status": "updated", "children": 1})
-            self.assertEqual(self.body, self.original.replace("## Sub-Issues\n\n## Criteria",
-                             "## Sub-Issues\n- example/child#2 — private &#64;group &#35;7\n\n## Criteria"))
+            with self.assertRaisesRegex(SystemExit, "^parent index needs maintainer reconciliation$"):
+                self.run_cli("index", self.parent, self.child)
+            self.assertEqual(self.body, self.original)
+            self.body = self.original.replace("## Sub-Issues\n\n## Criteria",
+                             "## Sub-Issues\n- example/child#2 — existing title\n\n## Criteria")
             self.assertEqual(self.run_cli("index", self.parent, self.child)["status"], "current")
-            self.assertEqual(sum("PATCH" in args for args in self.calls), 1)
+            self.assertFalse(any("PATCH" in args for args in self.calls))
 
     def test_unverified_relationship_and_provider_error(self):
         self.parent_of_child = None
@@ -90,8 +91,9 @@ class NativeIssueIndexTests(unittest.TestCase):
                 self.body = old + "concurrent change\n"
             return result
         with patch.object(index_helper.subprocess, "run", concurrent):
-            with self.assertRaisesRegex(SystemExit, "^parent changed before update$"):
+            with self.assertRaisesRegex(SystemExit, "^parent index needs maintainer reconciliation$"):
                 self.run_cli("index", self.parent, self.child)
+        self.assertIn("concurrent change", self.body)
         self.assertFalse(any("PATCH" in args for args in self.calls))
 
     def test_dot_prefixed_repository_names(self):

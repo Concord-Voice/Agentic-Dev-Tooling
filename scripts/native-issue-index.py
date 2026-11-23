@@ -33,10 +33,9 @@ def endpoint(url):
     return f"repos/{owner}/{repo}/issues/{number}"
 
 
-def api(*args, body=None):
-    data = json.dumps(body).encode() if body is not None else b""
+def api(*args):
     result = subprocess.run(["gh", "api", "--hostname", "github.com", *args],
-                            input=data, capture_output=True, timeout=30, check=False)
+                            stdin=subprocess.DEVNULL, capture_output=True, timeout=30, check=False)
     if result.returncode:
         raise Pending("GitHub request failed")
     return json.loads(result.stdout) if result.stdout else None
@@ -198,7 +197,7 @@ def reconcile(body, parent, children):
     return before + newline.join(additions) + newline + "".join(lines[end:])
 
 
-def update_index(parent, urls):
+def check_index(parent, urls):
     owner = identity(parent)[0].lower()
     if not urls or len(set(urls)) != len(urls):
         raise Pending("list distinct approved children")
@@ -212,13 +211,7 @@ def update_index(parent, urls):
     revised = reconcile(body, parent, children)
     if revised == body:
         return {"status": "current", "children": len(children)}
-    latest = issue_text(parent, "body")
-    if latest != body:
-        raise Pending("parent changed before update")
-    api("--method", "PATCH", endpoint(parent), "--input", "-", "--silent", body={"body": revised})
-    if issue_text(parent, "body") != revised:
-        raise Pending("parent changed during update")
-    return {"status": "updated", "children": len(children)}
+    raise Pending("parent index needs maintainer reconciliation")
 
 
 def main():
@@ -230,7 +223,7 @@ def main():
     index.add_argument("children", nargs="+")
     args = parser.parse_args()
     try:
-        record = inspect(args.url) if args.command == "inspect" else update_index(args.parent, args.children)
+        record = inspect(args.url) if args.command == "inspect" else check_index(args.parent, args.children)
         print(json.dumps(record))
     except Pending as exc:
         sys.exit(str(exc))
