@@ -94,6 +94,13 @@ class NativeIssueIndexTests(unittest.TestCase):
                 self.run_cli("index", self.parent, self.child)
         self.assertFalse(any("PATCH" in args for args in self.calls))
 
+    def test_headings_inside_html_comments(self):
+        for end in ("-->", "--!>"):
+            with self.subTest(end=end):
+                lines = ["<!-- comment " + end, "<!-- first", "## hidden", end + " <!-- next",
+                         "## still hidden", end, "## Sub-Issues"]
+                self.assertEqual(index_helper.markdown_headings(lines), [6])
+
     def test_index_sections_and_same_number_across_repos(self):
         children = [(self.child, "T"), (self.parent.replace("/2", "/7"), "Other")]
         row = "- example/child#2 — T"

@@ -10,6 +10,7 @@ PART = r"[A-Za-z0-9][A-Za-z0-9_.-]*"
 NUMBER = r"[1-9][0-9]*"
 URL = re.compile(rf"https://github\.com/({PART})/({PART})/issues/({NUMBER})")
 BULLET = re.compile(rf"- (?:(?P<repo>{PART}/{PART}))?#(?P<number>{NUMBER})(?:\s+—\s+.*)?")
+COMMENT_END = re.compile(r"--!?>")
 META = "query($url:URI!){resource(url:$url){__typename ... on Issue{url parent{url}}}}"
 
 
@@ -88,8 +89,8 @@ def block_ending(line):
     if opening:
         fence = opening[1]
         return re.compile(r"^ {0,3}" + fence[0] + "{" + str(len(fence)) + r",}[ \t]*$")
-    if "<!--" in line and "-->" not in line.split("<!--", 1)[1]:
-        return re.compile("-->")
+    if "<!--" in line and not COMMENT_END.search(line.rsplit("<!--", 1)[1]):
+        return COMMENT_END
     return None
 
 
@@ -99,8 +100,9 @@ def markdown_headings(lines):
     for i, raw in enumerate(lines):
         line = raw.rstrip("\r\n")
         if ending is not None:
-            if ending.search(line):
-                ending = None
+            close = ending.search(line)
+            if close:
+                ending = block_ending(line[close.end():]) if ending is COMMENT_END else None
             continue
         ending = block_ending(line)
         if ending is not None or "<!--" in line:
