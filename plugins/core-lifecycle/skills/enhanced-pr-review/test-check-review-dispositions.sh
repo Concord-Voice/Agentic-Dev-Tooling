@@ -804,6 +804,7 @@ for permission in write read unavailable; do
         write) want=0 ;;
         read) want=1 ;;
         unavailable) want=2 ;;
+        *) echo "Unexpected permission fixture: $permission" >&2; exit 1 ;;
     esac
     if [[ "$permission" == unavailable ]]; then unset TEST_MEMBER_PERMISSION; else export TEST_MEMBER_PERMISSION="$permission"; fi
     run_pages "live permission lookup: $permission" "$want" "[$(tpage false "")]" "$member_pages" "[$(rpage false "")]"
