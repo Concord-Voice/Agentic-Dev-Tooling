@@ -37,7 +37,7 @@ purely signature-shaped:
   registration order relative to window creation
 
 **The mechanism differs from Context7.** Context7 indexes libraries; the web platform is
-not a library. Use **MDN or the relevant W3C/WHATWG spec** via `WebFetch`, and quote the
+not a library. Use **MDN or the relevant W3C/WHATWG spec** from a cited public source supplied by the caller, and quote the
 sentence that carries the guarantee into the plan, the PR body, or the rules file.
 
 > **Founding incident — a late-attached WebRTC frame transform.** A receive-side frame
@@ -78,27 +78,19 @@ calls with zero behavior change. When unsure, fetch — it is cheap.
 
 ## How (Context7 MCP — repo-portable)
 
-Find the configured Context7 MCP server or connector in the current session's tool
-catalog. Load deferred schemas using that client's tool discovery. The two required
-operations are `resolve-library-id` and `query-docs`; some clients use underscores
-and a provider prefix. Match both the provider and the operation and use the
-advertised input schema.
+The caller dispatches a fresh researcher session with only the public library name,
+version and API question. Verify that the host gives the researcher only the two
+Context7 operations, with no checkout, source attachments or inherited conversation.
+Keep repository inspection with the caller.
 
-1. Resolve the dependency by its library name and the specific question.
-2. Pass the returned library ID and the question to the documentation query.
-3. If either operation is missing or fails, record which operation failed and
-   use the calling skill’s documented fallback. Keep that evidence distinct
-   from a successful Context7 lookup.
-
-- Resolve to the **pinned version** when the version list offers it (e.g.
-  `/pmndrs/zustand/v5.0.12`) — match the project's `package.json` / `go.mod` pin.
-- Use a **specific** query ("persist middleware partialize and version migration",
-  not "zustand"). Specific queries return usable snippets.
-- Never put secrets (keys, tokens) in a query.
-- On a Context7 quota error, say so and proceed using the in-repo pattern + the
-  dependency's pinned local types as the fallback basis — but state explicitly that
-  docs were unavailable. (Where the operator has one configured, a machine-local
-  `ctx7` CLI is an equivalent path if the MCP is down.)
+1. In the documentation session, discover the configured Context7 operations
+   `resolve-library-id` and `query-docs`. Use the advertised schemas.
+2. Resolve the library, select its pinned version when available and query the API.
+3. Return the library ID, version and cited documentation URL. Identify gaps or a
+   version mismatch. The caller supplies the citations to the repository-reading
+   roles that need them. If isolation, a lookup or a citation is missing, record
+   the gap and leave the dependent design or implementation pending. Continue
+   independent work.
 
 Record what you fetched: add the resolved library-id + doc URL to the issue's
 `## References` (issue-creation) or note it in the plan / task notes (dev-lifecycle).
@@ -112,7 +104,7 @@ Record what you fetched: add the resolved library-id + doc URL to the issue's
 | "I'll fetch the docs later, before I commit." | "Later" is the deferral that never fires under pressure. Fetch BEFORE you design / write the dependency code. |
 | "I already know this API." | The org rule is explicit: use Context7 *even when you think you know* — your training data may predate the pinned version. |
 | "The library isn't named in the issue." | The trigger is the file surface / API you touch, not the issue's wording. |
-| "Context7 tools aren't loaded." | Discover the two Context7 operations in this client’s tool catalog and load their schemas. |
+| "Context7 tools aren't loaded." | Verify the two documentation tools in the isolated researcher session and record any unavailable lookup. |
 
 ## Red flags — STOP and fetch
 

@@ -61,6 +61,17 @@ assert "npx ctx7" not in researcher["developer_instructions"]
 assert "without a checkout" in researcher["developer_instructions"]
 assert "root discovery instructions" not in researcher["developer_instructions"]
 assert "reads and greps" not in (claude / "researcher.md").read_text()
+for role_name in ("architect", "system-engineer", "backend-developer", "frontend-developer"):
+    native = tomllib.loads((codex / (role_name + ".toml")).read_text())
+    assert "cited documentation returned by the isolated researcher" in native["developer_instructions"]
+    claude_profile = (claude / (role_name + ".md")).read_text()
+    assert "cited documentation returned by the isolated researcher" in claude_profile
+    tools_lines = [line for line in claude_profile.split("---\n", 2)[1].splitlines() if line.startswith("tools: ")]
+    assert len(tools_lines) == 1, f"{role_name} needs an explicit Claude tool list"
+    assert "context7" not in tools_lines[0].lower()
+    assert "context7" not in str(native.get("mcp_servers", {})).lower()
+    for instructions in (claude_profile, native["developer_instructions"]):
+        assert "pending until the caller supplies the citation" in instructions
 profile = (root / "claude/.claude/agents/researcher.md").read_text().split("---\n", 2)[1]
 assert profile.split("tools: ",1)[1].splitlines()[0].split(", ") == ["mcp__context7__resolve-library-id", "mcp__context7__query-docs"]
 assert not researcher["features"]["shell_tool"] and "apps" not in researcher["features"]
