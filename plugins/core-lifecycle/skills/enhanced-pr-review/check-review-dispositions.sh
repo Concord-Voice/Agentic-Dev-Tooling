@@ -445,8 +445,8 @@ if [[ "$ROSTER_JSON" == "[]" ]]; then
 fi
 
 # --- Assertion 1 — thread coverage -------------------------------------------
-# A thread is IN SCOPE if it is unresolved or reviewer-authored (a bot, or a rostered machine account). A human-authored
-# thread can also be settled by its opener or by a verified repository writer.
+# Unresolved threads and threads containing a reviewer comment require a disposition.
+# A human-only thread can also be settled by its opener or by a verified repository writer.
 # Other resolvers need an authorized disposition.
 # A rostered machine USER account is a reviewer too (see `rostered` below), so its
 # resolved threads stay in scope and its own comments never count as a disposition.
@@ -527,7 +527,7 @@ JQ_DECIDER='def decision_author:
 THREAD_ROWS=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" --argjson writers "$writers" "$JQ_ROSTERED$JQ_DECIDER"'
   def reviewer: .author.__typename == "Bot" or rostered(.author.login);
   .data.repository.pullRequest.reviewThreads.nodes[]
-  | select(.isResolved == false or (.comments.nodes[0] | reviewer)
+  | select(.isResolved == false or any(.comments.nodes[]; reviewer)
            or ((.resolvedBy.login // "") as $resolver
                | ($resolver != "" and ($resolver == .comments.nodes[0].author.login
                   or ($writers | index($resolver) != null))) | not))

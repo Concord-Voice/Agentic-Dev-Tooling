@@ -172,6 +172,9 @@ human_resolved=$(doc "$(thread true second "$(human 'review note')")" "$BOT_TOP,
 run "BLOCK: resolved human finding needs a trusted resolver" 1 "$(jq '.fixturePermissions.second="read"' <<< "$human_resolved")"
 run "ok: repository writer resolves a human finding" 0 "$(jq '.fixturePermissions.second="write"' <<< "$human_resolved")"
 
+mixed_comments="$(human 'Initial review note'),$BOT"
+run "BLOCK: reviewer reply on a resolved human thread needs a decision" 1 "$(doc "$(thread true dev "$mixed_comments")" "$RECON")"
+run "ok: disposition covers the reviewer reply" 0 "$(doc "$(thread true dev "$mixed_comments,$(human '<!-- cv-disposition:rejected evidence: reviewed behavior -->')")" "$RECON")"
 bot_resolver=$(doc "$(thread true 'automation[bot]' "$(human 'review note'),$(human '<!-- cv-disposition:rejected evidence: documented behavior -->')")" "$BOT_TOP,$RECON")
 run "ok: a bot resolver keeps the authorized human disposition" 0 "$bot_resolver"
 
