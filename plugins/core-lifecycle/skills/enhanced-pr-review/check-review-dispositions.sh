@@ -457,7 +457,44 @@ JQ_ROSTERED='
             loginmatches($e; $l)
             or ((matchstr($e) != "") and ($l | contains(matchstr($e) | ascii_downcase)))))
          | length) > 0);'
-THREAD_ROWS=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'
+# An organization member can have read-only or triage access to this repository.
+# Look up only members recording a decision, once per login. OWNER is GitHub's
+# repository-owner association. Keep the existing exclusion of outside collaborators.
+# In a fixture, permissions are supplied alongside the simulated API response.
+if ! candidates=$(printf '%s' "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'
+    .data.repository.pullRequest
+    | [.comments.nodes[]?, .reviewThreads.nodes[]?.comments.nodes[]?]
+    | map(select(.author.__typename == "User" and .authorAssociation == "MEMBER")
+          | select(rostered(.author.login) | not)
+          | select(.body | test("<!--\\s*cv-(disposition:|review-reconciliation\\s*-->)"))
+          | .author.login) | unique[]'); then
+    echo "STOP: could not identify review decision authors." >&2
+    exit 2
+fi
+writers='[]'
+while IFS= read -r login; do
+    [[ -n "$login" ]] || continue
+    if [[ ! "$login" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_-]*$ ]]; then
+        echo "STOP: invalid review author login." >&2
+        exit 2
+    fi
+    if [[ -n "${CV_REVIEW_FIXTURE:-}" ]]; then
+        permission=$(printf '%s' "$RAW" | jq -r --arg login "$login" '.fixturePermissions[$login] // "none"') || exit 2
+    elif ! permission=$(gh api "repos/${OWNER}/${REPO}/collaborators/${login}/permission" --jq '.permission'); then
+        echo "STOP: could not verify repository permission for ${login}." >&2
+        exit 2
+    fi
+    case "$permission" in
+        admin|maintain|write) writers=$(jq -cn --argjson list "$writers" --arg login "$login" '$list + [$login]') || exit 2 ;;
+        read|triage|none) ;;
+        *) echo "STOP: unrecognized repository permission for ${login}." >&2; exit 2 ;;
+    esac
+done <<< "$candidates"
+JQ_DECIDER='def decision_author:
+    .author.__typename == "User" and
+    (.authorAssociation == "OWNER" or
+      (.authorAssociation == "MEMBER" and (.author.login as $login | $writers | index($login) != null)));'
+THREAD_ROWS=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" --argjson writers "$writers" "$JQ_ROSTERED$JQ_DECIDER"'
   def reviewer: .author.__typename == "Bot" or rostered(.author.login);
   .data.repository.pullRequest.reviewThreads.nodes[]
   | select(.isResolved == false or (.comments.nodes[0] | reviewer))
@@ -468,16 +505,8 @@ THREAD_ROWS=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"
   # corrected disposition supersedes an earlier one in the same thread.
   | ([$t.comments.nodes[]
       | select(reviewer | not)
-      # Identity class alone is not authorization. Without this, ANY GitHub
-      # account that can comment could clear every finding on a PR. COLLABORATOR
-      # is deliberately NOT accepted: GitHub returns it for read and triage
-      # access, so it would admit someone who cannot push. Repos that genuinely
-      # want an outside collaborator deciding findings should add them to a team
-      # (making them MEMBER) rather than widening this set. Harmless
-      # today (the gate runs from a developer session on a private repo), but
-      # the name "merge gate" invites wiring it into a workflow, and this repo
-      # goes AGPL in 2030 — cheap now, load-bearing later.
-      | select((.authorAssociation // "NONE") | IN("OWNER","MEMBER"))
+      # Use the same verified authority as the reconciliation post.
+      | select(decision_author)
       | .body
       | capture("<!--\\s*cv-disposition:\\s*(?<d>[a-z]+)(?<rest>[^>]*?)-->"; "g")
      ] | last) as $m
@@ -559,17 +588,9 @@ if [[ -n "$THREAD_ROWS" ]]; then
                                 # — `gh issue view` succeeds on a PR number, so
                                 # `deferred evidence: #<some PR>` used to satisfy
                                 # "the issue exists".
-                                # Capture output and status SEPARATELY. The earlier
-                                # `|| ISSUE_URL=""` blanked the message on every failure,
-                                # so "not found" and "the token expired" were the same
-                                # value — and the script then asserted the issue did not
-                                # exist, a fact it had not established, sending the
-                                # developer to file an issue that was already there.
-                                # `|| ISSUE_RC=$?` rather than a bare assignment: under
-                                # `set -e` an assignment from a failing command
-                                # substitution aborts the script before the next line
-                                # runs, so a separate `ISSUE_RC=$?` never executes and
-                                # every transport failure exited 1 instead of 2.
+                                # GitHub can hide an inaccessible issue behind the same
+                                # not-found response as an absent issue. Both require
+                                # verification before a deferral can pass.
                                 ISSUE_RC=0
                                 if [[ -n "$OWNER" ]] && [[ -n "$REPO" ]]; then
                                     ISSUE_OUT=$(gh issue view "$issue" -R "${OWNER}/${REPO}" --json url --jq '.url' 2>&1) || ISSUE_RC=$?
@@ -706,10 +727,10 @@ fi
 # cannot mint its own decision, and a bot-authored reconciliation post would
 # reopen that hole one level up. Codesmith is installed on this repo and posts.
 # A rostered machine USER account is excluded too, exactly as in Assertion 1.
-RECON_COUNT=$(echo "$RAW" | jq --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'[.data.repository.pullRequest.comments.nodes[]?
+RECON_COUNT=$(echo "$RAW" | jq --argjson roster "$ROSTER_JSON" --argjson writers "$writers" "$JQ_ROSTERED$JQ_DECIDER"'[.data.repository.pullRequest.comments.nodes[]?
     | select(.author.__typename != "Bot")
     | select(rostered(.author.login) | not)
-    | select((.authorAssociation // "NONE") | IN("OWNER","MEMBER"))
+    | select(decision_author)
     | select(.body | test("<!--\\s*cv-review-reconciliation\\s*-->"))] | length' 2>/dev/null || echo "JQERR")
 if [[ "$RECON_COUNT" = "JQERR" ]]; then
     echo "STOP: could not read reconciliation posts for #${PR}." >&2
@@ -730,10 +751,10 @@ elif [[ "$RECON_COUNT" -gt 1 ]]; then
     echo "          Phase 3.5 edits its post in place (gh api PATCH); it never re-posts."
     fail=1
 else
-    if ! RECON_BODY=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'.data.repository.pullRequest.comments.nodes[]?
+    if ! RECON_BODY=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" --argjson writers "$writers" "$JQ_ROSTERED$JQ_DECIDER"'.data.repository.pullRequest.comments.nodes[]?
         | select(.author.__typename != "Bot")
         | select(rostered(.author.login) | not)
-        | select((.authorAssociation // "NONE") | IN("OWNER","MEMBER"))
+        | select(decision_author)
         | select(.body | test("<!--\\s*cv-review-reconciliation\\s*-->")) | .body' 2>&1); then
         echo "STOP: could not read the reconciliation post for #${PR}: ${RECON_BODY}" >&2
         exit 2

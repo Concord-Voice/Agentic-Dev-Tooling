@@ -663,8 +663,16 @@ run "BLOCK: a NONE-association commenter cannot clear a finding" 1 \
 run "BLOCK: a NONE-association reconciliation post does not count" 1 \
     "$(doc "" "$(botsay coderabbitai 'summary'),$(outsider '<!-- cv-review-reconciliation -->\n| CodeRabbit |')")"
 
-run "ok: MEMBER association is accepted" 0 \
-    "$(doc "$(thread true 'x[bot]' "$BOT,$(member '<!-- cv-disposition: rejected evidence: .claude/rules/backend.md -->')")" "$BOT_TOP,$RECON")"
+member_fixture="$(doc "$(thread true 'x[bot]' "$BOT,$(member '<!-- cv-disposition: rejected evidence: .claude/rules/backend.md -->')")" "$BOT_TOP,$RECON")"
+for role in read triage none; do
+    run "BLOCK: organization member with $role access" 1 "$(jq --arg role "$role" '.fixturePermissions.teammate=$role' <<< "$member_fixture")"
+done
+for role in write maintain admin; do
+    run "ok: organization member with $role access" 0 "$(jq --arg role "$role" '.fixturePermissions.teammate=$role' <<< "$member_fixture")"
+done
+member_recon="$(doc "" "$(botsay gitar-bot 'summary'),$(member '<!-- cv-review-reconciliation --> Gitar')")"
+run "BLOCK: read-only member reconciliation" 1 "$(jq '.fixturePermissions.teammate="read"' <<< "$member_recon")"
+run "ok: write member reconciliation" 0 "$(jq '.fixturePermissions.teammate="write"' <<< "$member_recon")"
 
 # --- Assertion 2 gets its first real coverage --------------------------------
 # Every other fixture sets CV_SKIP_EXISTENCE_CHECKS=1, so the `gh issue view`
@@ -754,6 +762,10 @@ paginate_shim() {
 #!/bin/bash
 case "$1 $2" in
   "repo view") echo "example-org/example-repo"; exit 0 ;;
+  "api repos/example-org/example-repo/collaborators/teammate/permission")
+    [[ "$3" == "--jq" && "$4" == ".permission" && -n "${TEST_MEMBER_PERMISSION:-}" ]] || exit 1
+    echo "$TEST_MEMBER_PERMISSION"
+    exit 0 ;;
 esac
 q=""
 for a in "$@"; do case "$a" in query=*) q="$a" ;; esac; done
@@ -784,6 +796,19 @@ run_pages() { # run_pages <name> <expected-exit> <threads-array> <comments-array
     if [[ "$got" -eq "$want" ]]; then printf '  ok   %-52s (exit %d)\n' "$name" "$got"; pass=$((pass+1))
     else printf '  FAIL %-52s (want %d, got %d)\n' "$name" "$want" "$got"; printf '%s\n' "$out" | sed 's/^/         | /'; fail=$((fail+1)); fi
 }
+
+# Exercise REST permission lookup from the same live-path API shim as pagination.
+member_pages="[$(cpage false "$(botsay gitar-bot 'summary'),$(member '<!-- cv-review-reconciliation --> Gitar')")]"
+for permission in write read unavailable; do
+    case "$permission" in
+        write) want=0 ;;
+        read) want=1 ;;
+        unavailable) want=2 ;;
+    esac
+    if [[ "$permission" == unavailable ]]; then unset TEST_MEMBER_PERMISSION; else export TEST_MEMBER_PERMISSION="$permission"; fi
+    run_pages "live permission lookup: $permission" "$want" "[$(tpage false "")]" "$member_pages" "[$(rpage false "")]"
+done
+unset TEST_MEMBER_PERMISSION
 
 CLEAN_T="$(thread2 T1 true 'coderabbitai[bot]' "$BOT,$(human '<!-- cv-disposition: accepted evidence: e5c34d0 -->')")"
 NAKED_T="$(thread2 T2 true 'coderabbitai[bot]' "$BOT")"

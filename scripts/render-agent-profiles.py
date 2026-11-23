@@ -98,10 +98,10 @@ def render_codex(source, header, body, description, tools):
             policy += "Perform a defensive, read-only review and recommend mitigations.\n\n"
     elif name == "researcher":
         description = "Use only in an independently restricted research session. " + description
-        policy += ("Check the host's actual MCP and filesystem authority before supplying source "
-                   "material. Use an independently restricted read-only session with only approved "
-                   "Context7 library resolution and documentation queries. If unavailable, report "
-                   "the missing documentation checkpoint before receiving untrusted inputs.\n\n")
+        policy += ("Start a fresh documentation session without a checkout, inherited conversation "
+                   "or repository read tools. Verify that only the two Context7 operations are available "
+                   "before supplying a public package name, version and API question. Report the "
+                   "missing documentation checkpoint when the host cannot isolate that session.\n\n")
     lines = (policy + body).split("\n")
     instructions = "\n".join(quote(line)[1:-1] for line in lines)
     content = (

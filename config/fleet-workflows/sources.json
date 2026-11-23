@@ -50,7 +50,7 @@
     ]
   },
   "enhanced-pr-review/SKILL.md": {
-    "sha256": "9c16da8ac6d0a5ea3fccd966823553cae8cf12c5f46898fc5ae99e4189eff5fd",
+    "sha256": "0e2634508a6f47397eedd705f4da2da2176a538aa0e0a4a413b0e67d8b280675",
     "edits": [
       [3, 3, "description: Reconcile bot and independent defensive reviews, quality signals and thread dispositions on the current PR head."],
       [9, 9, ""],
@@ -72,7 +72,7 @@
     ]
   },
   "enhanced-pr-review/check-review-dispositions.sh": {
-    "sha256": "e8c1e561cb2f23b92ab39322aacd9cee4fda885ec2615e33c79c9d49133ec1fe"
+    "sha256": "00dec5e6b0294ff22420e7e598f38616fe432c5e7c34adc96732d9084de4e902"
   },
   "enhanced-pr-review/review-coverage.sh": {
     "sha256": "dd0b2095316256b93dc6bf222dd5393414bcc3987ee026374dc0971ffd77f2ab",
