@@ -11,7 +11,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 ( cd "$TMP"
   export RC_FILE="$TMP/.claude/repo-config.json"
   source "$HERE/repo-config.sh"
-  [ "$(rc_get "$BRANCH_FILTER" main)" = "main" ] || fail "absent: default not returned"
+  [[ "$(rc_get "$BRANCH_FILTER" main)" == "main" ]] || fail "absent: default not returned"
   rc_has '.project' && fail "absent: rc_has should be false" || true
 )
 
@@ -23,7 +23,7 @@ JSON
 ( cd "$TMP"
   export RC_FILE="$TMP/.claude/repo-config.json"
   source "$HERE/repo-config.sh"
-  [ "$(rc_get "$BRANCH_FILTER" main)" = "trunk" ] || fail "present: value not read"
+  [[ "$(rc_get "$BRANCH_FILTER" main)" == "trunk" ]] || fail "present: value not read"
   [ "$(rc_get '.project.id' NONE)" = "NONE" ] || fail "null section: default not returned"
   [ "$(rc_get '.quality_gate.coverage_min' 0)" = "80" ] || fail "nested: value not read"
   rc_has '.quality_gate' || fail "present: rc_has should be true"
@@ -49,7 +49,7 @@ echo "{ not json" > "$TMP/.claude/repo-config.json"
 ( cd "$TMP"
   export RC_FILE="$TMP/.claude/repo-config.json"
   source "$HERE/repo-config.sh"
-  [ "$(rc_get "$BRANCH_FILTER" main)" = "main" ] || fail "malformed: default not returned"
+  [[ "$(rc_get "$BRANCH_FILTER" main)" == "main" ]] || fail "malformed: default not returned"
 )
 
 for input in '' '  ' '{} {}'; do
