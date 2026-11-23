@@ -125,7 +125,7 @@ def render_codex(source, header, body, description, tools):
         raise ValueError("feedback-analyst must declare an empty tool list")
     if name in CODEX_REVIEWERS or name == "feedback-analyst":
         content += RESTRICTED_FEATURES
-    elif name == "architect":
+    elif name in {"architect", "system-engineer", "docs-writer"}:
         content += "\n[features]\nshell_tool = false\ncode_mode = false\nrequest_permissions_tool = false\n"
     elif name == "researcher":
         # The source uses Context7 through MCP. Connector support can be

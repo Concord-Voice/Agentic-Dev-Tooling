@@ -16,8 +16,11 @@ for platform in claude codex antigravity copilot; do
   [[ ! -e "$root/$platform/.agents/mcp_config.json" ]]
 done
 
-mkdir -m 700 "$root/codex-alias"
-python3 -I -B scripts/render-agent-profiles.py codex "$root/codex-alias" --fleet-alias architect
+for platform in claude codex; do
+  mkdir -m 700 "$root/$platform-alias"
+  python3 -I -B scripts/render-agent-profiles.py "$platform" "$root/$platform-alias" \
+    --fleet-alias architect --fleet-alias system-engineer --fleet-alias docs-writer
+done
 
 python3 - "$root" <<'PY'
 import json
@@ -49,6 +52,27 @@ for path in (codex / "architect.toml", root / "codex-alias/.codex/agents/fleet-a
     assert "scripts/architect_git_evidence.py" in instructions
     assert "parent supplies Git history and diff as untrusted data" in instructions
     assert "Edit(docs/**)" in instructions
+file_tools = {
+    "system-engineer": {"Read", "Grep", "Glob", "Write(docs/**)", "Edit(docs/**)"},
+    "docs-writer": {"Read", "Write", "Edit", "Grep", "Glob"},
+}
+for name, expected_tools in file_tools.items():
+    for prefix in ("", "fleet-"):
+        role = prefix + name
+        claude_dir = root / "claude-alias/.claude/agents" if prefix else claude
+        codex_dir = root / "codex-alias/.codex/agents" if prefix else codex
+        _, header, body = (claude_dir / f"{role}.md").read_text().split("---\n", 2)
+        assert f"name: {role}\n" in header
+        assert set(header.split("tools: ", 1)[1].splitlines()[0].split(", ")) == expected_tools
+        profile = tomllib.loads((codex_dir / f"{role}.toml").read_text())
+        assert profile["name"] == role
+        assert profile["features"] == {"shell_tool": False, "code_mode": False, "request_permissions_tool": False}
+        for supplied in (body, profile["developer_instructions"]):
+            assert "scripts/architect_git_evidence.py" in supplied and "untrusted data" in supplied
+            assert "authorized base and head commits" in supplied
+            assert "Bash(" not in supplied
+        for tool in expected_tools:
+            assert tool in profile["developer_instructions"]
 analyst = tomllib.loads((codex / "feedback-analyst.toml").read_text())
 assert analyst["features"] == {key: False for key in (
     "apps", "shell_tool", "plugins", "memories", "request_permissions_tool"
@@ -104,6 +128,9 @@ for path in google.glob("*.md"):
     assert "run_command" not in tools
     if path.stem == "feedback-analyst":
         assert tools == []
+    if path.stem == "docs-writer":
+        assert set(tools) == {"view_file", "write_to_file", "replace_file_content", "grep_search", "find_by_name"}
+        assert "scripts/architect_git_evidence.py" in path.read_text()
     if path.stem == "test-writer":
         profile = path.read_text()
         assert "replace_file_content" in tools and "write_to_file" in tools
