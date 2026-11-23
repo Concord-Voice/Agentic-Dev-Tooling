@@ -19,8 +19,9 @@ rc_get() (
   printf '%s' "$v"
 )
 
-rc_has() {
+rc_has() (
   command -v jq >/dev/null 2>&1 || return 1
   [ -f "$RC_FILE" ] || return 1
-  jq -e "($1) != null" "$RC_FILE" >/dev/null 2>&1
-}
+  filter="$1"
+  jq -e "($filter) != null" "$RC_FILE" >/dev/null 2>&1
+)
