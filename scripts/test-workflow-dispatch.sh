@@ -77,6 +77,7 @@ for table in (core / "_shared/lifecycle-agent-dispatch.md",
     assert "collector command above" in parent and "untrusted data" in parent
     assert "authorized staging, removals and approved refresh commands" in parent
     assert "current surrounding text even when the two Git commits are identical" in parent
+    assert "tool, credential and delegation restrictions" in parent
 print("PASS: workflow dispatch contracts")
 PY
 
