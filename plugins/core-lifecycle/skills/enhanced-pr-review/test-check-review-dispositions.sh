@@ -762,10 +762,14 @@ paginate_shim() {
 #!/bin/bash
 case "$1 $2" in
   "repo view") echo "example-org/example-repo"; exit 0 ;;
-  "api repos/example-org/example-repo/collaborators/teammate/permission")
-    [[ "$3" == "--jq" && "$4" == ".permission" && -n "${TEST_MEMBER_PERMISSION:-}" ]] || exit 1
-    echo "$TEST_MEMBER_PERMISSION"
-    exit 0 ;;
+  "api --include")
+    [[ "$3" == "repos/example-org/example-repo/collaborators/teammate/permission" && "$4" == "--jq" && "$5" == ".permission" ]] || exit 1
+    case "${TEST_MEMBER_PERMISSION:-}" in
+      absent) printf 'HTTP/2.0 404 Not Found\r\n\r\n{}\n'; exit 1 ;;
+      denied) printf 'HTTP/2.0 403 Forbidden\r\n\r\n{}\n'; exit 1 ;;
+      '') exit 1 ;;
+      *) printf 'HTTP/2.0 200 OK\r\n\r\n%s\n' "$TEST_MEMBER_PERMISSION"; exit 0 ;;
+    esac ;;
 esac
 q=""
 for a in "$@"; do case "$a" in query=*) q="$a" ;; esac; done
@@ -799,16 +803,19 @@ run_pages() { # run_pages <name> <expected-exit> <threads-array> <comments-array
 
 # Exercise REST permission lookup from the same live-path API shim as pagination.
 member_pages="[$(cpage false "$(botsay gitar-bot 'summary'),$(member '<!-- cv-review-reconciliation --> Gitar')")]"
-for permission in write read unavailable; do
+for permission in write read absent denied unavailable; do
     case "$permission" in
         write) want=0 ;;
-        read) want=1 ;;
-        unavailable) want=2 ;;
+        read|absent) want=1 ;;
+        denied|unavailable) want=2 ;;
         *) echo "Unexpected permission fixture: $permission" >&2; exit 1 ;;
     esac
     if [[ "$permission" == unavailable ]]; then unset TEST_MEMBER_PERMISSION; else export TEST_MEMBER_PERMISSION="$permission"; fi
     run_pages "live permission lookup: $permission" "$want" "[$(tpage false "")]" "$member_pages" "[$(rpage false "")]"
 done
+export TEST_MEMBER_PERMISSION=absent
+mixed_pages="[$(cpage false "$BOT_TOP,$RECON,$(member '<!-- cv-review-reconciliation --> Gitar')")]"
+run_pages "a missing member does not invalidate the owner's reconciliation" 0 "[$(tpage false "")]" "$mixed_pages" "[$(rpage false "")]"
 unset TEST_MEMBER_PERMISSION
 
 CLEAN_T="$(thread2 T1 true 'coderabbitai[bot]' "$BOT,$(human '<!-- cv-disposition: accepted evidence: e5c34d0 -->')")"

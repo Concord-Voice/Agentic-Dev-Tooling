@@ -480,9 +480,19 @@ while IFS= read -r login; do
     fi
     if [[ -n "${CV_REVIEW_FIXTURE:-}" ]]; then
         permission=$(printf '%s' "$RAW" | jq -r --arg login "$login" '.fixturePermissions[$login] // "none"') || exit 2
-    elif ! permission=$(gh api "repos/${OWNER}/${REPO}/collaborators/${login}/permission" --jq '.permission'); then
-        echo "STOP: could not verify repository permission for ${login}." >&2
-        exit 2
+    else
+        # Read the HTTP status independently of the service's error body.
+        # A 404 grants this author no authority. Other failures leave the
+        # lookup incomplete and cannot establish a decision.
+        endpoint="repos/${OWNER}/${REPO}/collaborators/${login}/permission"
+        if response=$(gh api --include "$endpoint" --jq '.permission' 2>/dev/null); then
+            permission=${response##*$'\n'}
+        elif [[ "${response%%$'\n'*}" =~ ^HTTP/[0-9.]+[[:space:]]404([[:space:]]|$) ]]; then
+            permission=none
+        else
+            echo "STOP: could not verify repository permission for ${login}." >&2
+            exit 2
+        fi
     fi
     case "$permission" in
         admin|maintain|write) writers=$(jq -cn --argjson list "$writers" --arg login "$login" '$list + [$login]') || exit 2 ;;

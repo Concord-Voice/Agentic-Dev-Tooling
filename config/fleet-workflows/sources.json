@@ -72,7 +72,7 @@
     ]
   },
   "enhanced-pr-review/check-review-dispositions.sh": {
-    "sha256": "00dec5e6b0294ff22420e7e598f38616fe432c5e7c34adc96732d9084de4e902"
+    "sha256": "6fc907712ec69df13681e14467a70a7fc56214521a8a077dff820e1e5dec5cef"
   },
   "enhanced-pr-review/review-coverage.sh": {
     "sha256": "dd0b2095316256b93dc6bf222dd5393414bcc3987ee026374dc0971ffd77f2ab",
