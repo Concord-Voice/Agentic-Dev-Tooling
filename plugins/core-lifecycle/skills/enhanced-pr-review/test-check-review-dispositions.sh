@@ -795,13 +795,20 @@ rpage() { printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"
 paginate_shim() {
     cat > "$TMP/gh" <<'SHIM'
 #!/bin/bash
+canonical_repo=${CV_TEST_CANONICAL_REPO:-example-org/example-repo}
 case "$1 $2" in
-  "repo view") echo "example-org/example-repo"; exit 0 ;;
+  "repo view")
+    if [[ "$*" == "repo view --json nameWithOwner" ]]; then
+      jq -nc --arg repo "$canonical_repo" '{nameWithOwner:$repo}'
+    else
+      echo "$canonical_repo"
+    fi
+    exit 0 ;;
   "pr view")
-    [[ "$*" == "pr view 999 --repo github.com/example-org/example-repo --json baseRefOid,headRefOid" ]] || exit 1
+    [[ "$*" == "pr view 999 --repo github.com/$canonical_repo --json baseRefOid,headRefOid" ]] || exit 1
     cat "$CV_TEST_PAGES/target.json"; exit $? ;;
   "api --include")
-    [[ "$3" == "repos/example-org/example-repo/collaborators/teammate/permission" && "$4" == "--jq" && "$5" == ".permission" ]] || exit 1
+    [[ "$3" == "repos/$canonical_repo/collaborators/teammate/permission" && "$4" == "--jq" && "$5" == ".permission" ]] || exit 1
     case "${TEST_MEMBER_PERMISSION:-}" in
       absent) printf 'HTTP/2.0 404 Not Found\r\n\r\n{}\n'; exit 1 ;;
       denied) printf 'HTTP/2.0 403 Forbidden\r\n\r\n{}\n'; exit 1 ;;
@@ -1108,6 +1115,8 @@ status=$(source_node 102 owner OWNER User "Build finished")
 machine=$(source_node 103 gitar-bot MEMBER User "Automated status")
 bot=$(source_node 104 bot MEMBER Bot "Build result")
 review=$(source_node 105 teammate COLLABORATOR User "The new wording also needs a reference")
+run "human-only comment and review need no separate bot post" 0 \
+    "$(doc '' "$status" | jq --argjson review "$review" '.data.repository.pullRequest.reviews={nodes:[$review]}')"
 fixture_page reviewThreads '[]' > "$TMP/pages/threads.json"
 fixture_page comments "[$writer,$status,$machine,$bot]" > "$TMP/pages/comments.json"
 fixture_page reviews "[$review]" > "$TMP/pages/reviews.json"
@@ -1196,6 +1205,24 @@ installed_compatibility() (
     jq -e '[.[].url | split("#")[1]] == ["issuecomment-101","issuecomment-102","pullrequestreview-105"]' <<<"$output" >/dev/null
     output=$(MODE=--formal-state bash "$TMP/installed.bash")
     jq -e --arg repo "$target" --arg head "$oid" '. == {repository:$repo,pr:"999",head:$head,state:"clear"}' <<<"$output" >/dev/null
+    export CV_TEST_CANONICAL_REPO=Example-Org/Example-Repo
+    local spelling
+    for spelling in example-org/example-repo eXample-Org/Example-rePo; do
+        output=$(TARGET_REPO="$spelling" MODE=--maintainer-sources bash "$TMP/installed.bash")
+        jq -e --arg prefix "https://github.com/$CV_TEST_CANONICAL_REPO/pull/999#" \
+            'length == 3 and all(.[]; .url | startswith($prefix))' <<<"$output" >/dev/null
+        output=$(TARGET_REPO="$spelling" MODE=--formal-state bash "$TMP/installed.bash")
+        jq -e --arg repo "$CV_TEST_CANONICAL_REPO" --arg head "$oid" \
+            '. == {repository:$repo,pr:"999",head:$head,state:"clear"}' <<<"$output" >/dev/null
+    done
+    for mode in --maintainer-sources --formal-state; do
+        for spelling in Other-Org/Example-Repo Example-Org/Other-Repo; do
+            status=0
+            output=$(TARGET_REPO="$spelling" MODE="$mode" bash "$TMP/installed.bash") || status=$?
+            [[ $status == 2 && -z "$output" ]]
+        done
+    done
+    unset CV_TEST_CANONICAL_REPO
     fixture_page comments '[]' > "$TMP/pages/comments.json"
     fixture_page reviews '[]' > "$TMP/pages/reviews.json"
     output=$(MODE=--maintainer-sources bash "$TMP/installed.bash")

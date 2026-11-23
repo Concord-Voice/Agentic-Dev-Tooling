@@ -24,17 +24,20 @@ For an ordinary installation, keep the target base’s one-argument Phase 3.5.3 
   unset CV_REPO_CONFIG CV_REVIEW_FIXTURE CV_SKIP_EXISTENCE_CHECKS CV_BASE_REF CV_DEFAULT_BRANCH GITHUB_BASE_REF BASH_ENV ENV
   result=$(/bin/bash "$gate" "$PR" "$MODE" "$TARGET_REPO" "$REVIEWED_SHA") || exit $?
   jq -ces --arg mode "$MODE" --arg repo "$TARGET_REPO" --arg pr "$PR" --arg head "$REVIEWED_SHA" '
+    def same_repo: type == "string" and ascii_downcase == ($repo | ascii_downcase);
     select(length == 1) | .[0] |
-    if $mode == "--formal-state" then select(. == {state:"clear",repository:$repo,pr:$pr,head:$head})
-    else ("https://github.com/"+$repo+"/pull/"+$pr+"#") as $prefix |
-      select(type == "array" and all(.[];
-        keys == ["updatedAt","url"] and (.url | startswith($prefix) and
-          (ltrimstr($prefix) | test("\\A(issuecomment-|pullrequestreview-)[1-9][0-9]*\\z"))) and
-        (.updatedAt | test("\\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z\\z")))) end' <<<"$result" || exit 2
+    if $mode == "--formal-state" then
+      select((.repository | same_repo) and . == {state:"clear",repository:.repository,pr:$pr,head:$head})
+    else select(type == "array" and all(.[];
+      keys == ["updatedAt","url"] and (.url | split("/") |
+        length == 7 and .[:3] == ["https:","","github.com"] and (.[3:5] | join("/") | same_repo)
+        and .[5] == "pull" and (.[6] | startswith($pr+"#") and
+          (ltrimstr($pr+"#") | test("\\A(issuecomment-|pullrequestreview-)[1-9][0-9]*\\z"))))
+        and (.updatedAt | test("\\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z\\z")))) end' <<<"$result" || exit 2
 )
 ```
 
-Source collection reads the roster from the target PR’s current base commit in Git; that commit must be locally available. Exit 0 requires the source array (possibly `[]`) or the matching clear formal-state receipt. Missing evidence, an incompatible package, or a successful legacy ledger with no such output leaves the supplemental check unknown. The inventory includes nonempty bodies from repository owners and verified writers, excluding bot or rostered machine authors. Scope each source at its link. The resolved state of an inline conversation and the absence of inline findings do not decide a top-level finding.
+Both modes compare repository identities case-insensitively and return GitHub’s canonical spelling. The PR number and head SHA must match exactly. Source collection reads the roster from the target PR’s current base commit in Git; that commit must be locally available. Exit 0 requires the source array (possibly `[]`) or the matching clear formal-state receipt. Missing evidence, an incompatible package, or a successful legacy ledger with no such output leaves the supplemental check unknown. The inventory includes nonempty bodies from repository owners and verified writers, excluding bot or rostered machine authors. Scope each source at its link. The resolved state of an inline conversation and the absence of inline findings do not decide a top-level finding.
 
 During Phase 3/3.5, for **each actionable finding** record its original comment or review URL, the specific concern, a written decision and rationale, and the fix commit or deferral issue when applicable. Use separate decision rows for distinct findings in the same source. A link to an existing written decision covering that finding suffices. If later feedback withdraws or supersedes an earlier concern, link the later decision and close the historical item. Ignore ordinary conversation, acknowledgements, author status updates and reconciliation housekeeping. Authorship by the PR opener alone does not determine whether a comment is actionable. Keep existing bot and inline-marker rules. This manual judgment requires no special human-comment marker. An open or undecided actionable finding holds approval.
 

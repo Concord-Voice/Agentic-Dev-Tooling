@@ -545,8 +545,8 @@ Autofix footprint: <agent display name> — N commits, N thread-resolutions (N v
 Recommended next steps:
 1. Fix all Agreed + valid Bot-only + Subagent-only findings
 2. Review Conflicts and decide
-3. Carry every row to a disposition and record it in its thread (Post-Report)
-4. Post/update the Phase 3.5 reconciliation post, then run the disposition gate from the default branch (§3.5.3)
+3. Record each qualifying inline decision in its thread and link the written decision for each actionable top-level maintainer finding.
+4. Post or update the Phase 3.5 reconciliation when required, then run the disposition gate (§3.5.3).
 ```
 
 If NO bots posted findings (the filter returned an empty array in Phase 1), the report should explicitly call that out — an empty bot-findings section is itself a signal (bots either agree the PR is clean, or they haven't reviewed yet).
@@ -619,17 +619,17 @@ The `/replies` endpoint works for any bot's comment regardless of which GitHub a
 
 ---
 
-## Phase 3.5 — The reconciliation post (REQUIRED when any reviewer spoke, one per PR)
+## Phase 3.5 — Reconcile bot feedback and link maintainer decisions
 
-Record a linked written decision for each actionable maintainer finding per [linked maintainer decisions](references/maintainer-decisions.md). This skill posts its own comment to the PR. It is the single artifact that reconciles **every** review signal — each bot's findings, each specialist subagent's findings, and the decision on each — into one record that lives with the PR rather than in terminal scrollback.
+Record a linked written decision for each actionable maintainer finding per [linked maintainer decisions](references/maintainer-decisions.md). Link the source finding and the written decision together, wherever that decision was recorded. A PR with only human findings needs no separate reconciliation post. When a bot or rostered machine reviewer spoke, publish exactly one Phase 3.5 post covering its feedback and the specialist review results.
 
-**It posts regardless of merge-readiness.** A review whose outcome is "three findings deferred and one still under discussion" needs this record more than a clean one does, not less. This is why the reconciliation post is here and not folded into Phase 6: Phase 6's artifact is gated behind the §6.0 honesty gate and only ever appears on a PR that is *ready*, so a PR that stalls would carry no record of what was decided at all.
+**Record decisions as review progresses.** Publish the required bot reconciliation even when findings are deferred or undecided. Keep specialist decisions in the PR record. Phase 6 publishes the approval artifact only after §6.0 passes.
 
 **Why the summary comments make this mandatory rather than nice-to-have.** Bots post a master comment enumerating their findings and then one inline comment per finding. Top-level conversation comments have no thread and no Resolve affordance — GitHub offers nowhere to record a decision against them — so no per-thread gate can ever reach that surface. PRs are routinely observed with **zero** review threads and several top-level bot comments, where a thread-only gate reports "all threads resolved" over a review surface it never read. The reconciliation post is where those bots get answered.
 
 ### 3.5.1 — Shape
 
-The first line is the marker. The gate checks the reviewer names in the body. Before merging, manually compare the current top-level reviews and comments with the reconciliation post. Update the post for each new or edited finding, including a later report from a reviewer already named.
+The first line of a bot reconciliation post is the marker. Before merging, compare new or edited bot feedback with its entries, and update the existing post. Review new or edited top-level human findings against their own linked decisions.
 
 ```markdown
 <!-- cv-review-reconciliation -->
@@ -663,15 +663,15 @@ The first line is the marker. The gate checks the reviewer names in the body. Be
 
 **Agent names are written bare in this post, never `@`-prefixed** (`red-team`, not `@red-team`): GitHub turns an `@`-prefixed word into a mention of whoever owns that login. The same holds for every disposition reply, review body and issue this skill writes. See § Agent names in GitHub posts in the dispatch table.
 
-Every reviewer that posted anything gets a row in **Reviewers consulted**, including summary-only bots with no findings — that row is what records they were read rather than skipped. Every triage-table row gets a row in **Decisions**, carrying the same `Thread` handle so a reader can walk from the decision to the conversation it answers.
+Give each bot or rostered machine reviewer that posted a row in **Reviewers consulted**, including summary-only bots with no findings. Carry bot and specialist triage decisions into **Decisions** with the applicable thread handle. For an actionable human source, link its written decision wherever it was recorded.
 
-**Required vs. example — what the gate verifies, and what is convention.** Be precise about this, because the two are not the same size. `check-review-dispositions.sh` verifies exactly three things about this post: that exactly one exists, that a repo member (not a bot) authored it, and that every reviewer which spoke on any of the three surfaces — review threads, top-level comments, and PR reviews — is named in it by login or by a roster display-name alias. It does **not** parse the Decisions table, cross-check `Thread` handles, or count rows. The table shape above is the house format a reader relies on; the reviewer-coverage clause is the part with teeth. Do not read "REQUIRED" as "machine-verified in full".
+For a PR with bot feedback, `check-review-dispositions.sh` verifies the presence of exactly one reconciliation post by an authorized non-bot author, covering each bot or rostered reviewer that spoke across threads, comments and PR reviews. The reviewer login or roster display name establishes coverage. Maintainers manually verify the individual decisions and source links.
 
 The `Decision` values are the same four verbs as the thread markers. A row still under discussion is `undecided` and keeps the ledger open; Phase 4 will not pass while the count is non-zero.
 
 ### 3.5.2 — Post once, then edit in place
 
-The gate requires **exactly one** reconciliation post. Re-running the skill after a fix commit updates the existing comment; it never adds a second, so the PR carries one current record rather than a pile of superseded ones.
+When a bot or rostered machine reviewer spoke, the gate requires **exactly one** reconciliation post. Update the existing comment on re-runs. Skip the posting command for human-only findings when their linked written decisions are available.
 
 ```bash
 # --paginate + jq -s: a long PR spreads comments over several pages, and a first-page-only
@@ -700,7 +700,7 @@ Exit 0 means every in-scope thread carries a decision, every deferral names an i
 
 **The gate runs from the default branch, never from this checkout.** A PR can edit the checkout's copy, for example by adding `exit 0` at the top, and a gate the PR controls verifies nothing. So every invocation reads the script from `refs/remotes/origin/HEAD` with `git show` and runs that copy. The full refname matters: a short `origin/main` resolves to a local branch or a fetched tag of that name before the remote-tracking ref, and a PR can supply either, the same trust rule the gate already applies to the roster. A PR that changes the gate is therefore judged by the previous gate, and its own version takes effect after it merges.
 
-**What a green run proves, and what it does not.** It proves the decisions are recorded, addressable, and auditable. It does **not** prove a human made them: `gh` authenticates as the repo owner, so an agent's reply is authored by a `User` and clears the non-bot filter exactly as the developer's would. The gate cannot distinguish them and does not try. What changes is that the reasoning is now written down in one reviewable place instead of living in a terminal scrollback — a developer can read the reconciliation post and audit five decisions in one pass. Human judgment enters at the Phase 8 mode gate (`On-the-Loop` pauses on the triage outcome), not at this check. Never cite a green run as evidence that a person reviewed anything.
+The one-argument gate verifies inline dispositions and bot reconciliation. An account authenticated as a repository writer can post on behalf of an agent, so the recorded author alone cannot establish human review. Verify linked maintainer decisions separately before approval.
 
 ---
 
@@ -948,9 +948,9 @@ Use this exact shape every time, so the approval record is uniform and greppable
 | Bot review threads | ✅ 0 unresolved | |
 | Disposition ledger | ✅ N/N decided | N accepted · N rejected · N deferred · 0 undecided |
 
-**Decisions:** recorded in the [review reconciliation post](<permalink to the Phase 3.5 comment>) — N findings, 0 undecided.
+**Decisions:** <link to the Phase 3.5 post when present and to each actionable maintainer finding’s written decision and source> · N findings · 0 undecided.
 
-The per-finding decisions are NOT restated here. They live in exactly one place, the Phase 3.5 post, which is edited in place as the review progresses; a second copy in this artifact would be a snapshot taken at a different moment and would start disagreeing with the ledger the first time a decision changed.
+For human-only findings, link the existing written decisions directly. When there are no findings, report zero and omit the links.
 
 **Verdict: APPROVED FOR MERGE.** Every merge-gate signal is green and every finding is resolved or properly dispositioned.
 

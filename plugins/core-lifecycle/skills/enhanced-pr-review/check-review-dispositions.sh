@@ -80,12 +80,18 @@ fi
 # diagnostics in these modes; only validated links or a head-bound formal-state receipt leave the collector.
 MODE=${2:-}
 if [[ -n "$MODE" ]]; then
-    [[ $# == 4 && "$PR" =~ ^[1-9][0-9]*$ && "$3" =~ ^[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+$ && "$4" =~ ^[0-9a-f]{40}$ ]] || exit 2
+    requested=${3:-}
+    EXPECTED_HEAD=${4:-}
+    [[ $# == 4 && "$PR" =~ ^[1-9][0-9]*$ && "$requested" =~ ^[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+$ && "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]] || exit 2
     case "$MODE" in --maintainer-sources|--formal-state) ;; *) exit 2 ;; esac
     exec 2>/dev/null
-    export GH_HOST=github.com GH_REPO="github.com/$3"
-    TARGET=$3
-    EXPECTED_HEAD=$4
+    export GH_HOST=github.com GH_REPO="github.com/$requested"
+    # GitHub repository identity is case-insensitive. Retain its canonical
+    # spelling for every query, source URL and formal-state receipt.
+    TARGET=$(gh repo view --json nameWithOwner |
+        jq -er --arg requested "$requested" '.nameWithOwner |
+          select(type == "string" and ascii_downcase == ($requested | ascii_downcase))') || exit 2
+    export GH_REPO="github.com/$TARGET"
     # These operations always obtain live state. Fixture tests supply an offline gh.
     unset CV_REVIEW_FIXTURE CV_SKIP_EXISTENCE_CHECKS
 elif [[ $# != 1 ]]; then
@@ -146,12 +152,13 @@ else
     # with gh's own code (1), which the caller reads as "blocking violations
     # found" when the truth is "the check could not run". Fail-closed means exit
     # 2 — UNKNOWN — not a 1 that sends the developer hunting a list that is empty.
-    if ! OWNER_REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>&1); then
+    if [[ "$MODE" == --maintainer-sources ]]; then
+        OWNER_REPO=$TARGET
+    elif ! OWNER_REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>&1); then
         echo "STOP: could not resolve the repository: ${OWNER_REPO}" >&2
         echo "      Cannot determine the review surface. Treat as UNKNOWN, not clean." >&2
         exit 2
     fi
-    if [[ "$MODE" == --maintainer-sources && "$OWNER_REPO" != "$TARGET" ]]; then exit 2; fi
     OWNER="${OWNER_REPO%%/*}"
     REPO="${OWNER_REPO##*/}"
 

@@ -126,4 +126,12 @@ unset FIXTURE_GATE_RESULT
 code=0
 fleet_check_dispositions 12 acme/example --formal-state 1111111111111111111111111111111111111111 || code=$?
 [[ "$code" == 1 ]]
+# Changing the casing of the bound target must preserve its expected revision.
+RC_TRUSTED_REPO=AcMe/ExAmPlE
+RC_TRUSTED_OID=5555555555555555555555555555555555555555
+for mode in --maintainer-sources --formal-state; do
+  code=0
+  receipt=$(fleet_check_dispositions 12 acme/example "$mode" "$id") || code=$?
+  [[ $code == 2 && -z "$receipt" ]]
+done
 printf '%s\n' 'Fleet configuration and disposition fixtures passed.'

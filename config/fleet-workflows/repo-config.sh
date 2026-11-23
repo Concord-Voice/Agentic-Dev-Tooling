@@ -104,7 +104,10 @@ fleet_check_dispositions() (
   if [[ -z "$repo" ]]; then
     repo=$(unset GH_REPO; gh repo view --json nameWithOwner --jq .nameWithOwner) || return 2
   fi
-  if [[ "${RC_TRUSTED_REPO:-}" == "$repo" ]]; then expected=${RC_TRUSTED_OID:-}; fi
+  if jq -ne --arg cached "${RC_TRUSTED_REPO:-}" --arg repo "$repo" \
+      '($cached | ascii_downcase) == ($repo | ascii_downcase)' >/dev/null; then
+    expected=${RC_TRUSTED_OID:-}
+  fi
   fleet_load_repo_config "$repo" "$expected" >/dev/null 2>&1 || return 2
   [[ "${BASH_SOURCE[0]}" == /* ]] || return 2
   dir=$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P) || return 2

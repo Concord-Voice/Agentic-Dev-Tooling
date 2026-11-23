@@ -2753,7 +2753,7 @@ leads to the re-summon path.
 
 **This does not change the decision table above.** The monitor only decides *when this session wakes*; the ARRIVED / MISSING / EXHAUSTED / timeout semantics, the one re-summon, and the STOP-and-flag are unchanged. An `ARRIVED:` line is an invitation to re-read the bot's actual output, never a substitute for reading it — a bot can arrive with findings, and this line says nothing about which.
 
-**Optional ≠ ignorable.** An optional bot that posts findings at any point before merge is reconciled exactly like a required one — the Phase-9 §6.0 honesty gate still requires a recorded decision on every conversation from *any* reviewer, and a row in the reconciliation post for every reviewer that spoke.
+**Optional ≠ ignorable.** An optional bot that posts findings at any point before merge is reconciled exactly like a required one — the Phase-9 §6.0 honesty gate still requires a recorded decision on every actionable finding, and a row in the bot reconciliation for every bot or rostered machine reviewer that spoke.
 
 **STOP message format:**
 
@@ -2846,11 +2846,11 @@ Apply fixes and record a disposition on every thread? [yes / review each / skip]
 
 Applying fixes and deciding findings are different acts, and only the first one leaves a trace by default. A fix commit records *that* code changed; nothing in the commit says which reviewer's comment it answers, and a finding that was correctly dismissed leaves no artifact at all. The result is a PR whose conversations are closed but whose decisions are unrecoverable — the reviewer cannot tell whether their finding was fixed, rejected on merit, or simply lost.
 
-So Phase 8's exit condition is the **disposition ledger** defined in [`/enhanced-pr-review` Post-Report](../enhanced-pr-review/SKILL.md): every in-scope review conversation carries one reply with the reasoning plus a `cv-disposition` marker (`accepted` / `rejected` / `deferred` / `undecided`), authored by an `OWNER`/`MEMBER`, and every triage row carries the `Thread` handle that ties it to the conversation it answers. Bot reviewers post a summary comment and then one comment per finding, so both surfaces need answering — the per-finding threads through their markers, the summary comments through the Phase 3.5 reconciliation post.
+So Phase 8's exit condition is the **disposition ledger** defined in [`/enhanced-pr-review` Post-Report](../enhanced-pr-review/SKILL.md): every qualifying inline review thread carries one reply with the reasoning plus a `cv-disposition` marker (`accepted` / `rejected` / `deferred` / `undecided`), authored by an `OWNER`/`MEMBER`, and every triage row carries the `Thread` handle that ties it to the conversation it answers. Bot reviewers post a summary comment and then one comment per finding, so both surfaces need answering — the per-finding threads through their markers, the summary comments through the Phase 3.5 reconciliation post.
 
 Three things follow, and none is optional:
 
-1. **`/enhanced-pr-review` posts its Phase 3.5 reconciliation post to the PR** — one comment, edited in place on re-runs, reconciling every bot's findings, every specialist subagent's findings, and the developer's decision on each. It posts whether or not the PR is merge-ready; a stalled review needs the record more than a clean one does.
+1. **When a bot or rostered machine reviewer spoke, `/enhanced-pr-review` publishes its Phase 3.5 post** covering bot and specialist findings and their decisions. Edit this one post in place as review progresses. For human-only findings, link each source and its existing written decision directly. A separate post is optional.
 2. **A `deferred` decision is not complete until its follow-up issue exists.** The gate calls `gh issue view` and fails closed, and rejects a PR number in an issue's place. If the issue was never filed, the finding is not deferred — it is unaddressed, and routes back to Fix-in-PR. (The *justification* for deferring is unchanged and still passes `/enhanced-pr-review` §2.5.1–§2.5.4.)
 3. **Verify mechanically, not by assertion:**
 
@@ -2860,7 +2860,7 @@ Three things follow, and none is optional:
    if [ -n "$GATE_SH" ]; then bash -c "$GATE_SH" check-review-dispositions "<PR>"; else echo "UNKNOWN: no gate script on $GATE_REF" >&2; (exit 3); fi
    ```
 
-   Exit 0 → the ledger is complete. Exit 1 → the blocking list names each gap. Exit 2 → the check could not run; treat as UNKNOWN and re-run, never as clean. Any other exit (3 when no gate script could be read from the default branch, or a crash) → UNKNOWN, never clean.
+   Exit 0 verifies the qualifying inline dispositions and bot reconciliation. Check linked maintainer decisions separately. Exit 1 → the blocking list names each gap. Exit 2 → the check could not run; treat as UNKNOWN and re-run, never as clean. Any other exit (3 when no gate script could be read from the default branch, or a crash) → UNKNOWN, never clean.
 
 **Who applies the fix.** Routine findings are applied inline or by the producer agent owning the surface. Escalate (to the repo's escalation agent, or to the developer when none is defined) under the same E1-E4 criteria Phase 3 uses ([`lifecycle-agent-dispatch.md`](../_shared/lifecycle-agent-dispatch.md) § Escalation) — in practice at Phase 8 that means a finding from `@red-team` or a security domain reviewer on the surface it reviews (E2), a finding whose fix spans both surfaces (E3), or a finding that has already survived two fix commits (E4). Record the escalation and its criterion in the Phase-8 dispatch line. A reviewer's own pin is untouched by this — escalation governs fix application only.
 
@@ -2946,7 +2946,7 @@ if [ -n "$GATE_SH" ]; then bash -c "$GATE_SH" check-review-dispositions "$PR_NUM
 
 Branch on the exit code — and on nothing else:
 
-- **Exit 0** → every in-scope conversation carries a decision, every deferral names an issue that exists, and the Phase 3.5 reconciliation post accounts for every reviewer that spoke. Proceed to Step 9.1.5.
+- **Exit 0** → every qualifying inline thread carries a decision, every deferral names an issue that exists, and the Phase 3.5 reconciliation post accounts for every bot or rostered machine reviewer that spoke. Proceed to Step 9.1.5.
 - **Exit 1** → the blocking list is printed, one line per gap. Threads carrying a disposition but never marked resolved are batch-resolvable per [`/enhanced-pr-review` Step 4.3](../enhanced-pr-review/SKILL.md) (which defers to the same script); everything else needs a decision recorded. Do NOT proceed to Step 9.2. The developer re-invokes `/dev-lifecycle $0` after addressing.
 - **Exit 2** → the check could not be made. This is **UNKNOWN, not clean** — a rate-limited or auth-failed lookup returns no violations, and reading that as a pass is the exact failure the fail-closed exit exists to prevent. Re-run before merging.
 - **Any other exit code** (3 when no gate script could be read from the default branch, 126/127, a crash) → UNKNOWN, never clean. Do NOT proceed to Step 9.2.
