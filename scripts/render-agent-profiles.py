@@ -85,11 +85,15 @@ def render_codex(source, header, body, description, tools):
         "the permissions of the parent session. The parent host must enforce any "
         "required isolation. Report unavailable operations.\n\n"
     )
+    policy += ("The listed source tools describe authorized tasks. Codex enforces the actual "
+               "filesystem and tool permissions configured in the parent session.\n\n")
     if name in CODEX_REVIEWERS:
         description = "Trusted-input role. Untrusted PRs require the independent Codex review worker. " + description
         policy += ("Use scripts/codex-isolated-review.py from the verified tooling owner for "
                    "untrusted PR review. A project child inherits the session's permissions. "
-                   "Before fetching a diff, the caller must verify a separate review session.\n\n")
+                   "Before fetching a diff, the caller must verify a separate review session. "
+                   "This role has no shell. Review the supplied material. If evidence is missing, "
+                   "report the review as incomplete and identify the input the caller must supply.\n\n")
         if name == "security-reviewer":
             policy += "Perform a defensive, read-only review and recommend mitigations.\n\n"
     elif name == "researcher":

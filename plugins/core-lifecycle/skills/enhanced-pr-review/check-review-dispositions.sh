@@ -427,6 +427,10 @@ if [[ -n "$ROSTER_RAW" ]]; then
     fi
 fi
 
+if [[ "$ROSTER_JSON" == "[]" ]]; then
+    printf 'WARNING: no reviewer roster at %s. Only GitHub Bot accounts can be identified automatically.\n' "$ROSTER_SOURCE" >&2
+fi
+
 # --- Assertion 1 — thread coverage -------------------------------------------
 # A thread is IN SCOPE if it is unresolved or reviewer-authored (a bot, or a rostered machine account). A human-authored
 # thread a human already resolved is self-evidently decided; requiring a marker
@@ -579,10 +583,6 @@ if [[ -n "$THREAD_ROWS" ]]; then
                                         fail=1 ;;
                                     0:*)
                                         printf "BLOCKING: deferred to #%s resolved to an unexpected URL '%s' — %s\n" "$issue" "$ISSUE_OUT" "$loc" >&2
-                                        fail=1 ;;
-                                    *"Could not resolve"*|*"not found"*|*"Not Found"*|*"NOT_FOUND"*)
-                                        echo "BLOCKING: deferred to #${issue} but that issue does not exist — ${loc}" >&2
-                                        echo "          A follow-up that was never filed is an accepted finding." >&2
                                         fail=1 ;;
                                     *)  echo "STOP: could not verify issue #${issue} (${loc}): ${ISSUE_OUT}" >&2
                                         echo "      A transport or auth failure is not a missing issue. UNKNOWN, not clean." >&2

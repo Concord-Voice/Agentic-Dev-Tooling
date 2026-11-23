@@ -695,7 +695,7 @@ DEFER_DOC="$(doc "$(thread true 'x[bot]' "$BOT,$(human '<!-- cv-disposition: def
 run_shim "Assertion 2: deferred issue EXISTS -> pass" 0 "$DEFER_DOC" \
     'echo "https://github.com/example-org/example-repo/issues/1234"; exit 0'
 
-run_shim "Assertion 2: deferred issue MISSING -> block" 1 "$DEFER_DOC" \
+run_shim "Assertion 2: absent or inaccessible issue -> unknown" 2 "$DEFER_DOC" \
     'echo "GraphQL: Could not resolve to an Issue" >&2; exit 1'
 
 # A transport/auth failure is NOT a missing issue; conflating them asserts a
