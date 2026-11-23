@@ -94,15 +94,22 @@ def block_ending(line):
     return None
 
 
+def continued_block(ending, line):
+    close = ending.search(line)
+    if not close:
+        return ending
+    if ending is COMMENT_END:
+        return block_ending(line[close.end():])
+    return None
+
+
 def markdown_headings(lines):
     ending = None
     headings = []
     for i, raw in enumerate(lines):
         line = raw.rstrip("\r\n")
         if ending is not None:
-            close = ending.search(line)
-            if close:
-                ending = block_ending(line[close.end():]) if ending is COMMENT_END else None
+            ending = continued_block(ending, line)
             continue
         ending = block_ending(line)
         if ending is not None or "<!--" in line:
