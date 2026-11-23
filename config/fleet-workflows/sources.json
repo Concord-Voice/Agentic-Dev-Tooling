@@ -1,6 +1,6 @@
 {
   "_shared/context7-docs-discipline.md": {
-    "sha256": "742cd202139f1837cada600650945850333e259de532b86c637169032e47bc37"
+    "sha256": "a5fad429e0f51f0baa62b7bd9dcc4f225d6b1b036cfe7b562f4ba8476bd6480f"
   },
   "_shared/model-equivalence.md": {
     "sha256": "a7be94d3ea61a8459c1d92a02c51c09d4472747ae9fbcda5bbb7c5bf4aee1498",
@@ -12,7 +12,7 @@
     "sha256": "ea2ab9aa17d0977815f226553cfb74dd9dda389aa4f895461dee795e900bcf32"
   },
   "dev-lifecycle/SKILL.md": {
-    "sha256": "f48e7406dfd12ca3e282a9fe3a970debc0ccc2ad83f8be4a2172c4d395bd13e8",
+    "sha256": "fb806c8fe3865e3d8757c142e7c81efd601cfc726810083861056a4d73d40dc3",
     "edits": [
       [13, 13, ""],
       [51, 68, "> source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"],
@@ -86,7 +86,7 @@
     "sha256": "d02b11c01188708b5b83922739f5f613150d6e07de4efabdd4c410dcbffc0941"
   },
   "issue-creation/SKILL.md": {
-    "sha256": "572458bb1c862aa8ce9ad514d6259eb24c6a490a43a320b548cfe83f38bc165c",
+    "sha256": "905551124d4ba6d50b533d5a1c4162826a10d6c98ca2feb40e815628d2191b22",
     "edits": [
       [4, 4, "argument-hint: \"[short topic or title sketch] [--force-standalone] [--parent=NUMBER|ISSUE_URL]\""],
       [23, 26, "On direct or nested entry, bind the intake repository via the verified fleet entry contract. Load its default-branch configuration before planning or mutating issues. Record the verified target repository and ISSUE_CONFIG_OID with the intake. In each fresh shell, bind FLEET_TARGET_REPO and ISSUE_CONFIG_OID from that record and repeat the pinned loader shown in Phase 1 before repository operations. Use the returned RC_ISSUE_LINKAGE. A target or revision change requires a fresh preview and approval. When the mode is `native_rest`, read the [native sub-issue procedure](../_shared/native-issue-links.md) before interpreting parent arguments, drafting bodies or previewing links. The default and the explicit `tasklist` setting both use the tasklist procedure."],

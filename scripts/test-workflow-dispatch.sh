@@ -51,5 +51,12 @@ if 'ToolSearch  query: "select:' in context7:
 for operation in ("resolve-library-id", "query-docs"):
     if operation not in context7:
         sys.exit(f"Context7 instructions missing operation {operation}")
+for skill, expected in ((issue, 1), (lifecycle, 2)):
+    steps = [line for line in skill.read_text().splitlines() if line.startswith("**") and "Context7 docs discipline" in line]
+    assert len(steps) == expected
+    for step in steps:
+        assert "dispatch a fresh researcher session" in step and "cit" in step
+        assert "only the public library name, version and API question" in step
+assert "no checkout, source attachments or inherited conversation" in context7
 print("PASS: workflow dispatch contracts")
 PY
