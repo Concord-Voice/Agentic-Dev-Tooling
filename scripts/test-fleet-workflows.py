@@ -158,6 +158,22 @@ class NativeIssueIndexTests(unittest.TestCase):
                              "--confirmed-digest", preview["digest"], self.child)
             self.assertEqual(sum("PATCH" in argv for argv in self.calls), 1)
 
+    def test_append_and_create_index_preserve_unrelated_sections(self):
+        titles = {self.child: "Child"}
+        row = "- example/child#2 — Child"
+        pairs = [
+            ("Context", f"Context\n\n## Sub-Issues\n{row}\n"),
+            ("## Sub-Issues", f"## Sub-Issues\n{row}\n"),
+            ("## Sub-Issues\r\n## Criteria\r\n- [ ] Keep\r\n",
+             f"## Sub-Issues\r\n{row}\r\n\r\n## Criteria\r\n- [ ] Keep\r\n"),
+        ]
+        for body, expected in pairs:
+            with self.subTest(body=body):
+                candidate, rows = index_helper.plan_index(body, self.parent, titles)
+                self.assertEqual(candidate, expected)
+                self.assertEqual(list(rows.values()), [row])
+                self.assertEqual(index_helper.plan_index(candidate, self.parent, titles), (candidate, {}))
+
     def test_dot_prefixed_repository_names(self):
         for repo in (".github", ".dotfiles"):
             url = f"https://github.com/example/{repo}/issues/2"
@@ -372,6 +388,9 @@ class FleetWorkflowTests(unittest.TestCase):
         self.assertIn("replace_parent=true", policy)
         self.assertIn("After every intended child verifies", policy)
         self.assertIn("one plain bullet per child", policy)
+        self.assertIn("version epic governed by a REST-only rule", skill)
+        lifecycle = fleet.resolve(self.cache, "dev-lifecycle").read_text()
+        self.assertIn(".epic_linkage.version_epics` is absent or true", lifecycle)
         creation = skill.split("## Phase 7:", 1)[1].split("## Phase 8:", 1)[0]
         self.assertLess(creation.index("separate Phase 7 absorption decision"),
                         creation.index('--method POST "repos/$RC_TRUSTED_REPO/issues"'))
