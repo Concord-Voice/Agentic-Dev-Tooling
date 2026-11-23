@@ -34,4 +34,4 @@ bash "$ROOT/scripts/test-native-agents.sh"
 "$SYNC_REAL_PYTHON" -m coverage report --include='*/render-agent-profiles.py' --fail-under=80
 "$SYNC_REAL_PYTHON" -m coverage report --include='*/codex-isolated-review.py,*/codex_review_session.py' --fail-under=80
 "$SYNC_REAL_PYTHON" -m coverage report --include='*/resolve-fleet-workflow.py' --fail-under=80
-"$SYNC_REAL_PYTHON" -m coverage xml --quiet --include='*/sync-shared-safe.py,*/render-agent-profiles.py,*/codex-isolated-review.py,*/codex_review_session.py,*/test-codex-isolated-review.py,*/resolve-fleet-workflow.py,*/test-fleet-workflows.py' -o "$OUTPUT"
+"$SYNC_REAL_PYTHON" -m coverage xml --quiet --include='*/sync-shared-safe.py,*/render-agent-profiles.py,*/codex-isolated-review.py,*/codex_review_session.py,*/test-codex-isolated-review.py,*/resolve-fleet-workflow.py,*/native-issue-index.py,*/test-fleet-workflows.py' -o "$OUTPUT"

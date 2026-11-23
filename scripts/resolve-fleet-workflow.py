@@ -47,6 +47,7 @@ def edition():
     files = {Path("skills", path): source_file(path, spec) for path, spec in manifest.items()}
     for name in TABLES:
         files[Path("skills/_shared", name)] = (EDITION / name).read_bytes()
+    files[Path("skills/_shared/native-issue-index.py")] = (ROOT / "scripts/native-issue-index.py").read_bytes()
     digest = hashlib.sha256()
     for path, contents in sorted(files.items()):
         digest.update(str(path).encode() + b"\0" + hashlib.sha256(contents).digest())
