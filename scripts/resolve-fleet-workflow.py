@@ -230,6 +230,8 @@ def main(argv=None):
     parser.add_argument("--profile", type=Path)
     args = parser.parse_args(argv)
     try:
+        if os.name != "posix" or not callable(getattr(os, "getuid", None)):
+            raise ValueError("Run the fleet resolver inside WSL on Windows, with the cache in your Linux home directory.")
         if args.skill:
             if args.cache is None or args.platform or args.profile or args.project:
                 parser.error("--skill takes only --cache")
