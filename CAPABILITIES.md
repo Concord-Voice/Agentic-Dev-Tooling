@@ -35,7 +35,7 @@ On Windows, run the resolver with Linux Python in WSL and keep the cache in your
 
 The resolver accepts the nine core lifecycle skills and weekly-deps. Bundled source hashes in `config/fleet-workflows/sources.json` lock each reviewed source and its line edits together. Re-review the edition when updating those source files. Each complete edition is stored under an owner-controlled cache. The standalone package continues to expose its independently selected workflows.
 
-Fleet issue creation reads `issue_creation.sub_issue_linkage` from the intake repository’s default-branch `.claude/repo-config.json`. An omitted setting or `"tasklist"` uses the existing parent-tasklist workflow. Set it to `"native_rest"` to attach children using GitHub’s sub-issue API and update the parent’s plain-bullet index after all requested links verify. A move between parents requires confirmation for that child. An invalid setting or an unreadable configuration stops intake before any write.
+Fleet issue creation reads `issue_creation.sub_issue_linkage` from the intake repository’s default-branch `.claude/repo-config.json`. An omitted setting or `"tasklist"` uses the existing parent-tasklist workflow. Set it to `"native_rest"` to attach children using GitHub’s sub-issue API and verify the parent’s titled plain-bullet index after all requested links verify. The helper can apply a previewed index once a maintainer confirms exclusive editing of the exact parent body for the update and readback. Otherwise it supplies proposed rows in a private file for manual reconciliation. A move between parents requires confirmation for that child. An invalid setting or an unreadable configuration stops intake before any write.
 
 ## Dispatch and permissions
 

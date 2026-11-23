@@ -25,12 +25,22 @@ Show existing children and their current parents by full URL. Show new issues by
 
 Before any Phase 7 write for a parent absorbing existing issues, show the proposed parent, children and current parents. Offer the choices to proceed, create only the parent, or cancel. Create each approved issue once and run its configured board step. Keep existing child bodies intact. For a verified existing absorbed child, use the isolated collector to check for the existing tracking comment. Return only a validated presence flag. If absent, post the fixed tracking comment with the verified parent URL using a silent request. If presence cannot be verified, leave the comment pending.
 
-After every intended child verifies, run the following command once with the exact approved URLs and the complete child list. The helper verifies every relationship again and checks for one plain bullet per child. All titles and body text stay inside the helper. For missing entries the helper also returns copyable Markdown rows built solely from approved repository names and issue numbers.
+After every intended child verifies, preview the index against the exact approved parent and child URLs. Use a new output filename in an owner-only temporary directory. The helper checks one plain bullet per child against the current title, preserves other body text and identifies missing or outdated entries. Its private Markdown file contains the proposed titled rows for the maintainer. Keep that file out of the write-capable agent’s context. The structured receipt contains only validated identities, status and a digest binding the complete parent body, proposed update and children.
 
 ```bash
-python3 -I -B "${FLEET_SKILLS:?}/_shared/native-issue-index.py" index "$PARENT_URL" "${CHILD_URLS[@]}"
+python3 -I -B "${FLEET_SKILLS:?}/_shared/native-issue-index.py" index \
+  --rows-file "$ISSUE_DRAFT/index-rows.md" "$PARENT_URL" "${CHILD_URLS[@]}"
 ```
 
-The helper reports `current` for a verified index. For missing entries it exits with code 2 and emits a `pending` receipt. Show the maintainer the `missing_rows` for the parent’s `## Sub-Issues` section. An ambiguous section or an unverified relationship returns a diagnostic and leaves reconciliation pending. Record the verified native links separately. GitHub’s issue-update endpoint offers no atomic version check for body edits. Leave any edit to the existing body for maintainer reconciliation. [GitHub conditional requests](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api#use-conditional-requests-if-appropriate)
+A `current` receipt verifies completion. Exit 2 with `pending` means the maintainer can review the titled rows in the private file. Show the exact parent URL, affected children and digest. For cross-repository links, include the destination repository so the maintainer can confirm that the previewed titles may be published there. Ask the maintainer to confirm they have coordinated **exclusive editing of that parent body** with its other human and automated editors for the duration of this one update and its readback. The separate absorption or attachment approval does not establish exclusivity. If exclusivity is unavailable or ends, retain the pending receipt for manual reconciliation. An ambiguous section or unreadable relationship also stays pending.
+
+While that confirmed window is active, apply the confirmed digest to the exact parent once:
+
+```bash
+python3 -I -B "${FLEET_SKILLS:?}/_shared/native-issue-index.py" apply-index \
+  --exclusive-parent "$PARENT_URL" --confirmed-digest "$CONFIRMED_DIGEST" "${CHILD_URLS[@]}"
+```
+
+The helper reads the relationships, titles and body again immediately before writing, refuses a changed preview and sends the body as request data. It verifies the full body, titles and parent relationships after submission, including after an ambiguous result. Report an unverified write as pending. Any further write needs a fresh preview and confirmation. GitHub provides no atomic body-version precondition for the issue update. The exclusive editing window covers the interval between the last read and the write. [Issue updates](https://docs.github.com/en/rest/issues/issues#update-an-issue) · [Conditional requests](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api#use-conditional-requests-if-appropriate)
 
 [GitHub sub-issues REST reference](https://docs.github.com/en/rest/issues/sub-issues)

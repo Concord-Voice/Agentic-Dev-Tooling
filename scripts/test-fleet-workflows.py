@@ -32,18 +32,29 @@ class NativeIssueIndexTests(unittest.TestCase):
     def setUp(self):
         self.body = self.original
         self.calls = []
+        self.title = "existing title"
         self.parent_of_child = self.parent
 
     def transport(self, argv, **options):
-        self.assertEqual(argv, ["gh", "api", "--hostname", "github.com", "graphql", "--input", "-"])
         self.assertTrue(options["capture_output"])
         self.calls.append(argv)
         packet = json.loads(options["input"])
+        if "PATCH" in argv:
+            self.assertEqual(argv, ["gh", "api", "--hostname", "github.com", "--method", "PATCH",
+                                    "repos/example/parent/issues/2", "--input", "-", "--silent"])
+            self.assertEqual(set(packet), {"body"})
+            self.body = packet["body"]
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+        self.assertEqual(argv, ["gh", "api", "--hostname", "github.com", "graphql", "--input", "-"])
         url = packet["variables"]["url"]
         issue = {"__typename": "Issue", "url": url}
         if packet["query"] == index_helper.META:
             issue["fullDatabaseId"] = "4000000000"
             issue["parent"] = {"url": self.parent_of_child} if url == self.child and self.parent_of_child else None
+        elif packet["query"] == index_helper.CHILD:
+            self.assertEqual(url, self.child)
+            issue["title"] = self.title
+            issue["parent"] = {"url": self.parent_of_child} if self.parent_of_child else None
         else:
             self.assertEqual(packet["query"], index_helper.BODY)
             self.assertEqual(url, self.parent)
@@ -69,7 +80,8 @@ class NativeIssueIndexTests(unittest.TestCase):
             self.assertEqual(self.run_cli("inspect", self.child),
                              {"url": self.child, "parent": self.parent, "database_id": 4000000000})
             result = self.run_cli("index", self.parent, self.child, expect_pending=True)
-            self.assertEqual(result, {"status": "pending", "children": 1, "missing_rows": ["- example/child#2"]})
+            self.assertEqual(result["missing_rows"], ["- example/child#2"])
+            self.assertRegex(result["digest"], r"^[a-f0-9]{64}$")
             self.assertEqual(self.body, self.original)
             self.body = self.original.replace("## Sub-Issues\n\n## Criteria",
                              "## Sub-Issues\n- example/child#2 — existing title\n\n## Criteria")
@@ -98,16 +110,60 @@ class NativeIssueIndexTests(unittest.TestCase):
             return result
         with patch.object(index_helper.subprocess, "run", concurrent):
             result = self.run_cli("index", self.parent, self.child, expect_pending=True)
-            self.assertEqual(result, {"status": "pending", "children": 1, "missing_rows": ["- example/child#2"]})
+            self.assertEqual(result["missing_rows"], ["- example/child#2"])
+            self.assertRegex(result["digest"], r"^[a-f0-9]{64}$")
         self.assertIn("concurrent change", self.body)
         self.assertFalse(any("PATCH" in args for args in self.calls))
+
+    def test_confirmed_edit_preserves_body_and_sends_titled_rows_as_data(self):
+        self.title = "private [sample]"
+        old = self.original.replace("## Sub-Issues\n\n## Criteria",
+                                    "## Sub-Issues\n- #77 — Other\n- example/child#2\n\n## Criteria")
+        self.body = old
+        with tempfile.TemporaryDirectory() as draft, patch.object(index_helper.subprocess, "run", self.transport):
+            rows_file = Path(draft) / "rows.md"
+            preview = self.run_cli("index", "--rows-file", str(rows_file), self.parent, self.child, expect_pending=True)
+            row = r"- example/child#2 — private \[sample\]"
+            self.assertEqual(rows_file.read_text(), row + "\n")
+            self.assertEqual(rows_file.stat().st_mode & 0o777, 0o600)
+            result = self.run_cli("apply-index", "--exclusive-parent", self.parent,
+                                  "--confirmed-digest", preview["digest"], self.child)
+            self.assertEqual(result["status"], "current")
+            self.assertEqual(self.body, old.replace("- example/child#2\n", row + "\n"))
+            self.run_cli("index", self.parent, self.child)
+            self.assertEqual(sum("PATCH" in argv for argv in self.calls), 1)
+
+    def test_stale_title_or_body_invalidates_confirmation(self):
+        with patch.object(index_helper.subprocess, "run", self.transport):
+            preview = self.run_cli("index", self.parent, self.child, expect_pending=True)
+            for change in ("title", "body"):
+                with self.subTest(change=change):
+                    self.title = "new" if change == "title" else "existing title"
+                    self.body = self.original if change == "title" else self.original + "new edit"
+                    with self.assertRaisesRegex(SystemExit, "index preview changed"):
+                        self.run_cli("apply-index", "--exclusive-parent", self.parent,
+                                     "--confirmed-digest", preview["digest"], self.child)
+            self.assertFalse(any("PATCH" in argv for argv in self.calls))
+
+    def test_ambiguous_submission_reads_back_without_retry(self):
+        def changed_after_submission(argv, **opts):
+            if "PATCH" in argv:
+                self.calls.append(argv)
+                raise subprocess.TimeoutExpired("gh", 30)
+            return self.transport(argv, **opts)
+        with patch.object(index_helper.subprocess, "run", changed_after_submission):
+            preview = self.run_cli("index", self.parent, self.child, expect_pending=True)
+            with self.assertRaisesRegex(SystemExit, "unverified"):
+                self.run_cli("apply-index", "--exclusive-parent", self.parent,
+                             "--confirmed-digest", preview["digest"], self.child)
+            self.assertEqual(sum("PATCH" in argv for argv in self.calls), 1)
 
     def test_dot_prefixed_repository_names(self):
         for repo in (".github", ".dotfiles"):
             url = f"https://github.com/example/{repo}/issues/2"
             self.assertEqual(index_helper.identity(url), ("example", repo, "2"))
             row = f"- example/{repo}#2"
-            self.assertEqual(index_helper.existing_children([row], "example/root"), {(f"example/{repo}", "2")})
+            self.assertEqual(set(index_helper.existing_children([row], "example/root")), {(f"example/{repo}", "2")})
         for repo in (".", ".."):
             with self.assertRaises(index_helper.Pending):
                 index_helper.identity(f"https://github.com/example/{repo}/issues/2")
@@ -118,7 +174,7 @@ class NativeIssueIndexTests(unittest.TestCase):
         for opener, closer in (("<![CDATA[", "]]>"), ("<?instruction", "?>"), ("<!DECLARATION", ">")):
             body = "\n".join([opener, "## Sub-Issues", "## Other", closer])
             with self.subTest(opener=opener), self.assertRaisesRegex(index_helper.Pending, "HTML"):
-                index_helper.missing_rows(body, self.parent, [self.child])
+                index_helper.plan_index(body, self.parent, {self.child: "Sample"})
 
     def test_headings_inside_html_comments(self):
         for end in ("-->", "--!>"):
@@ -128,15 +184,15 @@ class NativeIssueIndexTests(unittest.TestCase):
                 self.assertEqual(index_helper.markdown_headings(lines), [6])
 
     def test_index_sections_and_same_number_across_repos(self):
-        children = [self.child, self.parent.replace("/2", "/7")]
+        children = {self.child: "Other repo", self.parent.replace("/2", "/7"): "Same repo"}
         current = "## Sub-Issues\r\n- #7 — Same repo\r\n"
-        self.assertEqual(index_helper.missing_rows(current, self.parent, children), ["- example/child#2"])
-        self.assertEqual(index_helper.missing_rows("Context", self.parent, children), ["- example/child#2", "- example/parent#7"])
+        self.assertEqual(list(index_helper.plan_index(current, self.parent, children)[1]), ["- example/child#2"])
+        self.assertEqual(list(index_helper.plan_index("Context", self.parent, children)[1]), ["- example/child#2", "- example/parent#7"])
         for body in ["Sub-Issues\n----------\n- example/child#2", "## Sub-Issues <!-- hidden -->\n- #2",
                      "## Sub-Issues\n### Backend\n- example/child#2", "## Sub-Issues\n## Sub-Issues\n", "## Sub-Issues\n- [ ] #2", "```\n",
                      "<!--private", "<pre>\n## Sub-Issues\n", "## Sub-Issues\n- #7\n- example/parent#7"]:
             with self.subTest(body=body), self.assertRaises(index_helper.Pending):
-                index_helper.missing_rows(body, self.parent, children)
+                index_helper.plan_index(body, self.parent, children)
 
 
 class FleetWorkflowTests(unittest.TestCase):
@@ -318,12 +374,44 @@ class FleetWorkflowTests(unittest.TestCase):
         self.assertIn("one plain bullet per child", policy)
         creation = skill.split("## Phase 7:", 1)[1].split("## Phase 8:", 1)[0]
         self.assertLess(creation.index("separate Phase 7 absorption decision"),
-                        creation.index('gh issue create --repo "$RC_TRUSTED_REPO"'))
+                        creation.index('--method POST "repos/$RC_TRUSTED_REPO/issues"'))
         self.assertIn('${ISSUE_CONFIG_OID:?use the revision recorded at intake}', creation)
         native, tasklist = creation.split("**Tasklist mode only, Steps 3 and 4.**")
         self.assertIn("Run Step 2 for each newly created issue", native)
         self.assertNotIn("gh issue edit PARENT --body-file", native)
         self.assertIn("gh issue edit PARENT --body-file", tasklist)
+
+    def test_create_request_from_preview_files_through_rendered_shell(self):
+        entry = fleet.resolve(self.cache, "issue-creation")
+        shell = entry.read_text().split("jq -en --rawfile title", 1)[1].split("\n```", 1)[0]
+        shell = "jq -en --rawfile title" + shell
+        title = 'Read "design" ($5) [draft]'
+        body = "Overview\n\n* Draft body\n"
+        (self.tmp / "title.txt").write_text(title + "\n")
+        (self.tmp / "body.md").write_text(body)
+        labels = ["type: feature", "area: cli"]
+        (self.tmp / "labels.json").write_text(json.dumps(labels))
+        # The fake API echoes only file data, just like an issue-creation response.
+        fake = """gh() {
+          [[ "$*" == "api --hostname github.com --method POST repos/example/test/issues --input $ISSUE_DRAFT/create.json" ]] || return 1
+          jq '. + {html_url:"https://github.com/example/test/issues/7", number:7,
+                   labels: [.labels[] | {name:.}], milestone: (if .milestone then {number:.milestone} else null end)}' "$ISSUE_DRAFT/create.json"
+        }
+"""
+        env = {**os.environ, "ISSUE_DRAFT": str(self.tmp), "RC_TRUSTED_REPO": "example/test"}
+        for number in ("", "23"):
+            with self.subTest(number=number):
+                result = subprocess.run(["bash", "-c", fake + shell], env={**env, "MILESTONE_NUMBER": number},
+                                        capture_output=True, text=True, check=True)
+                self.assertEqual(json.loads(result.stdout), {"url": "https://github.com/example/test/issues/7",
+                                 "number": 7, "metadata_matches": True})
+                request = json.loads((self.tmp / "create.json").read_bytes())
+                self.assertEqual(request, {"title": title, "body": body, "labels": labels,
+                                           **({"milestone": int(number)} if number else {})})
+        (self.tmp / "title.txt").write_text("first\nsecond")
+        result = subprocess.run(["bash", "-c", fake + shell], env=env, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b"Invalid issue draft", result.stderr)
 
     def test_coverage_uses_exact_default_config(self):
         entry = fleet.resolve(self.cache, "enhanced-pr-review")
