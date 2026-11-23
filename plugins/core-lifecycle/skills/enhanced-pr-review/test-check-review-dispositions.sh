@@ -88,6 +88,31 @@ run_out() {
 
 echo "check-review-dispositions.sh — fixture suite"
 
+# Exercise the real Git lookup separately from the fixture roster override.
+# Clear inherited repository-local variables before creating the throwaway repo.
+test_base_roster_lookup() (
+    unset CV_REPO_CONFIG GITHUB_BASE_REF
+    # shellcheck disable=SC2046
+    unset $(git rev-parse --local-env-vars)
+    export CV_BASE_REF=main
+    git init -q "$TMP/base-lookup" && cd "$TMP/base-lookup" || exit 1
+    git -c user.name=Fixture -c user.email=fixture@example.invalid commit --allow-empty -qm base || exit 1
+    local empty
+    empty=$(doc '' '')
+    run "unavailable base leaves reviewer coverage unknown" 2 "$empty"
+    git update-ref refs/remotes/origin/main HEAD || exit 1
+    run "verified base can omit a roster" 0 "$empty"
+    mkdir .claude && cp "$TMP/repo-config.json" .claude/repo-config.json || exit 1
+    git add .claude/repo-config.json &&
+        git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm roster &&
+        git update-ref refs/remotes/origin/main HEAD || exit 1
+    mkdir nested && cd nested || exit 1
+    run "configured base roster applies from a subdirectory" 1 "$(doc '' '{"author":{"__typename":"User","login":"ci-machine"},"body":"Review complete"}')"
+    [[ "$fail" == 0 ]]
+)
+if test_base_roster_lookup; then pass=$((pass + 3)); else fail=$((fail + 1)); fi
+
+
 # --- Assertion 1: thread coverage -------------------------------------------
 run "clean: bot-resolved thread WITH human disposition" 0 \
     "$(doc "$(thread true 'coderabbitai[bot]' "$BOT,$(human 'Fixed.\n<!-- cv-disposition: accepted evidence: e5c34d0 -->')")" "$BOT_TOP,$RECON")"
@@ -148,6 +173,9 @@ human_resolved=$(doc "$(thread true second "$(human 'review note')")" "$BOT_TOP,
 run "BLOCK: resolved human finding needs a trusted resolver" 1 "$(jq '.fixturePermissions.second="read"' <<< "$human_resolved")"
 run "ok: repository writer resolves a human finding" 0 "$(jq '.fixturePermissions.second="write"' <<< "$human_resolved")"
 
+mixed_comments="$(human 'Initial review note'),$BOT"
+run "BLOCK: reviewer reply on a resolved human thread needs a decision" 1 "$(doc "$(thread true dev "$mixed_comments")" "$RECON")"
+run "ok: disposition covers the reviewer reply" 0 "$(doc "$(thread true dev "$mixed_comments,$(human '<!-- cv-disposition:rejected evidence: reviewed behavior -->')")" "$RECON")"
 bot_resolver=$(doc "$(thread true 'automation[bot]' "$(human 'review note'),$(human '<!-- cv-disposition:rejected evidence: documented behavior -->')")" "$BOT_TOP,$RECON")
 run "ok: a bot resolver keeps the authorized human disposition" 0 "$bot_resolver"
 

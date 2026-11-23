@@ -337,14 +337,27 @@ elif git rev-parse --git-dir >/dev/null 2>&1; then
         BASE_REF=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null) \
             || BASE_REF="refs/remotes/origin/${CV_DEFAULT_BRANCH:-main}"
     fi
-    if ROSTER_RAW=$(git show "${BASE_REF}:.claude/repo-config.json" 2>/dev/null); then
-        ROSTER_SOURCE="${BASE_REF}:.claude/repo-config.json"
-    else
+    # Only a successful tree lookup can establish that the base has no roster.
+    # A shallow clone may be missing the remote base ref or a required Git object.
+    if ! base_oid=$(git rev-parse --verify "${BASE_REF}^{commit}") ||
+       ! roster_entry=$(git ls-tree --full-tree "$base_oid" -- .claude/repo-config.json); then
+        echo "STOP: cannot read the reviewer roster tree at ${BASE_REF}." >&2
+        exit 2
+    fi
+    if [[ -z "$roster_entry" ]]; then
         ROSTER_RAW=''
-        ROSTER_SOURCE="${BASE_REF} (no roster on the base branch)"
+        ROSTER_SOURCE="${base_oid} (no roster on the base branch)"
+    else
+        ROSTER_SOURCE="${base_oid}:.claude/repo-config.json"
+        if [[ "$roster_entry" != "100644 blob "* && "$roster_entry" != "100755 blob "* ]] ||
+           ! ROSTER_RAW=$(git cat-file blob "$ROSTER_SOURCE") || [[ -z "$ROSTER_RAW" ]]; then
+            echo "STOP: cannot read the reviewer roster at ${ROSTER_SOURCE}." >&2
+            exit 2
+        fi
     fi
 else
-    ROSTER_RAW=''
+    echo "STOP: a Git checkout is required to verify the base reviewer roster." >&2
+    exit 2
 fi
 
 if [[ -n "$ROSTER_RAW" ]]; then
@@ -432,8 +445,8 @@ if [[ "$ROSTER_JSON" == "[]" ]]; then
 fi
 
 # --- Assertion 1 — thread coverage -------------------------------------------
-# A thread is IN SCOPE if it is unresolved or reviewer-authored (a bot, or a rostered machine account). A human-authored
-# thread can also be settled by its opener or by a verified repository writer.
+# Unresolved threads and threads containing a reviewer comment require a disposition.
+# A human-only thread can also be settled by its opener or by a verified repository writer.
 # Other resolvers need an authorized disposition.
 # A rostered machine USER account is a reviewer too (see `rostered` below), so its
 # resolved threads stay in scope and its own comments never count as a disposition.
@@ -514,7 +527,7 @@ JQ_DECIDER='def decision_author:
 THREAD_ROWS=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" --argjson writers "$writers" "$JQ_ROSTERED$JQ_DECIDER"'
   def reviewer: .author.__typename == "Bot" or rostered(.author.login);
   .data.repository.pullRequest.reviewThreads.nodes[]
-  | select(.isResolved == false or (.comments.nodes[0] | reviewer)
+  | select(.isResolved == false or any(.comments.nodes[]; reviewer)
            or ((.resolvedBy.login // "") as $resolver
                | ($resolver != "" and ($resolver == .comments.nodes[0].author.login
                   or ($writers | index($resolver) != null))) | not))
