@@ -120,9 +120,11 @@ class NativeIssueIndexTests(unittest.TestCase):
         old = self.original.replace("## Sub-Issues\n\n## Criteria",
                                     "## Sub-Issues\n- #77 — Other\n- example/child#2\n\n## Criteria")
         self.body = old
-        with tempfile.TemporaryDirectory() as draft, patch.object(index_helper.subprocess, "run", self.transport):
-            rows_file = Path(draft) / "rows.md"
-            preview = self.run_cli("index", "--rows-file", str(rows_file), self.parent, self.child, expect_pending=True)
+        with patch.object(index_helper.subprocess, "run", self.transport):
+            preview = self.run_cli("index", "--private-preview", self.parent, self.child, expect_pending=True)
+            rows_file = Path(preview["preview_file"])
+            self.addCleanup(rows_file.unlink)
+            self.assertEqual(rows_file.parent, Path("/tmp"))
             row = r"- example/child#2 — private \[sample\]"
             self.assertEqual(rows_file.read_text(), row + "\n")
             self.assertEqual(rows_file.stat().st_mode & 0o777, 0o600)
@@ -132,6 +134,20 @@ class NativeIssueIndexTests(unittest.TestCase):
             self.assertEqual(self.body, old.replace("- example/child#2\n", row + "\n"))
             self.run_cli("index", self.parent, self.child)
             self.assertEqual(sum("PATCH" in argv for argv in self.calls), 1)
+
+    def test_private_preview_uses_fresh_files_and_rejects_output_paths(self):
+        with patch.object(index_helper.subprocess, "run", self.transport):
+            receipt = self.run_cli("index", self.parent, self.child, expect_pending=True)
+            self.assertNotIn("preview_file", receipt)
+            previews = []
+            for _ in range(2):
+                receipt = self.run_cli("index", "--private-preview", self.parent, self.child, expect_pending=True)
+                path = Path(receipt["preview_file"])
+                self.addCleanup(path.unlink)
+                previews.append(path)
+            self.assertNotEqual(*previews)
+            with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                self.run_cli("index", "--rows-file", str(previews[0]), self.parent, self.child)
 
     def test_stale_title_or_body_invalidates_confirmation(self):
         with patch.object(index_helper.subprocess, "run", self.transport):

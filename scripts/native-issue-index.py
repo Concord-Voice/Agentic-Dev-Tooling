@@ -2,11 +2,11 @@
 import argparse
 import hashlib
 import json
-import os
 import re
 import string
 import subprocess
 import sys
+import tempfile
 import unicodedata
 
 OWNER = r"[A-Za-z0-9][A-Za-z0-9_.-]*"
@@ -144,6 +144,28 @@ def existing_children(lines, repo):
     return seen
 
 
+def append_child_rows(lines, bounds, additions, eol):
+    if not additions:
+        return "".join(lines)
+    end = bounds[1] if bounds else len(lines)
+    prefix = "".join(lines[:end])
+    suffix = "".join(lines[end:])
+    if prefix and not prefix.endswith("\n"):
+        prefix += eol
+    if bounds is None:
+        prefix += (eol if prefix else "") + INDEX_HEADING + eol
+    return prefix + eol.join(additions) + eol + (eol if suffix else "") + suffix
+
+
+def row_is_current(existing, title, escaped):
+    if existing is None or existing[1] is None:
+        return False
+    if existing[1] in (title, escaped):
+        return True
+    # A stale suffix may include operator annotations that must survive editing.
+    raise Pending("existing child row has additional or outdated text; reconcile manually")
+
+
 def plan_index(body, parent, titles):
     repo = "/".join(identity(parent)[:2])
     lines = body.splitlines(keepends=True)
@@ -152,18 +174,14 @@ def plan_index(body, parent, titles):
     seen = existing_children(rows, repo)
     missing = {}
     additions = []
-    eol = "\r\n" if "\r\n" in body else "\n"
     for url, title in titles.items():
         owner, child_repo, number = identity(url)
         child = (f"{owner}/{child_repo}".lower(), number)
         # Escape Markdown punctuation only in the display text. The issue reference stays live.
         escaped = re.sub(f"([{re.escape(string.punctuation)}])", r"\\\1", title)
         existing = seen.get(child)
-        if existing is not None and existing[1] is not None:
-            if existing[1] in (title, escaped):
-                continue
-            # The suffix may contain an operator annotation as well as an older title.
-            raise Pending("existing child row has additional or outdated text; reconcile manually")
+        if row_is_current(existing, title, escaped):
+            continue
         reference = f"- {owner}/{child_repo}#{number}"
         row = f"{reference} — {escaped}"
         missing[reference] = row
@@ -173,18 +191,8 @@ def plan_index(body, parent, titles):
             i = bounds[0] + existing[0]
             original = lines[i]
             lines[i] = row + original[len(original.rstrip("\r\n")):]
-    if additions:
-        end = bounds[1] if bounds else len(lines)
-        prefix = "".join(lines[:end])
-        suffix = "".join(lines[end:])
-        if prefix and not prefix.endswith("\n"):
-            prefix += eol
-        if bounds is None:
-            prefix += (eol if prefix else "") + INDEX_HEADING + eol
-        proposed = prefix + eol.join(additions) + eol + (eol if suffix else "") + suffix
-    else:
-        proposed = "".join(lines)
-    return proposed, missing
+    eol = "\r\n" if "\r\n" in body else "\n"
+    return append_child_rows(lines, bounds, additions, eol), missing
 
 
 def verified_titles(parent, urls):
@@ -207,7 +215,7 @@ def verified_titles(parent, urls):
     return titles
 
 
-def check_index(parent, urls, rows_file=None, confirmed_digest=None):
+def check_index(parent, urls, private_preview=False, confirmed_digest=None):
     titles = verified_titles(parent, urls)
     body = issue_body(parent)
     proposed, rows = plan_index(body, parent, titles)
@@ -230,13 +238,15 @@ def check_index(parent, urls, rows_file=None, confirmed_digest=None):
         if after_titles != titles or issue_body(parent) != proposed:
             raise Pending("index update unverified; reconcile before any further write")
         return {"status": "current", "children": len(urls)}
-    if rows_file is not None:
-        # Exclusive creation protects existing drafts and rejects symlinks.
-        fd = os.open(rows_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as out:
+    receipt = {"status": "pending", "children": len(urls), "missing_rows": list(rows), "digest": digest}
+    if private_preview:
+        # The helper chooses an exclusive, owner-only file. No caller supplies a destination.
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir="/tmp", prefix="fleet-index-",
+                                         suffix=".md", delete=False) as out:
             for row in rows.values():
                 out.write(row + "\n")
-    return {"status": "pending", "children": len(urls), "missing_rows": list(rows), "digest": digest}
+        receipt["preview_file"] = out.name
+    return receipt
 
 
 def main():
@@ -244,7 +254,7 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("inspect").add_argument("url")
     index = sub.add_parser("index")
-    index.add_argument("--rows-file", help="write missing or outdated titled rows to a new private file")
+    index.add_argument("--private-preview", action="store_true", help="create an owner-only file of proposed rows")
     index.add_argument("parent")
     index.add_argument("children", nargs="+")
     apply = sub.add_parser("apply-index", help="apply a preview under a confirmed exclusive editing window")
@@ -256,7 +266,7 @@ def main():
         if args.command == "inspect":
             record = inspect(args.url)
         elif args.command == "index":
-            record = check_index(args.parent, args.children, rows_file=args.rows_file)
+            record = check_index(args.parent, args.children, private_preview=args.private_preview)
         else:
             record = check_index(args.exclusive_parent, args.children, confirmed_digest=args.confirmed_digest)
         print(json.dumps(record))
