@@ -71,6 +71,29 @@ class FleetWorkflowTests(unittest.TestCase):
             self.assertIn("${FLEET_SKILLS:?}", loader.read_text())
             self.assertNotIn("git show \"$RC_OID:scripts/repo-config.sh", loader.read_text())
 
+    def test_issue_linkage_policy_reaches_direct_and_nested_intake(self):
+        entry = fleet.resolve(self.cache, "issue-creation")
+        skill = entry.read_text()
+        shared = entry.parent.parent / "_shared"
+        nested = (shared / "nested-skills.md").read_text()
+        self.assertIn("sibling `../NAME/SKILL.md`", nested)
+        self.assertIn("On direct or nested entry", skill)
+        policy = (shared / "native-issue-links.md").read_text()
+        self.assertIn("(../_shared/native-issue-links.md)", skill)
+        self.assertIn("Validated full parent issue URL in native mode", skill)
+        self.assertIn("database ID", policy)
+        self.assertIn("replace_parent=true", policy)
+        self.assertIn("After every intended child verifies", policy)
+        self.assertIn("one plain bullet per child", policy)
+        creation = skill.split("## Phase 7:", 1)[1].split("## Phase 8:", 1)[0]
+        self.assertLess(creation.index("separate Phase 7 absorption decision"),
+                        creation.index('gh issue create --repo "$RC_TRUSTED_REPO"'))
+        self.assertIn('${ISSUE_CONFIG_OID:?use the revision recorded at intake}', creation)
+        native, tasklist = creation.split("**Tasklist mode only, Steps 3 and 4.**")
+        self.assertIn("Run Step 2 for each newly created issue", native)
+        self.assertNotIn("gh issue edit PARENT --body-file", native)
+        self.assertIn("gh issue edit PARENT --body-file", tasklist)
+
     def test_coverage_uses_exact_default_config(self):
         entry = fleet.resolve(self.cache, "enhanced-pr-review")
         helper = entry.with_name("review-coverage.sh")

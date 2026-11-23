@@ -17,7 +17,7 @@ EDITION = ROOT / "config/fleet-workflows"
 SKILLS = ("ci-status", "dev-lifecycle", "enhanced-pr-review", "issue-brief", "issue-creation",
           "pr-creation", "reproduce-then-fix", "review-pr", "verify-quality-gate", "weekly-deps")
 TABLES = ("dispatchable-skills.md", "lifecycle-agent-dispatch.md", "nested-skills.md",
-          "pr-review-agent-dispatch.md", "repo-config.sh")
+          "pr-review-agent-dispatch.md", "repo-config.sh", "native-issue-links.md")
 
 ENTRY = (
     "\n**Fleet entry.** First read [the workflow and host boundary](../_shared/nested-skills.md). "

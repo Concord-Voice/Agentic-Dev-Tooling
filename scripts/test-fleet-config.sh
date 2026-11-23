@@ -33,7 +33,7 @@ case "$1 $2" in
       *) jq -nc --arg sha "$blob" '{truncated:false,tree:[{path:"repo-config.json",type:"blob",mode:"100644",sha:$sha}]}' ;;
     esac ;;
   "api repos/acme/example/git/blobs/$blob")
-    config='{"value":"default","bots":[]}'
+    if [[ -n "${FIXTURE_CONFIG+x}" ]]; then config="$FIXTURE_CONFIG"; else config='{"value":"default","bots":[]}'; fi
     [[ "${FIXTURE_STATE:-present}" != malformed ]] || config='not JSON'
     jq -nc --arg sha "$blob" --arg config "$config" \
       '{sha:$sha,size:($config|length),encoding:"base64",content:($config|@base64)}' ;;
@@ -70,6 +70,33 @@ fleet_load_repo_config acme/example
 if fleet_load_repo_config acme/example 5555555555555555555555555555555555555555; then exit 1; fi
 [[ -z "${RC_TRUSTED_CFG+x}${RC_TRUSTED_OID+x}" ]]
 unset FIXTURE_STATE
+# Issue intake binds the policy to its specified repository and exact revision.
+export GH_REPO=other/fixture
+fleet_load_issue_config acme/example "$id"
+[[ "$RC_TRUSTED_REPO" == acme/example && "$RC_ISSUE_LINKAGE" == tasklist ]]
+export FIXTURE_CONFIG='{"issue_creation":{"sub_issue_linkage":"native_rest"}}'
+fleet_load_issue_config acme/example "$id"
+[[ "$RC_ISSUE_LINKAGE" == native_rest ]]
+fleet_load_repo_config acme/example "$id"
+[[ -z "${RC_ISSUE_LINKAGE+x}" ]]
+export FIXTURE_CONFIG='{"issue_creation":{"sub_issue_linkage":"tasklist"}}'
+fleet_load_issue_config acme/example "$id"
+[[ "$RC_ISSUE_LINKAGE" == tasklist ]]
+for invalid in 'null' '{}' 'false' '"unknown"'; do
+  FIXTURE_CONFIG="{\"issue_creation\":{\"sub_issue_linkage\":$invalid}}"
+  if fleet_load_issue_config acme/example "$id" 2>/dev/null; then exit 1; fi
+  [[ -z "${RC_TRUSTED_REPO+x}${RC_TRUSTED_CFG+x}${RC_ISSUE_LINKAGE+x}" ]]
+done
+export FIXTURE_CONFIG='{"issue_creation":null}'
+if fleet_load_issue_config acme/example "$id" 2>/dev/null; then exit 1; fi
+export FIXTURE_CONFIG='{"issue_creation":{}}'
+fleet_load_issue_config acme/example "$id"
+[[ "$RC_ISSUE_LINKAGE" == tasklist ]]
+if fleet_load_issue_config other/fixture "$id"; then exit 1; fi
+[[ -z "${RC_TRUSTED_REPO+x}${RC_ISSUE_LINKAGE+x}" ]]
+if fleet_load_issue_config acme/example 5555555555555555555555555555555555555555; then exit 1; fi
+[[ -z "${RC_TRUSTED_REPO+x}${RC_ISSUE_LINKAGE+x}" ]]
+unset FIXTURE_CONFIG
 export GH_REPO=other/fixture CV_REVIEW_FIXTURE=legacy CV_SKIP_EXISTENCE_CHECKS=1
 export CV_REPO_CONFIG=alternate CV_BASE_REF=alternate GITHUB_BASE_REF=alternate CV_DEFAULT_BRANCH=alternate
 for repo_arg in '' acme/example; do

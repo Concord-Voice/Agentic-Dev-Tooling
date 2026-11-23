@@ -31,6 +31,8 @@ When an enrolled Claude or Codex project has an authored role with the same name
 
 The resolver accepts the nine core lifecycle skills and weekly-deps. Bundled source hashes in `config/fleet-workflows/sources.json` lock each reviewed source and its line edits together. Re-review the edition when updating those source files. Each complete edition is stored under an owner-controlled cache. The standalone package continues to expose its independently selected workflows.
 
+Fleet issue creation reads `issue_creation.sub_issue_linkage` from the intake repository’s default-branch `.claude/repo-config.json`. An omitted setting or `"tasklist"` uses the existing parent-tasklist workflow. Set it to `"native_rest"` to attach children using GitHub’s sub-issue API and update the parent’s plain-bullet index after all requested links verify. A move between parents requires confirmation for that child. An invalid setting or an unreadable configuration stops intake before any write.
+
 ## Dispatch and permissions
 
 Use the host's native dispatch operation and the installed role name. For feedback classification, pass the sanitized report payload to `feedback-analyst` in an analysis session provisioned for that data. The Claude profile uses an explicit empty tool list, which Claude Code documents as a tool-free launch. [Claude tool-list behavior](https://code.claude.com/docs/en/errors#agent-would-be-spawned-with-zero-tools)
