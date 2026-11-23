@@ -72,7 +72,8 @@ class NativeIssueIndexTests(unittest.TestCase):
             else:
                 index_helper.main()
         self.assertEqual(err.getvalue(), "")
-        self.assertNotIn("private", out.getvalue())
+        for source_text in ("private text", "private [sample]", r"private \[sample\]", "private body", "private error"):
+            self.assertNotIn(source_text, out.getvalue())
         return json.loads(out.getvalue())
 
     def test_real_cli_boundary_and_retry(self):
@@ -124,7 +125,7 @@ class NativeIssueIndexTests(unittest.TestCase):
             preview = self.run_cli("index", "--private-preview", self.parent, self.child, expect_pending=True)
             rows_file = Path(preview["preview_file"])
             self.addCleanup(rows_file.unlink)
-            self.assertEqual(rows_file.parent, Path("/tmp"))
+            self.assertEqual(rows_file.parent, Path(tempfile.gettempdir()).resolve())
             row = r"- example/child#2 — private \[sample\]"
             self.assertEqual(rows_file.read_text(), row + "\n")
             self.assertEqual(rows_file.stat().st_mode & 0o777, 0o600)
@@ -148,6 +149,55 @@ class NativeIssueIndexTests(unittest.TestCase):
             self.assertNotEqual(*previews)
             with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 self.run_cli("index", "--rows-file", str(previews[0]), self.parent, self.child)
+
+    def test_preview_cleanup_resumes_from_retained_intake_after_temp_directory_changes(self):
+        policy = (fleet.EDITION / "native-issue-links.md").read_text()
+        cleanup = policy.split("### Remove the private preview", 1)[1].split("```bash\n", 1)[1].split("\n```", 1)[0]
+        with tempfile.TemporaryDirectory() as intake, tempfile.TemporaryDirectory() as first, \
+                tempfile.TemporaryDirectory() as later:
+            record = Path(intake) / "native-index-receipt.abcdef12"
+            with patch.dict(os.environ, {"TMPDIR": first}), patch.object(tempfile, "tempdir", None), \
+                    patch.object(index_helper.subprocess, "run", self.transport):
+                with record.open("x") as output, redirect_stdout(output), \
+                        patch.object(sys, "argv", ["helper", "index", "--private-preview", self.parent, self.child]), \
+                        self.assertRaises(SystemExit) as pending:
+                    index_helper.main()
+                self.assertEqual(pending.exception.code, 2)
+                other = self.run_cli("index", "--private-preview", self.parent, self.child, expect_pending=True)
+            receipt = json.loads(record.read_bytes())
+            selected = Path(receipt["preview_file"])
+            unrelated = Path(other["preview_file"])
+            self.assertEqual(selected.parent, Path(first).resolve())
+            self.assertEqual(selected.read_text(), "- example/child#2 — existing title\n")
+            env = {**os.environ, "TMPDIR": later, "PREVIEW_RECORD": str(record), "ISSUE_DRAFT": intake}
+            subprocess.run(["bash", "-c", cleanup], env=env, check=True, capture_output=True)
+            self.assertFalse(selected.exists())
+            self.assertTrue(unrelated.is_file())
+            subprocess.run(["bash", "-c", cleanup], env=env, check=True, capture_output=True)
+
+            selected.write_text("replacement")
+            result = subprocess.run(["bash", "-c", cleanup], env=env, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"Preview identity changed", result.stderr)
+            self.assertEqual(selected.read_text(), "replacement")
+            self.assertTrue(record.is_file())
+            # The workflow never accepts a receipt outside the retained owner-only intake.
+            different = Path(later) / record.name
+            different.write_text(json.dumps(other))
+            result = subprocess.run(["bash", "-c", cleanup], env={**env, "PREVIEW_RECORD": str(different)},
+                                    capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue(unrelated.is_file())
+
+    def test_incomplete_preview_is_removed_before_any_receipt(self):
+        def interrupted():
+            yield "- example/child#2 — Sample"
+            raise OSError("fixture write interrupted")
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"TMPDIR": tmp}), \
+                patch.object(tempfile, "tempdir", None):
+            with self.assertRaisesRegex(OSError, "fixture write interrupted"):
+                index_helper.private_preview_file(interrupted())
+            self.assertEqual(list(Path(tmp).iterdir()), [])
 
     def test_stale_title_or_body_invalidates_confirmation(self):
         with patch.object(index_helper.subprocess, "run", self.transport):

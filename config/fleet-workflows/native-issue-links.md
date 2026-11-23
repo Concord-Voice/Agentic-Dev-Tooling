@@ -25,11 +25,19 @@ Show existing children and their current parents by full URL. Show new issues by
 
 Before any Phase 7 write for a parent absorbing existing issues, show the proposed parent, children and current parents. Offer the choices to proceed, create only the parent, or cancel. Create each approved issue once and run its configured board step. Keep existing child bodies intact. For a verified existing absorbed child, use the isolated collector to check for the existing tracking comment. Return only a validated presence flag. If absent, post the fixed tracking comment with the verified parent URL using a silent request. If presence cannot be verified, leave the comment pending.
 
-After every intended child verifies, preview the index against the exact approved parent and child URLs. Request an owner-only preview file from the helper. It chooses a fresh temporary filename for each pending preview. The helper checks one plain bullet per child against the current title, preserves other body text and identifies missing or titleless entries. Its private Markdown file contains the proposed titled rows for the maintainer. Keep that file out of the write-capable agent’s context. The structured receipt gives the preview file path, validated identities, status and a digest binding the complete parent body, proposed update and children.
+After every intended child verifies, preview the index against the exact approved parent and child URLs. Request an owner-only preview file from the helper. It chooses a fresh filename in the trusted host’s platform temporary directory for each pending preview. Use the host’s normal temporary-directory settings. The helper checks one plain bullet per child against the current title, preserves other body text and identifies missing or titleless entries. Its private Markdown file contains the proposed titled rows for the maintainer. Keep that file out of the write-capable agent’s context. Keep the helper’s receipt in the existing owner-only intake directory. On a direct link with no prior issue draft, establish and retain an owner-only intake directory first (umask 077 and mktemp -d). The structured receipt gives the generated file path and identity, its original directory, validated issue identities, status and a digest binding the complete parent body, proposed update and children.
 
 ```bash
-python3 -I -B "${FLEET_SKILLS:?}/_shared/native-issue-index.py" index \
-  --private-preview "$PARENT_URL" "${CHILD_URLS[@]}"
+PREVIEW_RECORD=$(mktemp "${ISSUE_DRAFT:?use the private intake directory}/native-index-receipt.XXXXXXXX") ||
+  { return 1 2>/dev/null || exit 1; }
+if python3 -I -B "${FLEET_SKILLS:?}/_shared/native-issue-index.py" index \
+  --private-preview "$PARENT_URL" "${CHILD_URLS[@]}" > "$PREVIEW_RECORD"; then
+  cat -- "$PREVIEW_RECORD"  # already current; no preview file
+else
+  status=$?
+  [ "$status" = 2 ] && [ -s "$PREVIEW_RECORD" ] || { return 1 2>/dev/null || exit 1; }
+  cat -- "$PREVIEW_RECORD"  # record this receipt filename with this intake
+fi
 ```
 
 A `current` receipt verifies completion. Exit 2 with `pending` means the maintainer can review the titled rows at the path in `preview_file`. Give the maintainer that path. Show the exact parent URL, affected children and digest. For cross-repository links, include the destination repository so the maintainer can confirm that the previewed titles may be published there. Ask the maintainer to confirm they have coordinated **exclusive editing of that parent body** with its other human and automated editors for the duration of this one update and its readback. The separate absorption or attachment approval does not establish exclusivity. If exclusivity is unavailable or ends, retain the pending receipt for manual reconciliation. A nested or ambiguous section, an unreadable relationship, or a row with different title text or operator annotations stays pending for manual reconciliation.
@@ -42,5 +50,33 @@ python3 -I -B "${FLEET_SKILLS:?}/_shared/native-issue-index.py" apply-index \
 ```
 
 The helper reads the relationships, titles and body again immediately before writing, refuses a changed preview and sends the body as request data. It verifies the full body, titles and parent relationships after submission, including after an ambiguous result. Report an unverified write as pending. Any further write needs a fresh preview and confirmation. GitHub provides no atomic body-version precondition for the issue update. The exclusive editing window covers the interval between the last read and the write. [Issue updates](https://docs.github.com/en/rest/issues/issues#update-an-issue) · [Conditional requests](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api#use-conditional-requests-if-appropriate)
+
+### Remove the private preview
+
+Run the following step after the application attempt and readback, on cancellation, or before superseding a preview. For manual reconciliation, keep the file while the maintainer needs it. Remove it as soon as they confirm they have finished or saved their own copy. On resumption, use the pending receipt saved with this specific intake. Use the original file written directly by the verified helper in that intake’s private directory. Recover its recorded filename from the trusted intake. Never reconstruct a receipt from model output or issue text, accept an externally supplied receipt, or search for previews by filename.
+
+```bash
+# Bind ISSUE_DRAFT and PREVIEW_RECORD to their original intake paths, including on resume.
+[ "${PREVIEW_RECORD%/*}" = "${ISSUE_DRAFT:?use the original private intake directory}" ] &&
+  [[ ${PREVIEW_RECORD##*/} =~ ^native-index-receipt\.[a-zA-Z0-9]+$ ]] &&
+  [ -f "$PREVIEW_RECORD" ] && [ ! -L "$PREVIEW_RECORD" ] ||
+  { echo "Original preview receipt required" >&2; return 1 2>/dev/null || exit 1; }
+PREVIEW_FILE=$(jq -er '
+  select(.status == "pending") | .preview_directory as $dir | .preview_file | strings |
+  select(startswith($dir + "/")) |
+  select(ltrimstr($dir + "/") | test("\\Afleet-index-[A-Za-z0-9_-]+\\.md\\z"))
+' "$PREVIEW_RECORD") || { return 1 2>/dev/null || exit 1; }
+if [ -e "$PREVIEW_FILE" ] || [ -L "$PREVIEW_FILE" ]; then
+  EXPECTED=$(jq -er '.preview_identity | strings' "$PREVIEW_RECORD") &&
+    [ -f "$PREVIEW_FILE" ] && [ ! -L "$PREVIEW_FILE" ] &&
+    ACTUAL=$(python3 -I -B -c 'import os, sys; s = os.lstat(sys.argv[1]); print(f"{s.st_dev}:{s.st_ino}:{s.st_ctime_ns}")' "$PREVIEW_FILE") &&
+    [ "$ACTUAL" = "$EXPECTED" ] ||
+    { echo "Preview identity changed; original receipt retained" >&2; return 1 2>/dev/null || exit 1; }
+  rm -f -- "$PREVIEW_FILE" || { return 1 2>/dev/null || exit 1; }
+fi
+unset PREVIEW_FILE EXPECTED ACTUAL
+```
+
+Cleanup checks the directory and file identity from creation even when the current temporary directory has changed. A replacement file stays intact and requires manual reconciliation. Keep the parent URL, approved child identities, digest and verification outcome in the intake record. If cleanup fails, retain the receipt and report the pending cleanup.
 
 [GitHub sub-issues REST reference](https://docs.github.com/en/rest/issues/sub-issues)

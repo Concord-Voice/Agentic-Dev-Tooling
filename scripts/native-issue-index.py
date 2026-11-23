@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 import string
 import subprocess
@@ -215,6 +216,27 @@ def verified_titles(parent, urls):
     return titles
 
 
+def private_preview_file(rows):
+    # Use the host temp location and an exclusive, owner-only file chosen by the helper.
+    preview = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix="fleet-index-",
+                                          suffix=".md", delete=False)
+    complete = False
+    try:
+        with preview:
+            for row in rows:
+                preview.write(row + "\n")
+            preview.flush()
+            info = os.fstat(preview.fileno())
+        path = os.path.realpath(preview.name)
+        # The host retains this receipt directly with the private intake, across sessions.
+        identity = f"{info.st_dev}:{info.st_ino}:{info.st_ctime_ns}"
+        complete = True
+        return {"preview_file": path, "preview_directory": os.path.dirname(path), "preview_identity": identity}
+    finally:
+        if not complete:
+            os.unlink(preview.name)
+
+
 def check_index(parent, urls, private_preview=False, confirmed_digest=None):
     titles = verified_titles(parent, urls)
     body = issue_body(parent)
@@ -240,12 +262,7 @@ def check_index(parent, urls, private_preview=False, confirmed_digest=None):
         return {"status": "current", "children": len(urls)}
     receipt = {"status": "pending", "children": len(urls), "missing_rows": list(rows), "digest": digest}
     if private_preview:
-        # The helper chooses an exclusive, owner-only file. No caller supplies a destination.
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir="/tmp", prefix="fleet-index-",
-                                         suffix=".md", delete=False) as out:
-            for row in rows.values():
-                out.write(row + "\n")
-        receipt["preview_file"] = out.name
+        receipt.update(private_preview_file(rows.values()))
     return receipt
 
 
