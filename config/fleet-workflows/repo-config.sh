@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Source from the verified fleet edition. This helper reads configuration as data.
 fleet_clear_config() {
-  unset RC_TRUSTED_CFG RC_TRUSTED_STATE RC_TRUSTED_OID RC_TRUSTED_REPO
+  unset RC_TRUSTED_CFG RC_TRUSTED_STATE RC_TRUSTED_OID RC_TRUSTED_REPO RC_ISSUE_LINKAGE
 }
 
 fleet_set_config() {
@@ -75,6 +75,20 @@ fleet_load_repo_config() {
     fleet_set_config "$oid" "$config" present || return 1
   fi
   RC_TRUSTED_REPO=$repo
+}
+
+# Bind the linkage policy to the authorized intake repository at its default revision.
+fleet_load_issue_config() {
+  fleet_load_repo_config "$@" || return 1
+  # The calling issue-creation skill reads this result in the same shell.
+  # shellcheck disable=SC2034
+  RC_ISSUE_LINKAGE=$(jq -er '
+    if (has("issue_creation") | not) then "tasklist"
+    elif (.issue_creation | type) != "object" then error("invalid issue_creation")
+    elif (.issue_creation | has("sub_issue_linkage") | not) then "tasklist"
+    else .issue_creation.sub_issue_linkage |
+      if . == "tasklist" or . == "native_rest" then . else error("invalid sub_issue_linkage") end
+    end' <<<"$RC_TRUSTED_CFG") || { fleet_clear_config; return 1; }
 }
 
 # Execute the bundled disposition gate against a private snapshot of the same

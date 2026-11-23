@@ -17,7 +17,7 @@ EDITION = ROOT / "config/fleet-workflows"
 SKILLS = ("ci-status", "dev-lifecycle", "enhanced-pr-review", "issue-brief", "issue-creation",
           "pr-creation", "reproduce-then-fix", "review-pr", "verify-quality-gate", "weekly-deps")
 TABLES = ("dispatchable-skills.md", "lifecycle-agent-dispatch.md", "nested-skills.md",
-          "pr-review-agent-dispatch.md", "repo-config.sh")
+          "pr-review-agent-dispatch.md", "repo-config.sh", "native-issue-links.md")
 
 ENTRY = (
     "\n**Fleet entry.** First read [the workflow and host boundary](../_shared/nested-skills.md). "
@@ -47,6 +47,7 @@ def edition():
     files = {Path("skills", path): source_file(path, spec) for path, spec in manifest.items()}
     for name in TABLES:
         files[Path("skills/_shared", name)] = (EDITION / name).read_bytes()
+    files[Path("skills/_shared/native-issue-index.py")] = (ROOT / "scripts/native-issue-index.py").read_bytes()
     digest = hashlib.sha256()
     for path, contents in sorted(files.items()):
         digest.update(str(path).encode() + b"\0" + hashlib.sha256(contents).digest())

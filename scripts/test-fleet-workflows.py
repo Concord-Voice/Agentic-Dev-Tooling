@@ -19,6 +19,126 @@ fleet = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(fleet)
 
 
+INDEX_SPEC = importlib.util.spec_from_file_location("index_helper", Path(__file__).with_name("native-issue-index.py"))
+index_helper = importlib.util.module_from_spec(INDEX_SPEC)
+INDEX_SPEC.loader.exec_module(index_helper)
+
+
+class NativeIssueIndexTests(unittest.TestCase):
+    parent = "https://github.com/example/parent/issues/2"
+    child = "https://github.com/example/child/issues/2"
+    original = "## Context\n\n```md\n## Sub-Issues\n```\n\n## Sub-Issues\n\n## Criteria\n- [ ] private text\n"
+
+    def setUp(self):
+        self.body = self.original
+        self.calls = []
+        self.parent_of_child = self.parent
+
+    def transport(self, argv, **options):
+        self.assertEqual(argv, ["gh", "api", "--hostname", "github.com", "graphql", "--input", "-"])
+        self.assertTrue(options["capture_output"])
+        self.calls.append(argv)
+        packet = json.loads(options["input"])
+        url = packet["variables"]["url"]
+        issue = {"__typename": "Issue", "url": url}
+        if packet["query"] == index_helper.META:
+            issue["fullDatabaseId"] = "4000000000"
+            issue["parent"] = {"url": self.parent_of_child} if url == self.child and self.parent_of_child else None
+        else:
+            self.assertEqual(packet["query"], index_helper.BODY)
+            self.assertEqual(url, self.parent)
+            issue["body"] = self.body
+        data = {"data": {"resource": issue}}
+        return subprocess.CompletedProcess(argv, 0, json.dumps(data).encode(), b"")
+
+    def run_cli(self, *args, expect_pending=False):
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(sys, "argv", ["helper", *args]), redirect_stdout(out), redirect_stderr(err):
+            if expect_pending:
+                with self.assertRaises(SystemExit) as raised:
+                    index_helper.main()
+                self.assertEqual(raised.exception.code, 2)
+            else:
+                index_helper.main()
+        self.assertEqual(err.getvalue(), "")
+        self.assertNotIn("private", out.getvalue())
+        return json.loads(out.getvalue())
+
+    def test_real_cli_boundary_and_retry(self):
+        with patch.object(index_helper.subprocess, "run", self.transport):
+            self.assertEqual(self.run_cli("inspect", self.child),
+                             {"url": self.child, "parent": self.parent, "database_id": 4000000000})
+            result = self.run_cli("index", self.parent, self.child, expect_pending=True)
+            self.assertEqual(result, {"status": "pending", "children": 1, "missing_rows": ["- example/child#2"]})
+            self.assertEqual(self.body, self.original)
+            self.body = self.original.replace("## Sub-Issues\n\n## Criteria",
+                             "## Sub-Issues\n- example/child#2 — existing title\n\n## Criteria")
+            self.assertEqual(self.run_cli("index", self.parent, self.child)["status"], "current")
+            self.assertFalse(any("PATCH" in args for args in self.calls))
+
+    def test_unverified_relationship_and_provider_error(self):
+        self.parent_of_child = None
+        with patch.object(index_helper.subprocess, "run", self.transport):
+            with self.assertRaisesRegex(SystemExit, "^child relationship is unverified$"):
+                self.run_cli("index", self.parent, self.child)
+            with self.assertRaisesRegex(SystemExit, "^invalid issue URL$"):
+                self.run_cli("inspect", self.child + "?query")
+        error = subprocess.CompletedProcess([], 1, b"private body", b"private error")
+        with patch.object(index_helper.subprocess, "run", return_value=error):
+            with self.assertRaisesRegex(SystemExit, "^GitHub request failed$"):
+                self.run_cli("inspect", self.child)
+        self.assertFalse(any("PATCH" in args for args in self.calls))
+
+    def test_concurrent_parent_edits_stay_pending(self):
+        def concurrent(argv, **opts):
+            old = self.body
+            result = self.transport(argv, **opts)
+            if json.loads(opts["input"])["query"] == index_helper.BODY:
+                self.body = old + "concurrent change\n"
+            return result
+        with patch.object(index_helper.subprocess, "run", concurrent):
+            result = self.run_cli("index", self.parent, self.child, expect_pending=True)
+            self.assertEqual(result, {"status": "pending", "children": 1, "missing_rows": ["- example/child#2"]})
+        self.assertIn("concurrent change", self.body)
+        self.assertFalse(any("PATCH" in args for args in self.calls))
+
+    def test_dot_prefixed_repository_names(self):
+        for repo in (".github", ".dotfiles"):
+            url = f"https://github.com/example/{repo}/issues/2"
+            self.assertEqual(index_helper.identity(url), ("example", repo, "2"))
+            row = f"- example/{repo}#2"
+            self.assertEqual(index_helper.existing_children([row], "example/root"), {(f"example/{repo}", "2")})
+        for repo in (".", ".."):
+            with self.assertRaises(index_helper.Pending):
+                index_helper.identity(f"https://github.com/example/{repo}/issues/2")
+            with self.assertRaises(index_helper.Pending):
+                index_helper.existing_children([f"- example/{repo}#2"], "example/root")
+
+    def test_unsupported_html_blocks_leave_the_index_pending(self):
+        for opener, closer in (("<![CDATA[", "]]>"), ("<?instruction", "?>"), ("<!DECLARATION", ">")):
+            body = "\n".join([opener, "## Sub-Issues", "## Other", closer])
+            with self.subTest(opener=opener), self.assertRaisesRegex(index_helper.Pending, "HTML"):
+                index_helper.missing_rows(body, self.parent, [self.child])
+
+    def test_headings_inside_html_comments(self):
+        for end in ("-->", "--!>"):
+            with self.subTest(end=end):
+                lines = ["<!-- comment " + end, "<!-- first", "## hidden", end + " <!-- next",
+                         "## still hidden", end, "## Sub-Issues"]
+                self.assertEqual(index_helper.markdown_headings(lines), [6])
+
+    def test_index_sections_and_same_number_across_repos(self):
+        children = [self.child, self.parent.replace("/2", "/7")]
+        current = "## Sub-Issues\r\n- #7 — Same repo\r\n"
+        self.assertEqual(index_helper.missing_rows(current, self.parent, children), ["- example/child#2"])
+        self.assertEqual(index_helper.missing_rows("Context", self.parent, children), ["- example/child#2", "- example/parent#7"])
+        for body in ["Sub-Issues\n----------\n- example/child#2", "## Sub-Issues <!-- hidden -->\n- #2",
+                     "## Sub-Issues\n### Backend\n- example/child#2", "## Sub-Issues\n## Sub-Issues\n", "## Sub-Issues\n- [ ] #2", "```\n",
+                     "<!--private", "<pre>\n## Sub-Issues\n", "## Sub-Issues\n- #7\n- example/parent#7"]:
+            with self.subTest(body=body), self.assertRaises(index_helper.Pending):
+                index_helper.missing_rows(body, self.parent, children)
+
+
 class FleetWorkflowTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -70,6 +190,30 @@ class FleetWorkflowTests(unittest.TestCase):
         for loader in (entry, edition/"pr-creation/SKILL.md", edition/"weekly-deps/SKILL.md"):
             self.assertIn("${FLEET_SKILLS:?}", loader.read_text())
             self.assertNotIn("git show \"$RC_OID:scripts/repo-config.sh", loader.read_text())
+
+    def test_issue_linkage_policy_reaches_direct_and_nested_intake(self):
+        entry = fleet.resolve(self.cache, "issue-creation")
+        skill = entry.read_text()
+        shared = entry.parent.parent / "_shared"
+        nested = (shared / "nested-skills.md").read_text()
+        self.assertIn("sibling `../NAME/SKILL.md`", nested)
+        self.assertIn("On direct or nested entry", skill)
+        self.assertEqual((shared / "native-issue-index.py").read_bytes(), Path(index_helper.__file__).read_bytes())
+        policy = (shared / "native-issue-links.md").read_text()
+        self.assertIn("(../_shared/native-issue-links.md)", skill)
+        self.assertIn("Validated full parent issue URL in native mode", skill)
+        self.assertIn("database ID", policy)
+        self.assertIn("replace_parent=true", policy)
+        self.assertIn("After every intended child verifies", policy)
+        self.assertIn("one plain bullet per child", policy)
+        creation = skill.split("## Phase 7:", 1)[1].split("## Phase 8:", 1)[0]
+        self.assertLess(creation.index("separate Phase 7 absorption decision"),
+                        creation.index('gh issue create --repo "$RC_TRUSTED_REPO"'))
+        self.assertIn('${ISSUE_CONFIG_OID:?use the revision recorded at intake}', creation)
+        native, tasklist = creation.split("**Tasklist mode only, Steps 3 and 4.**")
+        self.assertIn("Run Step 2 for each newly created issue", native)
+        self.assertNotIn("gh issue edit PARENT --body-file", native)
+        self.assertIn("gh issue edit PARENT --body-file", tasklist)
 
     def test_coverage_uses_exact_default_config(self):
         entry = fleet.resolve(self.cache, "enhanced-pr-review")
