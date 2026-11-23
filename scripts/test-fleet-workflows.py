@@ -94,6 +94,24 @@ class NativeIssueIndexTests(unittest.TestCase):
                 self.run_cli("index", self.parent, self.child)
         self.assertFalse(any("PATCH" in args for args in self.calls))
 
+    def test_dot_prefixed_repository_names(self):
+        for repo in (".github", ".dotfiles"):
+            url = f"https://github.com/example/{repo}/issues/2"
+            self.assertEqual(index_helper.identity(url), ("example", repo, "2"))
+            row = f"- example/{repo}#2"
+            self.assertEqual(index_helper.existing_children([row], "example/root"), {(f"example/{repo}", "2")})
+        for repo in (".", ".."):
+            with self.assertRaises(index_helper.Pending):
+                index_helper.identity(f"https://github.com/example/{repo}/issues/2")
+            with self.assertRaises(index_helper.Pending):
+                index_helper.existing_children([f"- example/{repo}#2"], "example/root")
+
+    def test_unsupported_html_blocks_leave_the_index_pending(self):
+        for opener, closer in (("<![CDATA[", "]]>"), ("<?instruction", "?>"), ("<!DECLARATION", ">")):
+            body = "\n".join([opener, "## Sub-Issues", "## Other", closer])
+            with self.subTest(opener=opener), self.assertRaisesRegex(index_helper.Pending, "HTML"):
+                index_helper.reconcile(body, self.parent, [(self.child, "Example")])
+
     def test_headings_inside_html_comments(self):
         for end in ("-->", "--!>"):
             with self.subTest(end=end):

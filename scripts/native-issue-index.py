@@ -6,10 +6,11 @@ import subprocess
 import sys
 import unicodedata
 
-PART = r"[A-Za-z0-9][A-Za-z0-9_.-]*"
+OWNER = r"[A-Za-z0-9][A-Za-z0-9_.-]*"
+REPO = r"(?!\.{1,2}[/#])[A-Za-z0-9_.-]+"
 NUMBER = r"[1-9][0-9]*"
-URL = re.compile(rf"https://github\.com/({PART})/({PART})/issues/({NUMBER})")
-BULLET = re.compile(rf"- (?:(?P<repo>{PART}/{PART}))?#(?P<number>{NUMBER})(?:\s+—\s+.*)?")
+URL = re.compile(rf"https://github\.com/({OWNER})/({REPO})/issues/({NUMBER})")
+BULLET = re.compile(rf"- (?:(?P<repo>{OWNER}/{REPO}))?#(?P<number>{NUMBER})(?:\s+—\s+.*)?")
 INDEX_HEADING = "## Sub-Issues"
 ATX_HEADING = re.compile(r"^ {0,3}#{1,6}(?:\s|$)")
 COMMENT_END = re.compile(r"--!?>")
@@ -126,7 +127,7 @@ def markdown_headings(lines):
         ending = block_ending(line)
         if ending is not None or "<!--" in line:
             continue
-        if re.match(r" {0,3}</?[A-Za-z]", line):
+        if re.match(r" {0,3}<(?:/?[A-Za-z]|[!?])", line):
             raise Pending("unrecognized HTML block")
         if ATX_HEADING.match(line):
             headings.append(i)
