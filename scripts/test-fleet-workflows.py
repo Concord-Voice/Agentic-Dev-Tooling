@@ -722,6 +722,8 @@ esac
                 fleet.main(args)
 
     def test_collision_only_role_binding(self):
+        instructions = (fleet.EDITION / "nested-skills.md").read_text()
+        self.assertIn("--verify-role ROLE --platform PLATFORM --profile ABSOLUTE_PATH", instructions)
         renderer_path = fleet.ROOT / "scripts/render-agent-profiles.py"
         import runpy
         renderer = runpy.run_path(str(renderer_path))
@@ -746,7 +748,11 @@ esac
             selected = json.loads(out.getvalue())
             self.assertEqual(selected["native_name"], "fleet-architect")
             self.assertEqual(selected["profile"], str(fallback))
-            self.assertEqual(selected["sha256"], fleet.verified_role(platform, "architect", fallback))
+            args = ["--verify-role", "architect", "--platform", platform,
+                    "--profile", selected["profile"]]
+            with redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(fleet.main(args), 0)
+            self.assertEqual(selected["sha256"], out.getvalue().strip())
             self.assertEqual(canonical.read_text(), "benign project-owned architect")
             # Compare the whole native file with only its declared identity normalized.
             source = renderer["profile_bytes"](platform, "architect")
