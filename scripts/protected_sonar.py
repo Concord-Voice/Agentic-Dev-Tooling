@@ -23,8 +23,9 @@ import tempfile
 from urllib.error import HTTPError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
-import xml.etree.ElementTree as ET
 import zipfile
+
+from defusedxml import DefusedXmlException, ElementTree as DET
 
 
 REPO = "Concord-Voice/Agentic-Dev-Tooling"
@@ -203,9 +204,13 @@ def coverage_report(content, files, base):
         raise Reject("coverage report is not UTF-8") from None
     if "<!DOCTYPE" in text.upper() or "<!ENTITY" in text.upper():
         raise Reject("coverage report declares a DTD")
+    if len(content) > MAX_REPORT:
+        raise Reject("coverage report too large")
     try:
-        root = ET.fromstring(content)
-    except (ET.ParseError, ValueError, RecursionError):
+        root = DET.fromstring(content, forbid_dtd=True)
+    except DefusedXmlException:
+        raise Reject("coverage report declares a DTD or entity") from None
+    except (DET.ParseError, ValueError, RecursionError):
         raise Reject("coverage report XML invalid") from None
     if root.tag != "coverage":
         raise Reject("coverage report root invalid")
@@ -214,9 +219,12 @@ def coverage_report(content, files, base):
         raise Reject("coverage report names a file outside the PR tree")
     for sources in root.findall("sources"):
         root.remove(sources)
-    ET.SubElement(root, "sources").append(ET.Element("source"))
-    root.find("sources/source").text = str(base)
-    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    sources = root.makeelement("sources", {})
+    source = root.makeelement("source", {})
+    source.text = str(base)
+    sources.append(source)
+    root.append(sources)
+    return DET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
 def git(repo, *args, limit=MAX_API):

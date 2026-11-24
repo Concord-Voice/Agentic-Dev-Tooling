@@ -49,7 +49,10 @@ class WorkflowTokenScope(unittest.TestCase):
         self.assertIn("-f ref=main", found["protected-sonar"])
         self.assertIn("    permissions:\n      actions: write\n", found["protected-sonar"])
         # Main's checkout runs the preparer; the PR tree is only ever data.
-        self.assertIn("python3 -I -B scripts/protected_sonar.py", found["sonarcloud"])
+        self.assertIn('/bin/python" -I -B scripts/protected_sonar.py', found["sonarcloud"])
+        self.assertIn("pip install --require-hashes --no-deps -r scripts/requirements-protected-sonar.txt", found["sonarcloud"])
+        install = found["sonarcloud"].split("Install pinned XML parser", 1)[1].split("- name:", 1)[0]
+        self.assertNotIn("SONAR_TOKEN", install)
         self.assertNotIn("ref: ${{", found["sonarcloud"])
         self.assertIn("github.ref != 'refs/heads/main'", found["reject-disabled-dispatch"])
 
@@ -116,6 +119,22 @@ class ReportData(unittest.TestCase):
         for content in cases:
             with self.assertRaises(ps.Reject):
                 ps.coverage_report(content, {"scripts/tool.py"}, Path("/a"))
+
+    def test_rejects_entity_attacks_fail_closed(self):
+        laughs = ('<!DOCTYPE lolz [<!ENTITY a "aaaa"><!ENTITY b "&a;&a;&a;&a;">'
+                  '<!ENTITY c "&b;&b;&b;&b;">]>')
+        xxe = '<!DOCTYPE c [<!ENTITY x SYSTEM "file:///etc/passwd">]>'
+        for dtd in (laughs, xxe):
+            content = report(extra=dtd).replace(b"<coverage>", b"<coverage>&x;" if "SYSTEM" in dtd else b"<coverage>&c;")
+            with self.assertRaisesRegex(ps.Reject, "DTD"):
+                ps.coverage_report(content, {"scripts/tool.py"}, Path("/a"))
+            # Second layer: the parser itself refuses even if the text check were bypassed.
+            with self.assertRaises(ps.DefusedXmlException):
+                ps.DET.fromstring(content, forbid_dtd=True)
+
+    def test_rejects_oversize_report(self):
+        with patch.object(ps, "MAX_REPORT", 10), self.assertRaisesRegex(ps.Reject, "too large"):
+            ps.coverage_report(report(), {"scripts/tool.py"}, Path("/a"))
 
     def test_zip_has_exactly_the_report(self):
         self.assertEqual(ps.one_zip(zipped()), report())

@@ -73,6 +73,7 @@ jobs:
           ARCHITECT_REQUIRE_LINUX_SANDBOX: '1'
         run: |
           python3 -m venv "$RUNNER_TEMP/sync-coverage-venv"
+          "$RUNNER_TEMP/sync-coverage-venv/bin/python" -m pip install --require-hashes --no-deps -r scripts/requirements-protected-sonar.txt
           "$RUNNER_TEMP/sync-coverage-venv/bin/python" -m pip install --no-deps 'coverage @ https://files.pythonhosted.org/packages/ec/16/114df1c291c22cac3b0c127a73e0af5c12ed7bbb6558d310429a0ae24023/coverage-7.10.7-py3-none-any.whl#sha256=f7941f6f2fe6dd6807a1208737b8a0cbcf1cc6d7b07d24998ad2d63590868260'
           SYNC_COVERAGE_PYTHON="$RUNNER_TEMP/sync-coverage-venv/bin/python" bash scripts/measure-sync-coverage.sh "$RUNNER_TEMP/sync-coverage.xml"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -151,6 +152,12 @@ jobs:
         with:
           name: sync-coverage
           path: ${{ runner.temp }}/sync-coverage
+      - name: Install pinned XML parser
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/protected-sonar-venv"
+          "$RUNNER_TEMP/protected-sonar-venv/bin/python" -m pip install --require-hashes --no-deps -r scripts/requirements-protected-sonar.txt
       - name: Verify caller and prepare inert PR tree
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -162,7 +169,7 @@ jobs:
           BASE_SHA: ${{ inputs.expected_base_sha }}
         run: |
           set -euo pipefail
-          python3 -I -B scripts/protected_sonar.py \
+          "$RUNNER_TEMP/protected-sonar-venv/bin/python" -I -B scripts/protected_sonar.py \
             --caller-run-id "$CALLER_RUN_ID" --caller-run-attempt "$CALLER_RUN_ATTEMPT" \
             --pr-number "$PR_NUMBER" --head-sha "$HEAD_SHA" --base-sha "$BASE_SHA" \
             --analysis-dir "$RUNNER_TEMP/protected-sonar-analysis" \
