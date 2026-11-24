@@ -4,22 +4,62 @@ name: SonarCloud
 # org, private repositories included (owner decision, 2026-11-04).
 # Automatic Analysis stays off, because SonarCloud rejects a CI scan while
 # it is on.
+#
+# Protected bridge: no job that runs on pull_request ever holds SONAR_TOKEN.
+# A PR controls this file, the scanner config and the tree, so a token in a
+# PR job could be exfiltrated. Instead:
+#   1. pull_request: `sync-coverage` runs the PR's tests with no secret and
+#      uploads the report; `protected-sonar` (no secret) dispatches this
+#      workflow on main and waits for it.
+#   2. workflow_dispatch on main: the `sonarcloud` job, bound to the
+#      `protected-sonar` environment (deployable from main only), re-checks the
+#      caller run and PR against the API with scripts/protected_sonar.py from
+#      main, takes the coverage report as bounded data, writes the PR tree out
+#      as plain files, and scans it with main's sonar-project.properties. The
+#      SonarCloud App then posts the required `SonarCloud Code Analysis` check.
+#   3. push to main: the same job scans main with that run's coverage.
+# The PR-side dispatcher is PR-controlled and trusted for nothing: an edited
+# copy can only dispatch main's code, or reach a non-main ref that the
+# environment refuses (and `reject-disabled-dispatch` fails loudly).
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      caller_run_id:
+        description: "Dispatching pull_request run ID"
+        type: string
+        required: true
+      caller_run_attempt:
+        description: "Dispatching run attempt"
+        type: string
+        required: true
+      pr_number:
+        description: "Candidate PR number"
+        type: string
+        required: true
+      expected_head_sha:
+        description: "Candidate PR head SHA"
+        type: string
+        required: true
+      expected_base_sha:
+        description: "Candidate PR base SHA"
+        type: string
+        required: true
 
 permissions: {}
 
 concurrency:
-  group: sonarcloud-${{ github.event.pull_request.number || github.ref }}
+  group: sonarcloud-${{ github.event_name == 'workflow_dispatch' && format('pr-{0}', inputs.pr_number) || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   sync-coverage:
     name: Shared sync coverage
-    # PR-controlled tests run in a separate job without the Sonar secret.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    # PR-controlled tests run in a job without the Sonar secret. Fork PRs get
+    # no dispatch permission, so they are not measured.
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -41,28 +81,95 @@ jobs:
           path: ${{ runner.temp }}/sync-coverage.xml
           if-no-files-found: error
 
+  protected-sonar:
+    name: Protected SonarCloud dispatch
+    needs: sync-coverage
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    # The child scan is bounded at 20 minutes; the margin covers queueing.
+    timeout-minutes: 30
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch and watch the main-owned scan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          # API version 2026-03-10 returns the dispatched run's ID.
+          child="$(gh api -X POST -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GH_REPO/actions/workflows/sonarcloud.yml/dispatches" \
+            -f ref=main -f "inputs[caller_run_id]=$RUN_ID" -f "inputs[caller_run_attempt]=$RUN_ATTEMPT" \
+            -f "inputs[pr_number]=$PR_NUMBER" -f "inputs[expected_head_sha]=$HEAD_SHA" \
+            -f "inputs[expected_base_sha]=$BASE_SHA" --jq '.workflow_run_id')"
+          if [[ ! "$child" =~ ^[1-9][0-9]{0,18}$ ]]; then
+            echo "::error::Dispatch returned no run ID."
+            exit 1
+          fi
+          echo "Protected SonarCloud run: https://github.com/$GH_REPO/actions/runs/$child" >> "$GITHUB_STEP_SUMMARY"
+          gh run watch "$child" --exit-status --interval 20
+
+  reject-disabled-dispatch:
+    name: Reject non-main dispatch
+    if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Reject non-main protected dispatch
+        run: |
+          echo "::error::Protected SonarCloud dispatch was not loaded from main."
+          exit 1
+
   sonarcloud:
     name: SonarCloud
     needs: sync-coverage
-    # Fork PRs get no secrets, so only same-repository PRs and main are scanned.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    # The only job that reads SONAR_TOKEN. `protected-sonar` admits main only,
+    # so a pull_request run (ref refs/pull/N/merge) never receives the token.
+    # !cancelled() lets the dispatch path run although sync-coverage skips there.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && ((github.event_name == 'push' && needs.sync-coverage.result == 'success') || github.event_name == 'workflow_dispatch') }}
+    environment: protected-sonar
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
+      actions: read
       pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # full history for new-code detection and blame
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - name: Download main coverage
+        if: github.event_name == 'push'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: sync-coverage
           path: ${{ runner.temp }}/sync-coverage
+      - name: Verify caller and prepare inert PR tree
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CALLER_RUN_ID: ${{ inputs.caller_run_id }}
+          CALLER_RUN_ATTEMPT: ${{ inputs.caller_run_attempt }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          HEAD_SHA: ${{ inputs.expected_head_sha }}
+          BASE_SHA: ${{ inputs.expected_base_sha }}
+        run: |
+          set -euo pipefail
+          python3 -I -B scripts/protected_sonar.py \
+            --caller-run-id "$CALLER_RUN_ID" --caller-run-attempt "$CALLER_RUN_ATTEMPT" \
+            --pr-number "$PR_NUMBER" --head-sha "$HEAD_SHA" --base-sha "$BASE_SHA" \
+            --analysis-dir "$RUNNER_TEMP/protected-sonar-analysis" \
+            --coverage-out "$RUNNER_TEMP/protected-sonar-coverage.xml"
       - name: SonarCloud scan
         uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
         with:
-          args: -Dsonar.python.coverage.reportPaths=${{ runner.temp }}/sync-coverage/sync-coverage.xml
+          args: ${{ github.event_name == 'workflow_dispatch' && format('-Dsonar.projectBaseDir={0}/protected-sonar-analysis -Dsonar.qualitygate.wait=true', runner.temp) || format('-Dsonar.python.coverage.reportPaths={0}/sync-coverage/sync-coverage.xml', runner.temp) }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
