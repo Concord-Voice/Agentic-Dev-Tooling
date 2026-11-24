@@ -12,7 +12,7 @@
     "sha256": "ea2ab9aa17d0977815f226553cfb74dd9dda389aa4f895461dee795e900bcf32"
   },
   "dev-lifecycle/SKILL.md": {
-    "sha256": "f7c0c1132f9936b425a58a79a780afcb8b14737babfc21b7907038bf094b2d83",
+    "sha256": "17d91ed98ca2009717dfe7741caa45cecf1d6b71ee957baa07f5fe4fc1039ced",
     "edits": [
       [13, 13, ""],
       [51, 68, "> source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"],
@@ -43,12 +43,12 @@
       [1423, 1423, "Run the agreed verification plan against the current tree. When the repository enables its quality gate, run the sibling verify-quality-gate and retain the result. If required checks cannot run, leave validation pending. Record the actual test and coverage evidence."],
       [1557, 1557, "Write agent names bare when posting authorized GitHub messages."],
       [1575, 1575, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage."],
-      [2827, 2829, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage. Open the sibling [enhanced review](../enhanced-pr-review/SKILL.md) for the exact head. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer."],
-      [2858, 2860, "   source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_check_dispositions \"<PR>\" \"${FLEET_TARGET_REPO:?}\""],
-      [2865, 2865, "Apply routine fixes with the owning producer. Cross-boundary, sensitive, or twice-failed changes return to the maintainer."],
-      [2923, 2923, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage."],
-      [2942, 2944, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_check_dispositions \"$PR_NUMBER\" \"${FLEET_TARGET_REPO:?}\""],
-      [3081, 3081, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage."]
+      [2841, 2843, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage. Open the sibling [enhanced review](../enhanced-pr-review/SKILL.md) for the exact head. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer."],
+      [2872, 2874, "   source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_check_dispositions \"<PR>\" \"${FLEET_TARGET_REPO:?}\""],
+      [2879, 2879, "Apply routine fixes with the owning producer. Cross-boundary, sensitive, or twice-failed changes return to the maintainer."],
+      [2937, 2937, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage."],
+      [2956, 2958, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_check_dispositions \"$PR_NUMBER\" \"${FLEET_TARGET_REPO:?}\""],
+      [3095, 3095, "Consult the [fleet catalog](../_shared/dispatchable-skills.md) for this stage and record required, completed and held coverage."]
     ]
   },
   "enhanced-pr-review/SKILL.md": {
