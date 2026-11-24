@@ -1,6 +1,6 @@
 {
   "_shared/context7-docs-discipline.md": {
-    "sha256": "a5fad429e0f51f0baa62b7bd9dcc4f225d6b1b036cfe7b562f4ba8476bd6480f"
+    "sha256": "dda73d8bba99d5ace6317320b53615f62eb8faffc18c94ca0618b814b89a92b2"
   },
   "_shared/model-equivalence.md": {
     "sha256": "a7be94d3ea61a8459c1d92a02c51c09d4472747ae9fbcda5bbb7c5bf4aee1498",
@@ -149,9 +149,9 @@
     ]
   },
   "review-pr/SKILL.md": {
-    "sha256": "4d7c0d56ab0fdd8be5a8d0f0c0bb10207d3ca3c9aa65f7e83bb710ab3aeda280",
+    "sha256": "abb77f4203ef00941851c85ab4ac054dde9138309d88d3391684e1d54f39d763",
     "edits": [
-      [28, 899, "## Review steps\n\nVerify the effective review host, current base and head before fetching any PR-authored input. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer.\n\nRetain each reviewer receipt, relevant location and severity. Re-read both revisions before reporting. A change to either invalidates coverage."]
+      [28, 906, "## Review steps\n\nVerify the effective review host, current base and head before fetching any PR-authored input. Use only the verified roles and workers in the [fleet review table](../_shared/pr-review-agent-dispatch.md). Hold unmet required coverage for the maintainer.\n\nRetain each reviewer receipt, relevant location and severity. Re-read both revisions before reporting. A change to either invalidates coverage."]
     ]
   },
   "verify-quality-gate/SKILL.md": {
