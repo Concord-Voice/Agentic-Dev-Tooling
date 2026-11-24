@@ -243,18 +243,25 @@ For each **surviving, non-human-touched** issue that represents real work and wh
    HITS=""
    EPIC_HITS=""
    SEARCH_OK=1
-   # Only tracker issues authored by the running identity count as back-references: a public
-   # sibling repo's issue that merely quotes $PUB_URL must never be reused (and later closed from).
+   # A back-reference counts only if the running identity authored it OR the candidate repo is
+   # private (only people with access can file there, which covers a deliberately reused,
+   # human-authored tracker issue). A PUBLIC sibling repo's issue that merely quotes $PUB_URL
+   # must never be reused, because anyone can file it and Phase 6 would later close from it.
    ME="${FT_ME:-$(gh api user --jq .login 2>/dev/null)}"
    case "$ME" in app/*) ME="${ME#app/}[bot]" ;; esac # gh shows a bot as app/<name>, REST as <name>[bot]: compare in the [bot] form
    [ -n "$ME" ] || SEARCH_OK=0
    while IFS= read -r repo; do
      [ "$SEARCH_OK" = 1 ] || break
      [ -z "$repo" ] && continue
+     # An unknown visibility is not "public": fail the search like any other failed lookup.
+     if ! priv=$(gh repo view "$repo" --json isPrivate --jq .isPrivate 2>/dev/null); then
+       SEARCH_OK=0
+       break
+     fi
      # Capture each search explicitly: a failed search must never read as "zero hits".
      if ! rows=$(gh search issues --repo "$repo" "\"$PUB_URL\"" --json number,body,labels,author \
-         | jq -r --arg repo "$repo" --arg pub_url "$PUB_URL" --arg me "$ME" \
-             '.[] | select(((.author.login // "") | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end | ascii_downcase) == ($me | ascii_downcase)) | select((.body // "") | ascii_downcase | split($pub_url | ascii_downcase) | .[1:] | any(test("^([^0-9]|$)"))) | ["\($repo)#\(.number)", ((.labels // [] | map(.name) | index("type: epic")) != null)] | @tsv'); then
+         | jq -r --arg repo "$repo" --arg pub_url "$PUB_URL" --arg me "$ME" --arg priv "$priv" \
+             '.[] | select($priv == "true" or ((.author.login // "") | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end | ascii_downcase) == ($me | ascii_downcase)) | select((.body // "") | ascii_downcase | split($pub_url | ascii_downcase) | .[1:] | any(test("^([^0-9]|$)"))) | ["\($repo)#\(.number)", ((.labels // [] | map(.name) | index("type: epic")) != null)] | @tsv'); then
        SEARCH_OK=0
        break
      fi
@@ -291,12 +298,12 @@ Update the survivor's **managed status comment** so a public reader sees it's tr
 
 ## Phase 6 — Reverse sync: shipped fix → close/annotate public (mode-gated)
 
-For every public issue whose marker carries an `alpha:` ref, parse `ALPHA_REPO` and `ALPHA_NUM` strictly across every supported form (`repo#N`, `internal#N`, and legacy `owner/repo#N`, `#N`, bare `N`) before querying GitHub. `internal#N` is resolved by finding the one candidate tracker whose issue `N`, **authored by `$ME`** (resolved as in `references/markers-and-templates.md`), carries the public issue's `Refs` back-reference with an **exact** number boundary (`$5` is that public issue number). Any failed lookup fails the whole resolution: an unreachable tracker is not proof of absence, so the caller defers the item to the next run:
+For every public issue whose marker carries an `alpha:` ref, parse `ALPHA_REPO` and `ALPHA_NUM` strictly across every supported form (`repo#N`, `internal#N`, and legacy `owner/repo#N`, `#N`, bare `N`) before querying GitHub. `internal#N` is resolved by finding the one candidate tracker whose issue `N` carries the public issue's `Refs` back-reference with an **exact** number boundary (`$5` is that public issue number). The issue counts only if `$ME` (resolved as in `references/markers-and-templates.md`) authored it **or** its repo is private, the same trust rule as Phase 4. Any failed lookup fails the whole resolution: an unreachable tracker is not proof of absence, so the caller defers the item to the next run:
 
 ```bash
 resolve_alpha_ref() {
   local raw="$1" tracker="$2" candidates="$3" pub="$4" pub_num="${5:-}"
-  local pub_norm repo_part num matches repo body url rest
+  local pub_norm repo_part num matches repo body url rest priv raw
   pub_norm=$(printf '%s' "${pub%.git}" | tr '[:upper:]' '[:lower:]')
   [ -n "${ME:-}" ] || return 1
   case "$ME" in app/*) ME="${ME#app/}[bot]" ;; esac # same [bot]-form normalization as Phase 4
@@ -320,8 +327,12 @@ resolve_alpha_ref() {
         [ -z "$repo" ] && continue
         # A failed lookup is NOT "not here": fail the whole resolution so uniqueness is never
         # established over a repo that could not be read. Zero or several matches also fail closed.
-        body=$(gh issue view "$num" --repo "$repo" --json author,body 2>/dev/null \
-          | jq -r --arg me "$ME" 'if ((.author.login // "") | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end | ascii_downcase) == ($me | ascii_downcase) then (.body // "") else "" end') || return 1
+        # Capture each gh call on its own: a pipeline's status is jq's, so a failed gh would
+        # otherwise read as an empty body unless the shell happened to enable pipefail.
+        priv=$(gh repo view "$repo" --json isPrivate --jq .isPrivate 2>/dev/null) || return 1
+        raw=$(gh issue view "$num" --repo "$repo" --json author,body 2>/dev/null) || return 1
+        body=$(printf '%s' "$raw" \
+          | jq -r --arg me "$ME" --arg priv "$priv" 'if $priv == "true" or ((.author.login // "") | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end | ascii_downcase) == ($me | ascii_downcase) then (.body // "") else "" end') || return 1
         body=$(printf '%s' "$body" | tr '[:upper:]' '[:lower:]')
         rest="$body"
         while [[ "$rest" == *"$url"* ]]; do

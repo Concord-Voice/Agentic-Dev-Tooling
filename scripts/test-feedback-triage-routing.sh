@@ -121,6 +121,14 @@ assert_eq "${ALPHA_REPO}#${ALPHA_NUM}" "example-org/3d-client#89" "digit-leading
 gh_json() { jq -nc --arg a "$1" --arg b "$2" '{author:{login:$a},body:$b}'; }
 # shellcheck disable=SC2329 # Invoked by resolve_alpha_ref.
 gh() {
+  if [[ "$1" == repo ]]; then # gh repo view R --json isPrivate --jq .isPrivate
+    [[ "${GH_PRIV_FAIL:-}" == 1 ]] && return 1
+    case "$3" in
+      "$CLIENT_REPO") printf '%s\n' "${GH_PRIV_CLIENT:-false}" ;;
+      *) printf 'false\n' ;;
+    esac
+    return 0
+  fi
   # gh issue view N --repo R --json author,body
   case "$5" in
     "$CLIENT_REPO") gh_json "${GH_CLIENT_AUTHOR:-$ME}" "${GH_CLIENT_BODY:-Refs $PUB_ISSUE_URL}" ;;
@@ -149,9 +157,19 @@ GH_CLIENT_BODY="see $(printf '%s' "$PUB_ISSUE_URL" | tr '[:lower:]' '[:upper:]')
 if GH_OPS_FAIL=1 GH_BOTH=1 resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
   fail "expected a failed candidate lookup to fail the resolution"
 fi
+# 6e2. Regression: the failed lookup must fail the resolution even WITHOUT pipefail
+if ( set +o pipefail; GH_OPS_FAIL=1 GH_BOTH=1 resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 ); then
+  fail "expected a failed lookup to fail the resolution when pipefail is off"
+fi
 # 6f. Regression: a back-reference authored by someone other than \$ME is ignored
 if GH_CLIENT_AUTHOR="attacker" resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
   fail "expected an untrusted-author back-reference to be ignored"
+fi
+# 6f2. A human-authored issue in a PRIVATE tracker repo is a valid reused back-reference; an unknown visibility fails
+GH_CLIENT_AUTHOR="a-human" GH_PRIV_CLIENT=true resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 \
+  || fail "expected a reused human-authored issue in a private repo to resolve"
+if GH_CLIENT_AUTHOR="a-human" GH_PRIV_FAIL=1 resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
+  fail "expected a failed visibility lookup to fail the resolution"
 fi
 # 6g. Regression: gh shows an App author as app/<name>, ME is the REST <name>[bot] form (and vice versa)
 GH_CLIENT_AUTHOR="app/trusted-app" ME="trusted-app[bot]" resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 \
@@ -189,11 +207,13 @@ fi
 JQ_FILTER="$(awk '/split\(\$pub_url/{gsub(/^ *'\''|'\''[^'\'']*$/, ""); print; exit}' "$SKILL_MD")"
 [[ -n "$JQ_FILTER" ]] || fail "could not extract crash-recovery jq filter from $SKILL_MD"
 jq_out="$(printf '%s' "[{\"number\":4370,\"author\":{\"login\":\"Trusted-Bot\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[{\"name\":\"type: epic\"}]},{\"number\":999,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"unrelated #91\",\"labels\":[]},{\"number\":1000,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"Refs ${PUB_ISSUE_URL}0\",\"labels\":[]},{\"number\":1002,\"author\":{\"login\":\"app/trusted-app\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[]},{\"number\":1001,\"author\":{\"login\":\"attacker\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[]}]" \
-  | jq -r --arg repo "$TRACKER_REPO" --arg pub_url "$PUB_ISSUE_URL" --arg me "$ME" "$JQ_FILTER")"
+  | jq -r --arg repo "$TRACKER_REPO" --arg pub_url "$PUB_ISSUE_URL" --arg me "$ME" --arg priv false "$JQ_FILTER")"
 expected_jq="$(printf '%s#4370\ttrue' "$TRACKER_REPO")"
 assert_eq "$jq_out" "$expected_jq" "crash-recovery jq filter mismatch"
 APP_JSON="[{\"number\":4370,\"author\":{\"login\":\"Trusted-Bot\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[{\"name\":\"type: epic\"}]},{\"number\":999,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"unrelated #91\",\"labels\":[]},{\"number\":1000,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"Refs ${PUB_ISSUE_URL}0\",\"labels\":[]},{\"number\":1002,\"author\":{\"login\":\"app/trusted-app\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[]},{\"number\":1001,\"author\":{\"login\":\"attacker\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[]}]"
-app_out="$(printf '%s' "$APP_JSON" | jq -r --arg repo "$TRACKER_REPO" --arg pub_url "$PUB_ISSUE_URL" --arg me "trusted-app[bot]" "$JQ_FILTER")"
+app_out="$(printf '%s' "$APP_JSON" | jq -r --arg repo "$TRACKER_REPO" --arg pub_url "$PUB_ISSUE_URL" --arg me "trusted-app[bot]" --arg priv false "$JQ_FILTER")"
+priv_out="$(printf '%s' "$APP_JSON" | jq -r --arg repo "$TRACKER_REPO" --arg pub_url "$PUB_ISSUE_URL" --arg me "nobody" --arg priv true "$JQ_FILTER" | cut -f1 | tr '\n' ' ')"
+assert_eq "$priv_out" "$(printf '%s#4370 %s#1002 %s#1001 ' "$TRACKER_REPO" "$TRACKER_REPO" "$TRACKER_REPO")" "private repo must trust any author but still anchor the URL"
 assert_eq "$app_out" "$(printf '%s#1002\tfalse' "$TRACKER_REPO")" "App-authored (app/<name>) hit must match ME=<name>[bot]"
 
 # 9. Regression guard: sub-issue linking must never force replace_parent
