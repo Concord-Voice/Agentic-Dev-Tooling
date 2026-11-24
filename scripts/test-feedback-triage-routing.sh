@@ -95,7 +95,30 @@ assert_phase0_fails '{"feedback_triage":{"routing":{"bad":"not valid/repo"}}}' "
 assert_phase0_fails '{"feedback_triage":{"routing":{"bad":123}}}' "routing contains non-string value"
 assert_phase0_fails "{\"feedback_triage\":{\"routing\":[\"$CLIENT_REPO\"]}}" "routing is non-object JSON"
 
+# 5b. A tracker repo named "internal" would be ambiguous with the opaque internal#N marker form
+assert_phase0_fails '{"feedback_triage":{"routing":{"x":"example-org/Internal"}}}' "a candidate tracker repo is named internal"
+
+# 5c. Disclosure form: anything other than exactly "repo" means the opaque internal#N
+run_disclosure() {
+  (
+    set -euo pipefail
+    # shellcheck disable=SC2034 # Consumed dynamically inside eval "$PHASE0_CODE".
+    TRACKER="$TRACKER_REPO"
+    # shellcheck disable=SC2034 # Consumed dynamically inside eval "$PHASE0_CODE".
+    PUBLIC="$PUBLIC_REPO"
+    # shellcheck disable=SC2329 # Invoked dynamically inside eval "$PHASE0_CODE".
+    rc_get() { local filter="$1" def="$2" out; out=$(printf '%s' "$CFG" | jq -r "$filter" 2>/dev/null) || { printf '%s' "$def"; return 0; }; printf '%s' "$out"; }
+    eval "$PHASE0_CODE"
+    printf '%s\n' "$DISCLOSURE"
+  )
+}
+assert_eq "$(CFG='{}' run_disclosure)" "internal" "unset disclosure must default to internal"
+assert_eq "$(CFG='{"feedback_triage":{"disclosure":"repo"}}' run_disclosure)" "repo" "disclosure repo must be honored"
+assert_eq "$(CFG='{"feedback_triage":{"disclosure":"Repo"}}' run_disclosure)" "internal" "a near-miss value must fall back to internal"
+assert_eq "$(CFG='{"feedback_triage":{"disclosure":"repos"}}' run_disclosure)" "internal" "a typo must fall back to internal"
+
 # 6. Phase 6 resolve_alpha_ref: owner/repo#N, repo#N, #N, and bare N
+# shellcheck disable=SC2034 # Read by resolve_alpha_ref.
 ME="trusted-bot"
 CANDS="$(printf '%s\n%s\n%s' "$TRACKER_REPO" "$CLIENT_REPO" "$OPS_REPO")"
 
@@ -117,79 +140,87 @@ resolve_alpha_ref '3d-client#89' "$TRACKER_REPO" "$DIGIT_CANDS" "$PUBLIC_REPO" |
 assert_eq "${ALPHA_REPO}#${ALPHA_NUM}" "example-org/3d-client#89" "digit-leading repo#N resolution failed"
 
 INTERNAL_REF="internal#45"
-# 6c. internal#N resolves via the Refs back-reference; zero or several matches fail closed
-# shellcheck disable=SC2329 # Invoked by resolve_alpha_ref.
+UPPER_URL="$(printf '%s' "$PUB_ISSUE_URL" | tr '[:lower:]' '[:upper:]')"
+OTHER_URL="https://github.com/${PUBLIC_REPO}/issues/50"
 gh_json() { local author="$1" body="$2"; jq -nc --arg a "$author" --arg b "$body" '{author:{login:$a},body:$b}'; }
 # shellcheck disable=SC2329 # Invoked by resolve_alpha_ref.
 gh() {
-  local group="$1" number_or_repo="$3" repo_arg="${5:-}"
-  if [[ "$group" == repo ]]; then # gh repo view R --json isPrivate --jq .isPrivate
-    [[ "${GH_PRIV_FAIL:-}" == 1 ]] && return 1
-    case "$number_or_repo" in
-      "$CLIENT_REPO") printf '%s\n' "${GH_PRIV_CLIENT:-false}" ;;
-      *) printf 'false\n' ;;
-    esac
-    return 0
-  fi
+  local group="$1" number_or_repo="${3:-}" repo_arg="${5:-}"
+  case "$group" in
+    api) # gh api user --jq .login
+      [[ "${GH_API_FAIL:-}" == 1 ]] && return 1
+      printf '%s\n' "${GH_API_USER:-trusted-bot}"
+      return 0 ;;
+    repo) # gh repo view R --json visibility --jq .visibility
+      [[ "${GH_VIS_FAIL:-}" == 1 ]] && return 1
+      case "$number_or_repo" in
+        "$CLIENT_REPO") printf '%s\n' "${GH_VIS_CLIENT:-PUBLIC}" ;;
+        *) printf 'PUBLIC\n' ;;
+      esac
+      return 0 ;;
+  esac
   # gh issue view N --repo R --json author,body
   case "$repo_arg" in
-    "$CLIENT_REPO") gh_json "${GH_CLIENT_AUTHOR:-$ME}" "${GH_CLIENT_BODY:-Refs $PUB_ISSUE_URL}" ;;
+    "$CLIENT_REPO") gh_json "${GH_CLIENT_AUTHOR:-trusted-bot}" "${GH_CLIENT_BODY:-Refs $PUB_ISSUE_URL}" ;;
     "$OPS_REPO")
       [[ "${GH_OPS_FAIL:-}" == 1 ]] && return 1
       if [[ "${GH_OPS_ABSENT:-}" == 1 ]]; then
         echo "GraphQL: Could not resolve to an issue or pull request with the number of $number_or_repo. (repository.issue)" >&2
         return 1
       fi
-      if [[ "${GH_BOTH:-}" == 1 ]]; then gh_json "$ME" "Refs $PUB_ISSUE_URL"; else gh_json "$ME" "unrelated"; fi
+      if [[ "${GH_OPS_404:-}" == 1 ]]; then echo "gh: Not Found (HTTP 404)" >&2; return 1; fi
+      if [[ "${GH_BOTH:-}" == 1 ]]; then gh_json "trusted-bot" "Refs $PUB_ISSUE_URL"; else gh_json "trusted-bot" "unrelated"; fi
       ;;
-    *) gh_json "$ME" "unrelated" ;;
+    *) gh_json "trusted-bot" "unrelated" ;;
   esac
 }
-resolve_alpha_ref "$INTERNAL_REF" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 || fail "internal#45 rejected"
+resolves() { resolve_alpha_ref "$INTERNAL_REF" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" "${1:-91}"; }
+# 6c. internal#N resolves via the last-line Refs back-reference; zero or several matches fail closed
+resolves || fail "internal#45 rejected"
 assert_eq "${ALPHA_REPO}#${ALPHA_NUM}" "${CLIENT_REPO}#45" "internal#N resolution failed"
-if GH_BOTH=1 resolve_alpha_ref "$INTERNAL_REF" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
-  fail "expected internal#N matching two trackers to fail closed"
-fi
-if resolve_alpha_ref "$INTERNAL_REF" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 92; then
-  fail "expected internal#N with no back-reference match to fail closed"
-fi
-# 6d. Regression: URL match is number-anchored (issues/91 must not match issues/910), case-insensitive
-if GH_CLIENT_BODY="Refs ${PUB_ISSUE_URL}0" resolve_alpha_ref "$INTERNAL_REF" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
-  fail "expected issues/910 not to satisfy a back-reference to issues/91"
-fi
-GH_CLIENT_BODY="see $(printf '%s' "$PUB_ISSUE_URL" | tr '[:lower:]' '[:upper:]'). Thanks" \
-  resolve_alpha_ref "$INTERNAL_REF" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 || fail "case/boundary-insensitive match rejected"
-# 6e. Regression: a failed lookup fails the resolution instead of reading as absence
-if GH_OPS_FAIL=1 GH_BOTH=1 resolve_alpha_ref "$INTERNAL_REF" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
-  fail "expected a failed candidate lookup to fail the resolution"
-fi
-# 6e1. A sibling tracker that never reached issue N is absence, not an error; other failures still fail
-GH_OPS_ABSENT=1 resolve_alpha_ref "$INTERNAL_REF" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 \
-  || fail "expected a not-found issue in a sibling tracker to count as absence"
+if GH_BOTH=1 resolves; then fail "expected internal#N matching two trackers to fail closed"; fi
+if resolves 92; then fail "expected internal#N with no back-reference match to fail closed"; fi
+
+# 6d. Only the LAST non-empty line counts, exactly: issues/91 is not issues/910, and a mention elsewhere is not a back-reference
+if GH_CLIENT_BODY="Refs ${PUB_ISSUE_URL}0" resolves; then fail "expected issues/910 not to satisfy a back-reference to issues/91"; fi
+if GH_CLIENT_BODY="$(printf 'Refs %s\nthanks for the report' "$PUB_ISSUE_URL")" resolves; then fail "expected a Refs line that is not last to be ignored"; fi
+if GH_CLIENT_BODY="see ${PUB_ISSUE_URL}. Thanks" resolves; then fail "expected a prose mention to be ignored"; fi
+if GH_CLIENT_BODY="Refs ${PUB_ISSUE_URL}/more" resolves; then fail "expected trailing path text to be ignored"; fi
+GH_CLIENT_BODY="$(printf 'Desc\n\n  REFS %s  \n\n\n' "$UPPER_URL")" resolves || fail "case, indentation and trailing blank lines must still match"
+GH_CLIENT_BODY="$(printf 'Desc\n<!-- feedback-triage:ref %s -->\n' "$PUB_ISSUE_URL")" resolves || fail "the feedback-triage:ref comment must match"
+
+# 6d2. Regression (proven PoC): the reporter's Description is seeded into the tracker body, which the routine authored. A victim URL inside it, even after a fence break, must not bind.
+# shellcheck disable=SC2016 # The backticks are literal Markdown fence text.
+ATTACK_BODY="$(printf '## Description\n```\nRefs %s\n```\nRefs %s\nRefs %s\n\nRefs %s' "$PUB_ISSUE_URL" "$PUB_ISSUE_URL" "$PUB_ISSUE_URL" "$OTHER_URL")"
+if GH_CLIENT_BODY="$ATTACK_BODY" resolves 91; then fail "a victim URL planted in the seeded Description must not bind public #91"; fi
+GH_CLIENT_BODY="$ATTACK_BODY" resolves 50 || fail "the routine's own last-line Refs for #50 must still resolve"
+
+# 6e. A sibling tracker that never reached issue N is absence; every other failure fails the resolution (with pipefail on or off)
+GH_OPS_ABSENT=1 resolves || fail "expected the exact not-found message to count as absence"
 assert_eq "${ALPHA_REPO}#${ALPHA_NUM}" "${CLIENT_REPO}#45" "absence in a sibling must not change the resolved tracker"
-# 6e2. Regression: the failed lookup must fail the resolution even WITHOUT pipefail
-if ( set +o pipefail; GH_OPS_FAIL=1 GH_BOTH=1 resolve_alpha_ref "$INTERNAL_REF" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 ); then
-  fail "expected a failed lookup to fail the resolution when pipefail is off"
-fi
-# 6f. Regression: a back-reference authored by someone other than \$ME is ignored
-if GH_CLIENT_AUTHOR="attacker" resolve_alpha_ref "$INTERNAL_REF" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
-  fail "expected an untrusted-author back-reference to be ignored"
-fi
-# 6f2. A human-authored issue in a PRIVATE tracker repo is a valid reused back-reference; an unknown visibility fails
-GH_CLIENT_AUTHOR="a-human" GH_PRIV_CLIENT=true resolve_alpha_ref "$INTERNAL_REF" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 \
-  || fail "expected a reused human-authored issue in a private repo to resolve"
-if GH_CLIENT_AUTHOR="a-human" GH_PRIV_FAIL=1 resolve_alpha_ref "$INTERNAL_REF" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
-  fail "expected a failed visibility lookup to fail the resolution"
-fi
-# 6g. Regression: gh shows an App author as app/<name>, ME is the REST <name>[bot] form (and vice versa)
-GH_CLIENT_AUTHOR="app/trusted-app" ME="trusted-app[bot]" resolve_alpha_ref "$INTERNAL_REF" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 \
-  || fail "expected app/<name> author to match ME=<name>[bot]"
-GH_CLIENT_AUTHOR="app/trusted-app" ME="app/trusted-app" resolve_alpha_ref "$INTERNAL_REF" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 \
-  || fail "expected app/<name> author to match ME=app/<name>"
-if GH_CLIENT_AUTHOR="trusted-app" ME="trusted-app[bot]" resolve_alpha_ref "$INTERNAL_REF" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
-  fail "expected the user trusted-app not to pass as the App trusted-app[bot]"
-fi
-unset -f gh
+if GH_OPS_404=1 resolves; then fail "a bare HTTP 404 (which also hides permission denials) must not count as absence"; fi
+if GH_OPS_FAIL=1 GH_BOTH=1 resolves; then fail "expected a failed candidate lookup to fail the resolution"; fi
+if ( set +o pipefail; GH_OPS_FAIL=1 GH_BOTH=1 resolves ); then fail "expected a failed lookup to fail the resolution when pipefail is off"; fi
+if GH_VIS_FAIL=1 resolves; then fail "expected a failed visibility lookup to fail the resolution"; fi
+
+# 6f. Trust: only the running identity's issues, or any author in a PRIVATE repo (not INTERNAL, not PUBLIC)
+if GH_CLIENT_AUTHOR="attacker" resolves; then fail "expected an untrusted author in a public repo to be ignored"; fi
+GH_CLIENT_AUTHOR="a-human" GH_VIS_CLIENT=PRIVATE resolves || fail "expected a reused human-authored issue in a PRIVATE repo to resolve"
+if GH_CLIENT_AUTHOR="a-human" GH_VIS_CLIENT=INTERNAL resolves; then fail "expected an INTERNAL (enterprise-wide) repo not to be trusted"; fi
+
+# 6g. gh shows an App author as app/<name>; the running identity is the <name>[bot] form (and vice versa)
+( unset ME FT_ME; GH_CLIENT_AUTHOR="app/trusted-app" GH_API_USER="trusted-app[bot]" resolves ) || fail "expected app/<name> author to match <name>[bot]"
+GH_CLIENT_AUTHOR="app/trusted-app" ME="app/trusted-app" resolves || fail "expected app/<name> author to match ME=app/<name>"
+if ( unset ME FT_ME; GH_CLIENT_AUTHOR="trusted-app" GH_API_USER="trusted-app[bot]" resolves ); then fail "expected the user trusted-app not to pass as the App trusted-app[bot]"; fi
+
+# 6h. Phase 6 runs in a fresh shell: the identity is resolved inside the function, and only internal#N needs it
+(
+  unset ME FT_ME
+  resolves || fail "internal#N must resolve the running identity itself"
+  GH_API_FAIL=1 resolve_alpha_ref '#3692' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" || fail "#N must not need the running identity"
+  GH_API_FAIL=1 resolve_alpha_ref 'app-client#89' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" || fail "repo#N must not need the running identity"
+  if GH_API_FAIL=1 resolves; then fail "internal#N with no resolvable identity must fail closed"; fi
+)
 
 # 7. Phase 6 resolve_alpha_ref fail-closed cases: $PUBLIC target, ambiguous basename, malformed ref
 if resolve_alpha_ref "${PUBLIC_REPO}#9" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO"; then
@@ -213,19 +244,49 @@ if resolve_alpha_ref "${CLIENT_REPO}#abc" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO
   fail "expected resolve_alpha_ref to reject non-numeric issue number"
 fi
 
-# 8. Crash-recovery jq filter syntax & epic label extraction check
-JQ_FILTER="$(awk '/split\(\$pub_url/{gsub(/^ *'\''|'\''[^'\'']*$/, ""); print; exit}' "$SKILL_MD")"
-[[ -n "$JQ_FILTER" ]] || fail "could not extract crash-recovery jq filter from $SKILL_MD"
-jq_out="$(printf '%s' "[{\"number\":4370,\"author\":{\"login\":\"Trusted-Bot\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[{\"name\":\"type: epic\"}]},{\"number\":999,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"unrelated #91\",\"labels\":[]},{\"number\":1000,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"Refs ${PUB_ISSUE_URL}0\",\"labels\":[]},{\"number\":1002,\"author\":{\"login\":\"app/trusted-app\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[]},{\"number\":1001,\"author\":{\"login\":\"attacker\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[]}]" \
-  | jq -r --arg repo "$TRACKER_REPO" --arg pub_url "$PUB_ISSUE_URL" --arg me "$ME" --arg priv false "$JQ_FILTER")"
-expected_jq="$(printf '%s#4370\ttrue' "$TRACKER_REPO")"
-assert_eq "$jq_out" "$expected_jq" "crash-recovery jq filter mismatch"
-APP_JSON="[{\"number\":4370,\"author\":{\"login\":\"Trusted-Bot\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[{\"name\":\"type: epic\"}]},{\"number\":999,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"unrelated #91\",\"labels\":[]},{\"number\":1000,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"Refs ${PUB_ISSUE_URL}0\",\"labels\":[]},{\"number\":1002,\"author\":{\"login\":\"app/trusted-app\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[]},{\"number\":1001,\"author\":{\"login\":\"attacker\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[]}]"
-app_out="$(printf '%s' "$APP_JSON" | jq -r --arg repo "$TRACKER_REPO" --arg pub_url "$PUB_ISSUE_URL" --arg me "trusted-app[bot]" --arg priv false "$JQ_FILTER")"
-priv_out="$(printf '%s' "$APP_JSON" | jq -r --arg repo "$TRACKER_REPO" --arg pub_url "$PUB_ISSUE_URL" --arg me "nobody" --arg priv true "$JQ_FILTER" | cut -f1 | tr '\n' ' ')"
-assert_eq "$priv_out" "$(printf '%s#4370 %s#1002 %s#1001 ' "$TRACKER_REPO" "$TRACKER_REPO" "$TRACKER_REPO")" "private repo must trust any author but still anchor the URL"
-assert_eq "$app_out" "$(printf '%s#1002\tfalse' "$TRACKER_REPO")" "App-authored (app/<name>) hit must match ME=<name>[bot]"
-
+# 8. Phase 4 idempotency search (the real block from SKILL.md, with a mocked gh)
+PHASE4_CODE="$(awk '/PUB_URL="https:\/\/github.com\//{c=1} c && /^ *```$/{exit} c{print}' "$SKILL_MD")"
+[[ -n "$PHASE4_CODE" ]] || fail "could not extract the Phase 4 search block from $SKILL_MD"
+s_item() { jq -nc --argjson n "$1" --arg a "$2" --arg b "$3" --argjson e "${4:-false}" '{number:$n,author:{login:$a},body:$b,labels:(if $e then [{name:"type: epic"}] else [] end)}'; }
+run_phase4() {
+  (
+    # shellcheck disable=SC2034 # Consumed dynamically inside eval "$PHASE4_CODE".
+    PUBLIC_CLEAN="$PUBLIC_REPO"
+    # shellcheck disable=SC2034 # Consumed dynamically inside eval "$PHASE4_CODE".
+    N=91
+    # shellcheck disable=SC2034 # Consumed dynamically inside eval "$PHASE4_CODE".
+    CANDIDATE_TRACKERS="${P4_CANDS:-$TRACKER_REPO}"
+    unset FT_ME
+    eval "$PHASE4_CODE"
+    printf '%s|%s|%s\n' "$SEARCH_OK" "$(printf '%s' "$HITS" | tr '\n' ',')" "$(printf '%s' "$EPIC_HITS" | tr '\n' ',')"
+  )
+}
+FIXTURE="[$(s_item 4370 Trusted-Bot "$(printf 'desc\n\nRefs %s' "$PUB_ISSUE_URL")" true),$(s_item 999 trusted-bot 'unrelated #91'),$(s_item 1000 trusted-bot "Refs ${PUB_ISSUE_URL}0"),$(s_item 1002 trusted-bot "$ATTACK_BODY"),$(s_item 1003 trusted-bot "$(printf 'Refs %s\nmore' "$PUB_ISSUE_URL")"),$(s_item 1001 attacker "Refs $PUB_ISSUE_URL")]"
+# shellcheck disable=SC2329 # Invoked by the extracted Phase 4 block.
+gh() {
+  case "$1" in
+    search) [[ "${GH_SEARCH_FAIL:-}" == 1 ]] && return 1; printf '%s\n' "$GH_SEARCH_JSON" ;;
+    api) [[ "${GH_API_FAIL:-}" == 1 ]] && return 1; printf '%s\n' "${GH_API_USER:-trusted-bot}" ;;
+    repo) [[ "${GH_VIS_FAIL:-}" == 1 ]] && return 1; printf '%s\n' "${GH_VIS:-PUBLIC}" ;;
+  esac
+}
+export GH_SEARCH_JSON="$FIXTURE"
+T="$TRACKER_REPO"
+assert_eq "$(run_phase4)" "1|${T}#4370|${T}#4370" "public repo: only the routine's last-line Refs counts (author trusted, planted, prefix and non-last lines ignored)"
+assert_eq "$(GH_VIS=PRIVATE run_phase4)" "1|${T}#4370,${T}#1001|${T}#4370" "private repo: any author counts, but still only the last-line Refs"
+assert_eq "$(GH_VIS=INTERNAL run_phase4)" "1|${T}#4370|${T}#4370" "internal repo: not trusted for other authors"
+APP_ITEM="$(s_item 1004 app/trusted-app "Refs $PUB_ISSUE_URL")"
+export GH_SEARCH_JSON="[$APP_ITEM]"
+assert_eq "$(GH_API_USER='trusted-app[bot]' run_phase4)" "1|${T}#1004|" "App author app/<name> must match ME=<name>[bot]"
+assert_eq "$(GH_API_USER='trusted-app' run_phase4)" "1||" "the user must not pass as the App"
+# Fail closed: no identity, unknown visibility, a failed search, or a full page that may be truncated
+assert_eq "$(GH_API_FAIL=1 run_phase4)" "0||" "no resolvable identity must fail the search"
+assert_eq "$(GH_VIS_FAIL=1 run_phase4)" "0||" "unknown visibility must fail the search"
+assert_eq "$(GH_SEARCH_FAIL=1 run_phase4)" "0||" "a failed search must not read as zero hits"
+FULL_PAGE="$(jq -nc '[range(0;100)|{number:.,author:{login:"x"},body:"",labels:[]}]')"
+export GH_SEARCH_JSON="$FULL_PAGE"
+assert_eq "$(run_phase4)" "0||" "a full page of results may be truncated and must fail the search"
+unset GH_SEARCH_JSON
 # 9. Regression guard: sub-issue linking must never force replace_parent
 if grep -q -- 'replace_parent' "$ALPHA_SYNC_MD"; then
   fail "$ALPHA_SYNC_MD must not reference replace_parent when linking sub-issues"
