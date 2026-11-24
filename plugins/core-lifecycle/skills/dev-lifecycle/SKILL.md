@@ -2456,6 +2456,11 @@ while :; do
   TYPED=$(jq -c '[ (.bots // [])[] | [ .login ] | flatten | .[] | select(type == "string")
                    | ascii_downcase | select(endswith("[bot]")) | sub("\\[bot\\]$"; "") ] | unique' "$CFG") \
     || { echo "UNKNOWN: could not derive the App login set from $CFG"; exit 2; }
+  # Capture both activity responses before checking REST actor types. All three GraphQL legs
+  # below must evaluate these same responses for this poll.
+  PR_VIEW=$(gh pr view <PR> --json reviews,comments,statusCheckRollup 2>/dev/null) \
+    && PR_COMMENTS=$(gh pr view <PR> --json comments 2>/dev/null) \
+    || { echo "UNKNOWN: reviewer probe failed (auth, rate limit or API error) — absence here is unobserved, not confirmed"; exit 2; }
   IMPOSTORS=$( set -o pipefail
       { gh api --paginate "repos/<owner>/<repo>/issues/<PR>/comments" \
         && gh api --paginate "repos/<owner>/<repo>/pulls/<PR>/reviews"; } \
@@ -2464,7 +2469,7 @@ while :; do
             | .node_id ]' ) \
     || { echo "UNKNOWN: impostor probe failed — a User account with an App's bare login is indistinguishable from the App"; exit 2; }
   now=$( set -o pipefail
-         { gh pr view <PR> --json reviews,comments,statusCheckRollup \
+         { printf '%s' "$PR_VIEW" \
              | jq -r --arg since "$READY_ISO" --arg want "$WANT_FLAT" --argjson nv "$NONVERDICT" \
                      --arg declined "$DECLINED_ALIASES" --arg head "$HEAD_SHA" \
                      --argjson logins "$LOGINS" --argjson imp "$IMPOSTORS" '
@@ -2553,7 +2558,7 @@ while :; do
                                       | contains($a | ascii_downcase)) | not )) ]
                  | map(select(. as $s | ($want|split("\n"))
                        | any(. as $w | ($s|ascii_downcase) | contains($w|ascii_downcase)))) | .[]' \
-           && gh pr view <PR> --json comments \
+           && printf '%s' "$PR_COMMENTS" \
              | jq -r --arg since "$READY_ISO" --argjson markers "$MARKERS" --argjson imp "$IMPOSTORS" '
                  # Same GraphQL-vs-REST login normalisation as the arrival leg above, and this
                  # leg is where the mismatch was ORIGINALLY latent: `.login` is
@@ -2587,7 +2592,7 @@ while :; do
   # it is just not an ARRIVAL. Probe it separately, and ADVISORILY: unlike the three arrival legs
   # above, a failed ack probe degrades the timeout MESSAGE and never the verdict, so it must not
   # exit 2. Losing it costs the "acknowledged but never delivered" wording; nothing else.
-  nv_now=$( gh pr view <PR> --json comments \
+  nv_now=$( printf '%s' "$PR_COMMENTS" \
       | jq -r --arg since "$READY_ISO" --argjson nv "$NONVERDICT" --argjson imp "$IMPOSTORS" '
           def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
           [ .comments[]? | select((.id | IN($imp[])) | not)
@@ -2599,7 +2604,7 @@ while :; do
   # it before the verdict is persisted. HEAD_SHA and the cutoff are fixed when the monitor starts,
   # so after a push mid-wait every leg can count a review of the superseded head, and `at_head`
   # can admit a Completed table that names it. Checking after every read means a push that lands
-  # during ANY probe is caught; an earlier placement missed one during the ack probe above. A push
+  # during ANY probe is caught, including the last read of inline comments above. A push
   # after this check is the same race as a push just after the monitor exits, and re-entry covers
   # both: PHASE75_DONE records the old SHA, which no longer matches. Record nothing here.
   # Shape-check it exactly as HEAD_SHA was at the top: a read that succeeds but prints `null` or

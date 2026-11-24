@@ -479,6 +479,20 @@ class FleetWorkflowTests(unittest.TestCase):
             self.assertIn("${FLEET_SKILLS:?}", loader.read_text())
             self.assertNotIn("git show \"$RC_OID:scripts/repo-config.sh", loader.read_text())
 
+    def test_arrival_monitor_uses_pre_identity_snapshots(self):
+        served = fleet.resolve(self.cache, "dev-lifecycle")
+        native = fleet.ROOT / fleet.CORE / "dev-lifecycle/SKILL.md"
+        for entry in (native, served):
+            with self.subTest(entry=entry):
+                tick = entry.read_text().split("  TYPED=$(", 1)[1].split("  cur_head=$(", 1)[0]
+                reads, verdicts = tick.split("  IMPOSTORS=$(", 1)
+                self.assertEqual(reads.count("gh pr view <PR> --json reviews,comments,statusCheckRollup"), 1)
+                self.assertEqual(reads.count("gh pr view <PR> --json comments"), 1)
+                self.assertNotIn("gh pr view <PR>", verdicts)
+                self.assertIn("""{ printf '%s' "$PR_VIEW" """, verdicts)
+                self.assertIn("""&& printf '%s' "$PR_COMMENTS" """, verdicts)
+                self.assertIn("""nv_now=$( printf '%s' "$PR_COMMENTS" """, verdicts)
+
     def test_served_lifecycle_approval_matrix_and_dispatch_contract(self):
         entry = fleet.resolve(self.cache, "dev-lifecycle")
         dev = entry.read_text()
