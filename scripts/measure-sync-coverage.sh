@@ -31,6 +31,7 @@ bash "$ROOT/scripts/test-native-agents.sh"
 "$SYNC_REAL_PYTHON" -m coverage run --parallel-mode "$ROOT/scripts/test-fleet-workflows.py"
 "$SYNC_REAL_PYTHON" -m coverage run --parallel-mode "$ROOT/scripts/test-architect-git-evidence.py"
 "$SYNC_REAL_PYTHON" -m coverage run --parallel-mode "$ROOT/scripts/test-claude-architect.py"
+"$SYNC_REAL_PYTHON" -m coverage run --parallel-mode "$ROOT/scripts/test-protected-sonar.py"
 "$SYNC_REAL_PYTHON" -m coverage combine --quiet "$TMP"
 "$SYNC_REAL_PYTHON" -m coverage report --include='*/sync-shared-safe.py' --fail-under=80
 "$SYNC_REAL_PYTHON" -m coverage report --include='*/render-agent-profiles.py' --fail-under=80
@@ -38,4 +39,5 @@ bash "$ROOT/scripts/test-native-agents.sh"
 "$SYNC_REAL_PYTHON" -m coverage report --include='*/resolve-fleet-workflow.py' --fail-under=80
 architect_sources="*/architect_git_evidence.py,*/architect_git_mcp.py,*/claude-architect.py"
 "$SYNC_REAL_PYTHON" -m coverage report --include="$architect_sources" --fail-under=80
-"$SYNC_REAL_PYTHON" -m coverage xml --quiet --include='*/sync-shared-safe.py,*/render-agent-profiles.py,*/codex-isolated-review.py,*/codex_review_session.py,*/test-codex-isolated-review.py,*/resolve-fleet-workflow.py,*/native-issue-index.py,*/test-fleet-workflows.py,'"$architect_sources" -o "$OUTPUT"
+"$SYNC_REAL_PYTHON" -m coverage report --include='*/protected_sonar.py' --fail-under=80
+"$SYNC_REAL_PYTHON" -m coverage xml --quiet --include='*/sync-shared-safe.py,*/render-agent-profiles.py,*/codex-isolated-review.py,*/codex_review_session.py,*/test-codex-isolated-review.py,*/resolve-fleet-workflow.py,*/native-issue-index.py,*/test-fleet-workflows.py,*/protected_sonar.py,'"$architect_sources" -o "$OUTPUT"
