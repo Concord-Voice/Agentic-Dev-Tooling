@@ -153,6 +153,14 @@ fi
 if GH_CLIENT_AUTHOR="attacker" resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
   fail "expected an untrusted-author back-reference to be ignored"
 fi
+# 6g. Regression: gh shows an App author as app/<name>, ME is the REST <name>[bot] form (and vice versa)
+GH_CLIENT_AUTHOR="app/trusted-app" ME="trusted-app[bot]" resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 \
+  || fail "expected app/<name> author to match ME=<name>[bot]"
+GH_CLIENT_AUTHOR="app/trusted-app" ME="app/trusted-app" resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 \
+  || fail "expected app/<name> author to match ME=app/<name>"
+if GH_CLIENT_AUTHOR="trusted-app" ME="trusted-app[bot]" resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
+  fail "expected the user trusted-app not to pass as the App trusted-app[bot]"
+fi
 unset -f gh
 
 # 7. Phase 6 resolve_alpha_ref fail-closed cases: $PUBLIC target, ambiguous basename, malformed ref
@@ -180,10 +188,13 @@ fi
 # 8. Crash-recovery jq filter syntax & epic label extraction check
 JQ_FILTER="$(awk '/split\(\$pub_url/{gsub(/^ *'\''|'\''[^'\'']*$/, ""); print; exit}' "$SKILL_MD")"
 [[ -n "$JQ_FILTER" ]] || fail "could not extract crash-recovery jq filter from $SKILL_MD"
-jq_out="$(printf '%s' "[{\"number\":4370,\"author\":{\"login\":\"Trusted-Bot\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[{\"name\":\"type: epic\"}]},{\"number\":999,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"unrelated #91\",\"labels\":[]},{\"number\":1000,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"Refs ${PUB_ISSUE_URL}0\",\"labels\":[]},{\"number\":1001,\"author\":{\"login\":\"attacker\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[]}]" \
+jq_out="$(printf '%s' "[{\"number\":4370,\"author\":{\"login\":\"Trusted-Bot\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[{\"name\":\"type: epic\"}]},{\"number\":999,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"unrelated #91\",\"labels\":[]},{\"number\":1000,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"Refs ${PUB_ISSUE_URL}0\",\"labels\":[]},{\"number\":1002,\"author\":{\"login\":\"app/trusted-app\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[]},{\"number\":1001,\"author\":{\"login\":\"attacker\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[]}]" \
   | jq -r --arg repo "$TRACKER_REPO" --arg pub_url "$PUB_ISSUE_URL" --arg me "$ME" "$JQ_FILTER")"
 expected_jq="$(printf '%s#4370\ttrue' "$TRACKER_REPO")"
 assert_eq "$jq_out" "$expected_jq" "crash-recovery jq filter mismatch"
+APP_JSON="[{\"number\":4370,\"author\":{\"login\":\"Trusted-Bot\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[{\"name\":\"type: epic\"}]},{\"number\":999,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"unrelated #91\",\"labels\":[]},{\"number\":1000,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"Refs ${PUB_ISSUE_URL}0\",\"labels\":[]},{\"number\":1002,\"author\":{\"login\":\"app/trusted-app\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[]},{\"number\":1001,\"author\":{\"login\":\"attacker\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[]}]"
+app_out="$(printf '%s' "$APP_JSON" | jq -r --arg repo "$TRACKER_REPO" --arg pub_url "$PUB_ISSUE_URL" --arg me "trusted-app[bot]" "$JQ_FILTER")"
+assert_eq "$app_out" "$(printf '%s#1002\tfalse' "$TRACKER_REPO")" "App-authored (app/<name>) hit must match ME=<name>[bot]"
 
 # 9. Regression guard: sub-issue linking must never force replace_parent
 if grep -q -- 'replace_parent' "$ALPHA_SYNC_MD"; then

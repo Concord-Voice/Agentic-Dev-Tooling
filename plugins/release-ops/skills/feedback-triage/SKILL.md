@@ -246,6 +246,7 @@ For each **surviving, non-human-touched** issue that represents real work and wh
    # Only tracker issues authored by the running identity count as back-references: a public
    # sibling repo's issue that merely quotes $PUB_URL must never be reused (and later closed from).
    ME="${FT_ME:-$(gh api user --jq .login 2>/dev/null)}"
+   case "$ME" in app/*) ME="${ME#app/}[bot]" ;; esac # gh shows a bot as app/<name>, REST as <name>[bot]: compare in the [bot] form
    [ -n "$ME" ] || SEARCH_OK=0
    while IFS= read -r repo; do
      [ "$SEARCH_OK" = 1 ] || break
@@ -253,7 +254,7 @@ For each **surviving, non-human-touched** issue that represents real work and wh
      # Capture each search explicitly: a failed search must never read as "zero hits".
      if ! rows=$(gh search issues --repo "$repo" "\"$PUB_URL\"" --json number,body,labels,author \
          | jq -r --arg repo "$repo" --arg pub_url "$PUB_URL" --arg me "$ME" \
-             '.[] | select(((.author.login // "") | ascii_downcase) == ($me | ascii_downcase)) | select((.body // "") | ascii_downcase | split($pub_url | ascii_downcase) | .[1:] | any(test("^([^0-9]|$)"))) | ["\($repo)#\(.number)", ((.labels // [] | map(.name) | index("type: epic")) != null)] | @tsv'); then
+             '.[] | select(((.author.login // "") | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end | ascii_downcase) == ($me | ascii_downcase)) | select((.body // "") | ascii_downcase | split($pub_url | ascii_downcase) | .[1:] | any(test("^([^0-9]|$)"))) | ["\($repo)#\(.number)", ((.labels // [] | map(.name) | index("type: epic")) != null)] | @tsv'); then
        SEARCH_OK=0
        break
      fi
@@ -272,7 +273,7 @@ For each **surviving, non-human-touched** issue that represents real work and wh
    - **Reusing a parent epic** (from either branch above) ⇒ first **reconcile** it: list its sub-issues (`gh api "repos/$EPIC_REPO/issues/$EPIC_NUM/sub_issues"`), create any missing child tasking issue per step 3, and link any unlinked child. Record `alpha` **only after** every required child exists and is linked; if reconciliation fails or the required child set is unclear, leave `alpha` unset (so the next run retries Phase 4) and log it to the Phase 7 digest. Recording `alpha` early would exclude the item from Phase 4 forever and leave the breakdown incomplete.
    The marker's `alpha:` field stays the primary record; this search is only the crash-recovery fallback.
 3. **Dispatch `/issue-creation`** in `$TARGET_REPO` with a tracking-request payload (target repo, topic, kind→labels, the public body, `reports=N` as the demand signal, and the public URL as a `Refs` back-reference). If the fix spans **multiple repositories**, create the **epic-style parent** (`type: epic`) in `$TARGET_REPO` (the main repo owning the fix, carrying `Refs https://github.com/$PUBLIC_CLEAN/issues/$N`), create child tasking issues in each sibling repo that owns an individual tasking (referencing the parent `owner/repo#PARENT_NUM` rather than repeating bare `Refs $PUB_URL`), and link every cross-repo child via GitHub's native sub-issues API (`POST repos/{owner}/{repo}/issues/{parent_num}/sub_issues` with `sub_issue_id`, without `replace_parent=true`). The dispatch contract — including how `/issue-creation`'s human checkpoints are answered in auto mode, routing rules, label/domain/release mapping, and demand-signal→Priority mapping — lives in [`references/alpha-sync.md`](references/alpha-sync.md). Created tracking issues land at board **Status = Triage/Backlog**, never `Ready`: a human still vets scope before work starts.
-4. Capture the full new (or reused) `<owner/repo>#NNN` ref (the parent epic when multi-repo). This full form is for internal use only; write the public marker per Phase 5, never with an `owner/` slug and its **`release:` label** (the shipping stream) → the **release window** (`v0.2.0-Beta`, `v1.0.0`, … or `a future release`). The window derives from the ship stream, NOT the milestone (a complete-by deadline). Derivation in [`references/alpha-sync.md`](references/alpha-sync.md).
+4. Capture the full new (or reused) `<owner/repo>#NNN` ref (the parent epic when multi-repo) and its **`release:` label** (the shipping stream) → the **release window** (`v0.2.0-Beta`, `v1.0.0`, … or `a future release`). The window derives from the ship stream, NOT the milestone (a complete-by deadline). Derivation in [`references/alpha-sync.md`](references/alpha-sync.md). The full ref is for internal use only; write the public marker per Phase 5, never with an `owner/` slug.
 
 ---
 
@@ -298,6 +299,7 @@ resolve_alpha_ref() {
   local pub_norm repo_part num matches repo body url rest
   pub_norm=$(printf '%s' "${pub%.git}" | tr '[:upper:]' '[:lower:]')
   [ -n "${ME:-}" ] || return 1
+  case "$ME" in app/*) ME="${ME#app/}[bot]" ;; esac # same [bot]-form normalization as Phase 4
   case "$raw" in
     */*\#*)
       repo_part="${raw%#*}"
@@ -319,7 +321,7 @@ resolve_alpha_ref() {
         # A failed lookup is NOT "not here": fail the whole resolution so uniqueness is never
         # established over a repo that could not be read. Zero or several matches also fail closed.
         body=$(gh issue view "$num" --repo "$repo" --json author,body 2>/dev/null \
-          | jq -r --arg me "$ME" 'if ((.author.login // "") | ascii_downcase) == ($me | ascii_downcase) then (.body // "") else "" end') || return 1
+          | jq -r --arg me "$ME" 'if ((.author.login // "") | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end | ascii_downcase) == ($me | ascii_downcase) then (.body // "") else "" end') || return 1
         body=$(printf '%s' "$body" | tr '[:upper:]' '[:lower:]')
         rest="$body"
         while [[ "$rest" == *"$url"* ]]; do
