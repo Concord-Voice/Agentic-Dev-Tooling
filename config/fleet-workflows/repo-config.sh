@@ -70,8 +70,14 @@ fleet_load_repo_config() {
   else
     response=$(gh api "repos/$repo/git/blobs/$blob") || return 1
     config=$(jq -er --arg id "$blob" 'select(.sha == $id and .encoding == "base64" and
-      (.size | type == "number" and . > 0)) | .content | @base64d | fromjson
-      | select(type == "object") | tojson' <<<"$response") || return 1
+      (.size | type == "number" and . > 0))
+      # GitHub wraps blob base64 with LF. Fold only LF, then require canonical
+      # base64 so other whitespace, malformed padding and changed bytes fail.
+      | (.content | strings | gsub("\n"; "")) as $encoded
+      | select($encoded | test("^[A-Za-z0-9+/]+={0,2}$"))
+      | ($encoded | @base64d) as $decoded
+      | select(($decoded | @base64) == $encoded)
+      | $decoded | fromjson | select(type == "object") | tojson' <<<"$response") || return 1
     fleet_set_config "$oid" "$config" present || return 1
   fi
   RC_TRUSTED_REPO=$repo

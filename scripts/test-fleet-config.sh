@@ -35,8 +35,15 @@ case "$1 $2" in
   "api repos/acme/example/git/blobs/$blob")
     if [[ -n "${FIXTURE_CONFIG+x}" ]]; then config="$FIXTURE_CONFIG"; else config='{"value":"default","bots":[]}'; fi
     [[ "${FIXTURE_STATE:-present}" != malformed ]] || config='not JSON'
-    jq -nc --arg sha "$blob" --arg config "$config" \
-      '{sha:$sha,size:($config|length),encoding:"base64",content:($config|@base64)}' ;;
+    encoded=$(jq -nr --arg config "$config" '$config | @base64')
+    case "${FIXTURE_STATE:-present}" in
+      wrapped) encoded=$(printf '%s' "$encoded" | fold -w 60); encoded+=$'\n' ;;
+      bad-space) encoded+=' ' ;;
+      bad-cr) encoded+=$'\r' ;;
+      bad-padding) encoded='e30' ;;
+    esac
+    jq -nc --arg sha "$blob" --arg config "$config" --arg encoded "$encoded" \
+      '{sha:$sha,size:($config|length),encoding:"base64",content:$encoded}' ;;
   *) exit 19 ;;
 esac
 FAKE
@@ -66,7 +73,14 @@ source "$work/edition/skills/_shared/repo-config.sh"
 id=1111111111111111111111111111111111111111
 fleet_load_repo_config acme/example "$id"
 [[ "$RC_TRUSTED_OID" == "$id" && "$RC_TRUSTED_STATE" == present && "$(rc_get .value)" == default ]]
-for state in truncated error link malformed; do
+pad=$(printf '%0120d' 0)
+FIXTURE_CONFIG=$(jq -nc --arg pad "$pad" '{value:"default",bots:[],pad:$pad}')
+FIXTURE_STATE=wrapped
+export FIXTURE_CONFIG FIXTURE_STATE
+fleet_load_repo_config acme/example "$id"
+[[ "$(rc_get .pad)" == "$pad" ]]
+unset FIXTURE_CONFIG FIXTURE_STATE
+for state in truncated error link malformed bad-space bad-cr bad-padding; do
   export FIXTURE_STATE="$state"
   if fleet_load_repo_config acme/example 2>/dev/null; then exit 1; fi
   [[ -z "${RC_TRUSTED_CFG+x}${RC_TRUSTED_OID+x}${RC_TRUSTED_STATE+x}${RC_TRUSTED_REPO+x}" ]]
