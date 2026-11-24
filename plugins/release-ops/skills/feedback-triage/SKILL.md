@@ -298,12 +298,12 @@ Update the survivor's **managed status comment** so a public reader sees it's tr
 
 ## Phase 6 — Reverse sync: shipped fix → close/annotate public (mode-gated)
 
-For every public issue whose marker carries an `alpha:` ref, parse `ALPHA_REPO` and `ALPHA_NUM` strictly across every supported form (`repo#N`, `internal#N`, and legacy `owner/repo#N`, `#N`, bare `N`) before querying GitHub. `internal#N` is resolved by finding the one candidate tracker whose issue `N` carries the public issue's `Refs` back-reference with an **exact** number boundary (`$5` is that public issue number). The issue counts only if `$ME` (resolved as in `references/markers-and-templates.md`) authored it **or** its repo is private, the same trust rule as Phase 4. Any failed lookup fails the whole resolution: an unreachable tracker is not proof of absence, so the caller defers the item to the next run:
+For every public issue whose marker carries an `alpha:` ref, parse `ALPHA_REPO` and `ALPHA_NUM` strictly across every supported form (`repo#N`, `internal#N`, and legacy `owner/repo#N`, `#N`, bare `N`) before querying GitHub. `internal#N` is resolved by finding the one candidate tracker whose issue `N` carries the public issue's `Refs` back-reference with an **exact** number boundary (`$5` is that public issue number). The issue counts only if `$ME` (resolved as in `references/markers-and-templates.md`) authored it **or** its repo is private, the same trust rule as Phase 4. Only a confirmed not-found (that tracker never reached issue `N`) counts as absence; any other failed lookup fails the whole resolution, because an unreachable tracker is not proof of absence, so the caller defers the item to the next run:
 
 ```bash
 resolve_alpha_ref() {
   local raw="$1" tracker="$2" candidates="$3" pub="$4" pub_num="${5:-}"
-  local pub_norm repo_part num matches repo body url rest priv raw
+  local pub_norm repo_part num matches repo body url rest priv raw err msg
   pub_norm=$(printf '%s' "${pub%.git}" | tr '[:upper:]' '[:lower:]')
   [ -n "${ME:-}" ] || return 1
   case "$ME" in app/*) ME="${ME#app/}[bot]" ;; esac # same [bot]-form normalization as Phase 4
@@ -330,7 +330,18 @@ resolve_alpha_ref() {
         # Capture each gh call on its own: a pipeline's status is jq's, so a failed gh would
         # otherwise read as an empty body unless the shell happened to enable pipefail.
         priv=$(gh repo view "$repo" --json isPrivate --jq .isPrivate 2>/dev/null) || return 1
-        raw=$(gh issue view "$num" --repo "$repo" --json author,body 2>/dev/null) || return 1
+        # Issue numbers are per repo, so a sibling tracker that never reached N is simply "not
+        # here". Only a confirmed not-found counts as absence (the repo itself was just read above,
+        # so it is reachable); any other failure (permissions, transport) fails the resolution.
+        err=$(mktemp) || return 1
+        if ! raw=$(gh issue view "$num" --repo "$repo" --json author,body 2>"$err"); then
+          msg=$(cat "$err"); rm -f "$err"
+          case "$msg" in
+            *"Could not resolve to an issue"* | *"HTTP 404"*) continue ;;
+            *) return 1 ;;
+          esac
+        fi
+        rm -f "$err"
         body=$(printf '%s' "$raw" \
           | jq -r --arg me "$ME" --arg priv "$priv" 'if $priv == "true" or ((.author.login // "") | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end | ascii_downcase) == ($me | ascii_downcase) then (.body // "") else "" end') || return 1
         body=$(printf '%s' "$body" | tr '[:upper:]' '[:lower:]')

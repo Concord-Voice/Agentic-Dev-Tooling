@@ -134,6 +134,10 @@ gh() {
     "$CLIENT_REPO") gh_json "${GH_CLIENT_AUTHOR:-$ME}" "${GH_CLIENT_BODY:-Refs $PUB_ISSUE_URL}" ;;
     "$OPS_REPO")
       [[ "${GH_OPS_FAIL:-}" == 1 ]] && return 1
+      if [[ "${GH_OPS_ABSENT:-}" == 1 ]]; then
+        echo "GraphQL: Could not resolve to an issue or pull request with the number of $3. (repository.issue)" >&2
+        return 1
+      fi
       if [[ "${GH_BOTH:-}" == 1 ]]; then gh_json "$ME" "Refs $PUB_ISSUE_URL"; else gh_json "$ME" "unrelated"; fi
       ;;
     *) gh_json "$ME" "unrelated" ;;
@@ -157,6 +161,10 @@ GH_CLIENT_BODY="see $(printf '%s' "$PUB_ISSUE_URL" | tr '[:lower:]' '[:upper:]')
 if GH_OPS_FAIL=1 GH_BOTH=1 resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
   fail "expected a failed candidate lookup to fail the resolution"
 fi
+# 6e1. A sibling tracker that never reached issue N is absence, not an error; other failures still fail
+GH_OPS_ABSENT=1 resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 \
+  || fail "expected a not-found issue in a sibling tracker to count as absence"
+assert_eq "${ALPHA_REPO}#${ALPHA_NUM}" "${CLIENT_REPO}#45" "absence in a sibling must not change the resolved tracker"
 # 6e2. Regression: the failed lookup must fail the resolution even WITHOUT pipefail
 if ( set +o pipefail; GH_OPS_FAIL=1 GH_BOTH=1 resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 ); then
   fail "expected a failed lookup to fail the resolution when pipefail is off"
