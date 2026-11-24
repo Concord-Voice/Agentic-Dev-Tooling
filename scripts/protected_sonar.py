@@ -204,27 +204,28 @@ def coverage_report(content, files, base):
         raise Reject("coverage report is not UTF-8") from None
     if "<!DOCTYPE" in text.upper() or "<!ENTITY" in text.upper():
         raise Reject("coverage report declares a DTD")
-    if len(content) > MAX_REPORT:
-        raise Reject("coverage report too large")
     try:
         root = DET.fromstring(content, forbid_dtd=True)
     except DefusedXmlException:
         raise Reject("coverage report declares a DTD or entity") from None
-    except (DET.ParseError, ValueError, RecursionError):
+    except (DET.ParseError, ValueError):
         raise Reject("coverage report XML invalid") from None
     if root.tag != "coverage":
         raise Reject("coverage report root invalid")
-    classes = list(root.iter("class"))
-    if not classes or any(safe_path(c.get("filename")) not in files for c in classes):
-        raise Reject("coverage report names a file outside the PR tree")
-    for sources in root.findall("sources"):
-        root.remove(sources)
-    sources = root.makeelement("sources", {})
-    source = root.makeelement("source", {})
-    source.text = str(base)
-    sources.append(source)
-    root.append(sources)
-    return DET.tostring(root, encoding="utf-8", xml_declaration=True)
+    try:
+        classes = list(root.iter("class"))
+        if not classes or any(safe_path(c.get("filename")) not in files for c in classes):
+            raise Reject("coverage report names a file outside the PR tree")
+        for sources in root.findall("sources"):
+            root.remove(sources)
+        sources = root.makeelement("sources", {})
+        source = root.makeelement("source", {})
+        source.text = str(base)
+        sources.append(source)
+        root.append(sources)
+        return DET.tostring(root, encoding="utf-8", xml_declaration=True)
+    except RecursionError:
+        raise Reject("coverage report XML invalid") from None
 
 
 def git(repo, *args, limit=MAX_API):

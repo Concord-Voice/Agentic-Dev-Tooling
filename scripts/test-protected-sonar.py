@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Protected SonarCloud bridge: token scope in the workflow, and inert PR preparation."""
+"""Protected SonarCloud bridge: token scope in the workflow, and inert PR preparation.
+
+Needs defusedxml: pip install --require-hashes --no-deps -r scripts/requirements-protected-sonar.txt
+"""
 
 import io
 from pathlib import Path
@@ -50,7 +53,7 @@ class WorkflowTokenScope(unittest.TestCase):
         self.assertIn("    permissions:\n      actions: write\n", found["protected-sonar"])
         # Main's checkout runs the preparer; the PR tree is only ever data.
         self.assertIn('/bin/python" -I -B scripts/protected_sonar.py', found["sonarcloud"])
-        self.assertIn("pip install --require-hashes --no-deps -r scripts/requirements-protected-sonar.txt", found["sonarcloud"])
+        self.assertIn("pip install --only-binary=:all: --require-hashes --no-deps -r scripts/requirements-protected-sonar.txt", found["sonarcloud"])
         install = found["sonarcloud"].split("Install pinned XML parser", 1)[1].split("- name:", 1)[0]
         self.assertNotIn("SONAR_TOKEN", install)
         self.assertNotIn("ref: ${{", found["sonarcloud"])
@@ -111,6 +114,8 @@ class ReportData(unittest.TestCase):
         out = ps.coverage_report(report(), {"scripts/tool.py"}, Path("/tmp/analysis"))
         self.assertIn(b"<source>/tmp/analysis</source>", out)
         self.assertNotIn(b"/w/x", out)
+        self.assertTrue(out.startswith(b"<?xml version='1.0' encoding='utf-8'?>\n<coverage>"))
+        self.assertTrue(out.endswith(b"<sources><source>/tmp/analysis</source></sources></coverage>"))
 
     def test_rejects_dtd_foreign_file_bad_encoding_and_shape(self):
         cases = (report(extra='<!DOCTYPE c [<!ENTITY e "x">]>'), report("scripts/other.py"),
@@ -128,13 +133,20 @@ class ReportData(unittest.TestCase):
             content = report(extra=dtd).replace(b"<coverage>", b"<coverage>&x;" if "SYSTEM" in dtd else b"<coverage>&c;")
             with self.assertRaisesRegex(ps.Reject, "DTD"):
                 ps.coverage_report(content, {"scripts/tool.py"}, Path("/a"))
-            # Second layer: the parser itself refuses even if the text check were bypassed.
-            with self.assertRaises(ps.DefusedXmlException):
-                ps.DET.fromstring(content, forbid_dtd=True)
 
-    def test_rejects_oversize_report(self):
-        with patch.object(ps, "MAX_REPORT", 10), self.assertRaisesRegex(ps.Reject, "too large"):
+    def test_parser_layer_rejects_when_text_check_is_bypassed(self):
+        with patch.object(ps.DET, "fromstring", side_effect=ps.DefusedXmlException("x")), \
+                self.assertRaisesRegex(ps.Reject, "DTD or entity"):
             ps.coverage_report(report(), {"scripts/tool.py"}, Path("/a"))
+
+    def test_deeply_nested_report_is_rejected_not_crashed(self):
+        deep = b"<coverage>" + b"<a>" * 5000 + b'<class filename="scripts/tool.py"/>' + b"</a>" * 5000 + b"</coverage>"
+        with self.assertRaisesRegex(ps.Reject, "XML invalid"):
+            ps.coverage_report(deep, {"scripts/tool.py"}, Path("/a"))
+
+    def test_zip_rejects_oversize_report(self):
+        with patch.object(ps, "MAX_REPORT", 10), self.assertRaisesRegex(ps.Reject, "ZIP shape"):
+            ps.one_zip(zipped())
 
     def test_zip_has_exactly_the_report(self):
         self.assertEqual(ps.one_zip(zipped()), report())
