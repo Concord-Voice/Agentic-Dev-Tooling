@@ -39,7 +39,7 @@ Fleet issue creation reads `issue_creation.sub_issue_linkage` from the intake re
 
 ## Dispatch and permissions
 
-Use the host's native dispatch operation and the installed role name. For feedback classification, pass the sanitized report payload to `feedback-analyst` in an analysis session provisioned for that data. The Claude profile uses an explicit empty tool list, which Claude Code documents as a tool-free launch. [Claude tool-list behavior](https://code.claude.com/docs/en/errors#agent-would-be-spawned-with-zero-tools)
+Use the host's native dispatch operation and the installed role name. For feedback classification, pass the sanitized report payload to `feedback-analyst` in an analysis session provisioned for that data. The Claude profile uses an explicit empty tool list, which Claude Code documents as a tool-free launch. The profile also lists every built-in tool in `disallowedTools`, so a host that reads an empty list differently still denies them. [Claude tool-list behavior](https://code.claude.com/docs/en/errors#agent-would-be-spawned-with-zero-tools)
 
 When a policy requires credential isolation, verify the host's actual credentials and tool access before dispatch. In particular, a Codex custom agent inherits its parent's permissions and MCP servers. Its supported feature switches can disable specific capabilities. A role file cannot independently enforce a read-only identity. [Codex custom agents](https://learn.chatgpt.com/docs/agent-configuration/subagents) · [Antigravity tool and permission inheritance](https://antigravity.google/docs/subagents/)
 
