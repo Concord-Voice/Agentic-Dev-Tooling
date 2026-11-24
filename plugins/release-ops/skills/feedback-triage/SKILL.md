@@ -243,7 +243,7 @@ Respect the closure cap; overflow → digest.
 For each **surviving, non-human-touched** issue that represents real work and whose marker has no `alpha:` ref:
 
 1. **Determine and validate the owning tracker repo (`TARGET_REPO`).** Read `.feedback_triage.routing` (see [`references/alpha-sync.md`](references/alpha-sync.md) § Owning-repo routing & multi-repo epics): route to the repo that owns the feedback/fix by surface and root cause, falling back to `$TRACKER` when `.feedback_triage.routing` is unset or ambiguous. Strip any `.git` suffix and validate that `TARGET_REPO` matches one of `$CANDIDATE_TRACKERS` (case-insensitively) and is never `$PUBLIC`; fail closed otherwise.
-2. **Idempotency guard (belt-and-suspenders).** Before creating, search **every candidate tracker repo** (`$CANDIDATE_TRACKERS`: `$TRACKER` plus configured `.feedback_triage.routing` targets) for an existing back-reference (covers a prior run that created the issue in any owning repo but failed to write the marker). The match is **line-based and routine-owned**: only the LAST non-empty line of the tracker body counts, and it must be exactly `Refs <PUB_URL>` or `<!-- feedback-triage:ref <PUB_URL> -->`, so `issues/91` never matches `issues/910`. A URL anywhere else never counts, because the reporter's Description is seeded into that body. GitHub search **tokenizes** a raw URL (splitting on `/` and `.`), so a bare-URL query matches noise — any tracker issue mentioning the bare number `$N` would falsely hit. Quote the URL as a **phrase** AND post-filter on literal body containment while inspecting `labels` (the search is best-effort; the filter is authoritative):
+2. **Idempotency guard (belt-and-suspenders).** Before creating, search **every candidate tracker repo** (`$CANDIDATE_TRACKERS`: `$TRACKER` plus configured `.feedback_triage.routing` targets) for an existing back-reference (covers a prior run that created the issue in any owning repo but failed to write the marker). The match is **line-based and routine-owned**: only the **trailing block** of consecutive `Refs <url>` / `<!-- feedback-triage:ref <url> -->` lines at the very end of the tracker body counts (blank lines ignored), and one line in it must be exactly `Refs <PUB_URL>` or `<!-- feedback-triage:ref <PUB_URL> -->`, so `issues/91` never matches `issues/910`. A tracker issue reused for several public reports carries one line per report in that block. A URL anywhere else never counts, because the reporter's Description is seeded into that body. GitHub search **tokenizes** a raw URL (splitting on `/` and `.`), so a bare-URL query matches noise — any tracker issue mentioning the bare number `$N` would falsely hit. Quote the URL as a **phrase** AND post-filter on literal body containment while inspecting `labels` (the search is best-effort; the filter is authoritative):
    ```bash
    PUB_URL="https://github.com/$PUBLIC_CLEAN/issues/$N"
    HITS=""
@@ -252,8 +252,9 @@ For each **surviving, non-human-touched** issue that represents real work and wh
    SEARCH_LIMIT=100
    # Trust, in two parts. WHO: the issue must be authored by the running identity, or live in a
    # PRIVATE repo (not INTERNAL, not PUBLIC), where only people with access can file. WHAT: only the
-   # LAST non-empty line of the body counts, and it must be exactly `Refs $PUB_URL` or the
-   # `feedback-triage:ref` comment. The reporter's text is seeded into the tracker body, so a URL
+   # trailing block of `Refs <url>` / `feedback-triage:ref` lines at the very end of the body counts
+   # (blank lines ignored), and one line in it must be exactly `Refs $PUB_URL` or the
+   # `feedback-triage:ref` comment for it. The reporter's text is seeded into the tracker body, so a URL
    # anywhere else (the fenced Description, a quote, a "see also") must never count.
    ME="${FT_ME:-$(gh api user --jq .login 2>/dev/null)}"
    case "$ME" in app/*) ME="${ME#app/}[bot]" ;; esac # gh shows a bot as app/<name>, REST as <name>[bot]: compare in the [bot] form
@@ -277,7 +278,7 @@ For each **surviving, non-human-touched** issue that represents real work and wh
        break
      fi
      if ! rows=$(printf '%s' "$found" | jq -r --arg repo "$repo" --arg pub_url "$PUB_URL" --arg me "$ME" --arg vis "$vis" \
-             '.[] | select($vis == "PRIVATE" or ((.author.login // "") | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end | ascii_downcase) == ($me | ascii_downcase)) | select((.body // "") | ascii_downcase | gsub("\r"; "") | split("\n") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != "")) | (last // "") as $l | ($pub_url | ascii_downcase) as $u | $l == "refs " + $u or $l == "<!-- feedback-triage:ref " + $u + " -->") | ["\($repo)#\(.number)", ((.labels // [] | map(.name) | index("type: epic")) != null)] | @tsv'); then
+             '.[] | select($vis == "PRIVATE" or ((.author.login // "") | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end | ascii_downcase) == ($me | ascii_downcase)) | select((.body // "") | ascii_downcase | gsub("\r"; "") | split("\n") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != "")) | reverse | [foreach .[] as $x (true; . and ($x | test("^(refs https://[^ ]+|<!-- feedback-triage:ref [^ ]+ -->)$")); if . then $x else empty end)] | ($pub_url | ascii_downcase) as $u | any(.[]; . == "refs " + $u or . == "<!-- feedback-triage:ref " + $u + " -->")) | ["\($repo)#\(.number)", ((.labels // [] | map(.name) | index("type: epic")) != null)] | @tsv'); then
        SEARCH_OK=0
        break
      fi
@@ -314,12 +315,12 @@ Update the survivor's **managed status comment** so a public reader sees it's tr
 
 ## Phase 6 — Reverse sync: shipped fix → close/annotate public (mode-gated)
 
-For every public issue whose marker carries an `alpha:` ref, parse `ALPHA_REPO` and `ALPHA_NUM` strictly across every supported form (`repo#N`, `internal#N`, and legacy `owner/repo#N`, `#N`, bare `N`) before querying GitHub. `internal#N` is resolved by finding the one candidate tracker whose issue `N` carries the public issue's `Refs` back-reference as the **last non-empty line** of its body, exactly `Refs <public URL>` or the `feedback-triage:ref` comment (`$5` is that public issue number). The issue counts only if the running identity authored it **or** its repo is `PRIVATE` (not internal or public), the same trust rule as Phase 4; the identity is resolved inside the function. Only the exact not-found message for that issue number counts as absence (the tracker has no readable issue `N`, including a deleted or transferred one); any other failed lookup fails the whole resolution, because an unreachable tracker is not proof of absence, so the caller defers the item to the next run:
+For every public issue whose marker carries an `alpha:` ref, parse `ALPHA_REPO` and `ALPHA_NUM` strictly across every supported form (`repo#N`, `internal#N`, and legacy `owner/repo#N`, `#N`, bare `N`) before querying GitHub. `internal#N` is resolved by finding the one candidate tracker whose issue `N` carries the public issue's `Refs` back-reference in the **trailing block** of `Refs <url>` lines at the end of its body, as the exact line `Refs <public URL>` or the `feedback-triage:ref` comment (`$5` is that public issue number). The issue counts only if the running identity authored it **or** its repo is `PRIVATE` (not internal or public), the same trust rule as Phase 4; the identity is resolved inside the function. Only the exact not-found message for that issue number counts as absence (the tracker has no readable issue `N`, including a deleted or transferred one); any other failed lookup fails the whole resolution, because an unreachable tracker is not proof of absence, so the caller defers the item to the next run:
 
 ```bash
 resolve_alpha_ref() {
   local raw="$1" tracker="$2" candidates="$3" pub="$4" pub_num="${5:-}"
-  local pub_norm repo_part num matches repo body url vis issue_json me last
+  local pub_norm repo_part num matches repo body url vis issue_json me block
   pub_norm=$(printf '%s' "${pub%.git}" | tr '[:upper:]' '[:lower:]')
   case "$raw" in
     */*\#*)
@@ -359,9 +360,9 @@ resolve_alpha_ref() {
         fi
         body=$(printf '%s' "$issue_json" \
           | jq -r --arg me "$me" --arg vis "$vis" 'if $vis == "PRIVATE" or ((.author.login // "") | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end | ascii_downcase) == ($me | ascii_downcase) then (.body // "") else "" end') || return 1
-        # Only the LAST non-empty line counts (see Phase 4): the reporter's text is in the body.
-        last=$(printf '%s' "$body" | tr '[:upper:]' '[:lower:]' | tr -d '\r' | awk 'NF { l = $0 } END { print l }' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-        if [ "$last" = "refs $url" ] || [ "$last" = "<!-- feedback-triage:ref $url -->" ]; then
+        # Only the trailing block of Refs lines counts (see Phase 4): the reporter's text is in the body.
+        block=$(printf '%s' "$body" | tr '[:upper:]' '[:lower:]' | tr -d '\r' | awk '{ sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "") } NF { l[++n] = $0 } END { for (i = n; i >= 1; i--) { if (l[i] ~ /^(refs https:\/\/[^ ]+|<!-- feedback-triage:ref [^ ]+ -->)$/) print l[i]; else break } }')
+        if printf '%s\n' "$block" | grep -Fxq -e "refs $url" -e "<!-- feedback-triage:ref $url -->"; then
           matches="${matches}${matches:+$'\n'}${repo}"
         fi
       done <<< "$candidates"

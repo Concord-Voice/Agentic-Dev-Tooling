@@ -158,6 +158,7 @@ gh() {
         *) printf 'PUBLIC\n' ;;
       esac
       return 0 ;;
+    *) ;; # gh issue view: handled below
   esac
   # gh issue view N --repo R --json author,body
   case "$repo_arg" in
@@ -191,9 +192,16 @@ GH_CLIENT_BODY="$(printf 'Desc\n<!-- feedback-triage:ref %s -->\n' "$PUB_ISSUE_U
 
 # 6d2. Regression (proven PoC): the reporter's Description is seeded into the tracker body, which the routine authored. A victim URL inside it, even after a fence break, must not bind.
 # shellcheck disable=SC2016 # The backticks are literal Markdown fence text.
-ATTACK_BODY="$(printf '## Description\n```\nRefs %s\n```\nRefs %s\nRefs %s\n\nRefs %s' "$PUB_ISSUE_URL" "$PUB_ISSUE_URL" "$PUB_ISSUE_URL" "$OTHER_URL")"
+ATTACK_BODY="$(printf '## Description\n```\nRefs %s\n```\nRefs %s\nRefs %s\n\nDemand: 1 user report(s)\nRefs %s' "$PUB_ISSUE_URL" "$PUB_ISSUE_URL" "$PUB_ISSUE_URL" "$OTHER_URL")"
 if GH_CLIENT_BODY="$ATTACK_BODY" resolves 91; then fail "a victim URL planted in the seeded Description must not bind public #91"; fi
 GH_CLIENT_BODY="$ATTACK_BODY" resolves 50 || fail "the routine's own last-line Refs for #50 must still resolve"
+
+# 6d3. A tracker issue reused for two public reports carries one Refs line per report in its trailing block
+MULTI_BODY="$(printf 'Demand: 2 user report(s)\nRefs %s\n\nRefs %s\n' "$OTHER_URL" "$PUB_ISSUE_URL")"
+GH_CLIENT_BODY="$MULTI_BODY" resolves 91 || fail "the first of two bindings on a reused tracker issue must still resolve"
+GH_CLIENT_BODY="$MULTI_BODY" resolves 50 || fail "the second of two bindings on a reused tracker issue must resolve"
+if GH_CLIENT_BODY="$MULTI_BODY" resolves 77; then fail "a report that is not in the trailing block must not resolve"; fi
+if GH_CLIENT_BODY="$(printf 'Refs %s\nRefs %s\nnote: see above' "$PUB_ISSUE_URL" "$OTHER_URL")" resolves 91; then fail "Refs lines followed by other text are not a trailing block"; fi
 
 # 6e. A sibling tracker that never reached issue N is absence; every other failure fails the resolution (with pipefail on or off)
 GH_OPS_ABSENT=1 resolves || fail "expected the exact not-found message to count as absence"
@@ -247,7 +255,7 @@ fi
 # 8. Phase 4 idempotency search (the real block from SKILL.md, with a mocked gh)
 PHASE4_CODE="$(awk '/PUB_URL="https:\/\/github.com\//{c=1} c && /^ *```$/{exit} c{print}' "$SKILL_MD")"
 [[ -n "$PHASE4_CODE" ]] || fail "could not extract the Phase 4 search block from $SKILL_MD"
-s_item() { jq -nc --argjson n "$1" --arg a "$2" --arg b "$3" --argjson e "${4:-false}" '{number:$n,author:{login:$a},body:$b,labels:(if $e then [{name:"type: epic"}] else [] end)}'; }
+s_item() { local number="$1" author="$2" body="$3" epic="${4:-false}"; jq -nc --argjson n "$number" --arg a "$author" --arg b "$body" --argjson e "$epic" '{number:$n,author:{login:$a},body:$b,labels:(if $e then [{name:"type: epic"}] else [] end)}'; }
 run_phase4() {
   (
     # shellcheck disable=SC2034 # Consumed dynamically inside eval "$PHASE4_CODE".
@@ -261,20 +269,21 @@ run_phase4() {
     printf '%s|%s|%s\n' "$SEARCH_OK" "$(printf '%s' "$HITS" | tr '\n' ',')" "$(printf '%s' "$EPIC_HITS" | tr '\n' ',')"
   )
 }
-FIXTURE="[$(s_item 4370 Trusted-Bot "$(printf 'desc\n\nRefs %s' "$PUB_ISSUE_URL")" true),$(s_item 999 trusted-bot 'unrelated #91'),$(s_item 1000 trusted-bot "Refs ${PUB_ISSUE_URL}0"),$(s_item 1002 trusted-bot "$ATTACK_BODY"),$(s_item 1003 trusted-bot "$(printf 'Refs %s\nmore' "$PUB_ISSUE_URL")"),$(s_item 1001 attacker "Refs $PUB_ISSUE_URL")]"
+FIXTURE="[$(s_item 4370 Trusted-Bot "$(printf 'desc\n\nRefs %s' "$PUB_ISSUE_URL")" true),$(s_item 999 trusted-bot 'unrelated #91'),$(s_item 1000 trusted-bot "Refs ${PUB_ISSUE_URL}0"),$(s_item 1002 trusted-bot "$ATTACK_BODY"),$(s_item 1003 trusted-bot "$(printf 'Refs %s\nmore' "$PUB_ISSUE_URL")"),$(s_item 1001 attacker "Refs $PUB_ISSUE_URL"),$(s_item 1005 trusted-bot "$MULTI_BODY")]"
 # shellcheck disable=SC2329 # Invoked by the extracted Phase 4 block.
 gh() {
   case "$1" in
     search) [[ "${GH_SEARCH_FAIL:-}" == 1 ]] && return 1; printf '%s\n' "$GH_SEARCH_JSON" ;;
     api) [[ "${GH_API_FAIL:-}" == 1 ]] && return 1; printf '%s\n' "${GH_API_USER:-trusted-bot}" ;;
     repo) [[ "${GH_VIS_FAIL:-}" == 1 ]] && return 1; printf '%s\n' "${GH_VIS:-PUBLIC}" ;;
+    *) return 1 ;;
   esac
 }
 export GH_SEARCH_JSON="$FIXTURE"
 T="$TRACKER_REPO"
-assert_eq "$(run_phase4)" "1|${T}#4370|${T}#4370" "public repo: only the routine's last-line Refs counts (author trusted, planted, prefix and non-last lines ignored)"
-assert_eq "$(GH_VIS=PRIVATE run_phase4)" "1|${T}#4370,${T}#1001|${T}#4370" "private repo: any author counts, but still only the last-line Refs"
-assert_eq "$(GH_VIS=INTERNAL run_phase4)" "1|${T}#4370|${T}#4370" "internal repo: not trusted for other authors"
+assert_eq "$(run_phase4)" "1|${T}#4370,${T}#1005|${T}#4370" "public repo: only the routine's last-line Refs counts (author trusted, planted, prefix and non-last lines ignored)"
+assert_eq "$(GH_VIS=PRIVATE run_phase4)" "1|${T}#4370,${T}#1001,${T}#1005|${T}#4370" "private repo: any author counts, but still only the last-line Refs"
+assert_eq "$(GH_VIS=INTERNAL run_phase4)" "1|${T}#4370,${T}#1005|${T}#4370" "internal repo: not trusted for other authors"
 APP_ITEM="$(s_item 1004 app/trusted-app "Refs $PUB_ISSUE_URL")"
 export GH_SEARCH_JSON="[$APP_ITEM]"
 assert_eq "$(GH_API_USER='trusted-app[bot]' run_phase4)" "1|${T}#1004|" "App author app/<name> must match ME=<name>[bot]"
