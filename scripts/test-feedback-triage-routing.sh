@@ -170,7 +170,7 @@ gh() {
         return 1
       fi
       if [[ "${GH_OPS_404:-}" == 1 ]]; then echo "gh: Not Found (HTTP 404)" >&2; return 1; fi
-      if [[ "${GH_BOTH:-}" == 1 ]]; then gh_json "trusted-bot" "Refs $PUB_ISSUE_URL"; else gh_json "trusted-bot" "unrelated"; fi
+      if [[ "${GH_BOTH:-}" == 1 ]]; then gh_json "trusted-bot" "Refs $PUB_ISSUE_URL"; else gh_json "trusted-bot" "${GH_OPS_BODY:-unrelated}"; fi
       ;;
     *) gh_json "trusted-bot" "unrelated" ;;
   esac
@@ -202,6 +202,22 @@ GH_CLIENT_BODY="$MULTI_BODY" resolves 91 || fail "the first of two bindings on a
 GH_CLIENT_BODY="$MULTI_BODY" resolves 50 || fail "the second of two bindings on a reused tracker issue must resolve"
 if GH_CLIENT_BODY="$MULTI_BODY" resolves 77; then fail "a report that is not in the trailing block must not resolve"; fi
 if GH_CLIENT_BODY="$(printf 'Refs %s\nRefs %s\nnote: see above' "$PUB_ISSUE_URL" "$OTHER_URL")" resolves 91; then fail "Refs lines followed by other text are not a trailing block"; fi
+
+# 6d4. A public child that shares the parent's issue number carries Report:, not Refs, so only the parent binds
+CHILD_BODY="$(printf 'Task for the client\n\nReport: %s#91' "$PUBLIC_REPO")"
+GH_OPS_BODY="$CHILD_BODY" resolves || fail "a Report: child sharing the parent's number must not make the binding ambiguous"
+assert_eq "${ALPHA_REPO}#${ALPHA_NUM}" "${CLIENT_REPO}#45" "the parent must stay the resolved tracker"
+if GH_BOTH=1 resolves; then fail "a child with its own Refs line must still be ambiguous (the reason it must not carry one)"; fi
+
+# 6d5. Legacy binding: the Refs line mid-body fails the strict check, and the diagnostic names it without binding it
+LEGACY_BODY="$(printf 'Desc\n\nRefs %s\n\n## Notes\nCreated by /issue-creation' "$PUB_ISSUE_URL")"
+if GH_CLIENT_BODY="$LEGACY_BODY" resolves; then fail "a mid-body Refs line must not bind"; fi
+# shellcheck disable=SC2034 # Read by ref_repair_candidates.
+CANDIDATE_TRACKERS="$CANDS"
+eval "$(extract_block_starting_with 'ref_repair_candidates() {')"
+assert_eq "$(GH_CLIENT_BODY="$LEGACY_BODY" ref_repair_candidates 45 "$PUBLIC_REPO" 91)" "${CLIENT_REPO}#45" "the diagnostic must name the one legacy tracker"
+assert_eq "$(ref_repair_candidates 45 "$PUBLIC_REPO" 92)" "" "no legacy line means no hint"
+assert_eq "$(GH_CLIENT_BODY="Refs ${PUB_ISSUE_URL}0" ref_repair_candidates 45 "$PUBLIC_REPO" 91)" "" "issues/910 must not hint for issues/91"
 
 # 6e. A sibling tracker that never reached issue N is absence; every other failure fails the resolution (with pipefail on or off)
 GH_OPS_ABSENT=1 resolves || fail "expected the exact not-found message to count as absence"

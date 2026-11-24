@@ -405,7 +405,29 @@ resolve_alpha_ref() {
 }
 ```
 
-Call it as `resolve_alpha_ref "$ALPHA_RAW" "$TRACKER" "$CANDIDATE_TRACKERS" "$PUBLIC_CLEAN" "$N"`. If `resolve_alpha_ref` fails (malformed marker, a ref outside `$CANDIDATE_TRACKERS`, ambiguous `repo#N` basename across orgs, no resolvable running identity, a failed visibility or issue lookup, or an `internal#N` that matches zero or several candidate trackers), emit a `digest:` error, **defer** the item to the next run, and skip closing the public issue. When reading the tracker's state, if `ALPHA_REPO#ALPHA_NUM` is a parent / `type: epic` issue, inspect its children via `gh api "repos/$ALPHA_REPO/issues/$ALPHA_NUM/sub_issues"` — a parent epic ships **only** when both the parent AND **every** child sub-issue are closed with `state_reason == "completed"` (or explicitly split out); open or `not_planned` children keep the public issue `in-progress` and emit a `digest:` warning. Post **only on a transition** (full state machine in [`references/idempotency.md`](references/idempotency.md)):
+Call it as `resolve_alpha_ref "$ALPHA_RAW" "$TRACKER" "$CANDIDATE_TRACKERS" "$PUBLIC_CLEAN" "$N"`. If `resolve_alpha_ref` fails (malformed marker, a ref outside `$CANDIDATE_TRACKERS`, ambiguous `repo#N` basename across orgs, no resolvable running identity, a failed visibility or issue lookup, or an `internal#N` that matches zero or several candidate trackers), emit a `digest:` error, **defer** the item to the next run, and skip closing the public issue.
+
+**Legacy bindings (migration).** A tracker issue bound before the trailing-block rule may hold its `Refs` line mid-body, for example above `/issue-creation`'s `## Notes` footer. It fails the strict resolution and Phase 4 never revisits an item whose marker already has an `alpha` ref, so it would be deferred on every run. When an `internal#N` resolves to zero trackers, run this check. It is a diagnostic and never binds anything, because a reporter-controlled line would pass it too:
+
+```bash
+ref_repair_candidates() {
+  local num="$1" pub_norm="$2" pub_num="$3" repo body url
+  url="https://github.com/${pub_norm}/issues/$pub_num"
+  while IFS= read -r repo; do
+    [ -z "$repo" ] && continue
+    body=$(gh issue view "$num" --repo "$repo" --json body 2>/dev/null) || continue
+    body=$(printf '%s' "$body" | jq -r '.body // ""') || continue
+    if printf '%s' "$body" | tr '[:upper:]' '[:lower:]' | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+        | grep -Fxq -e "refs $url" -e "<!-- feedback-triage:ref $url -->"; then
+      printf '%s#%s\n' "$repo" "$num"
+    fi
+  done <<< "$CANDIDATE_TRACKERS"
+}
+```
+
+Exactly one hit means the body holds the back-reference outside the trailing block. Emit `digest: repair-needed <repo>#<N> (back-reference not in the trailing block)` and keep deferring. Never edit the body unattended. In an interactive run, show the maintainer the tracker issue and its `Refs` line, and on their explicit yes move that line (and any other `Refs` lines) to the end of the body. The next run then resolves it strictly. Zero or several hits stay a plain deferral.
+
+When reading the tracker's state, if `ALPHA_REPO#ALPHA_NUM` is a parent / `type: epic` issue, inspect its children via `gh api "repos/$ALPHA_REPO/issues/$ALPHA_NUM/sub_issues"` — a parent epic ships **only** when both the parent AND **every** child sub-issue are closed with `state_reason == "completed"` (or explicitly split out); open or `not_planned` children keep the public issue `in-progress` and emit a `digest:` warning. Post **only on a transition** (full state machine in [`references/idempotency.md`](references/idempotency.md)):
 
 | Tracker state | Public action | Marker → |
 |---|---|---|
