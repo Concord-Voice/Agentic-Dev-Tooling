@@ -4,9 +4,9 @@
 # Merge gate enforcing the per-comment DISPOSITION LEDGER on a PR's review
 # surface. Consumed by /enhanced-pr-review Phase 4 and /dev-lifecycle Step 9.1.
 #
-# The invariant: every review conversation carries a recorded human decision,
-# and that decision is machine-checkable rather than inferred from the presence
-# of prose.
+# The ledger checks qualifying inline threads and the bot reconciliation post.
+# Actionable human findings outside inline threads require a linked written decision
+# in the review workflow. This script does not judge prose or verify those decisions.
 #
 #   Assertion 1 — thread coverage: every review thread that is unresolved OR
 #     reviewer-authored (a Bot, or a login in the roster `.bots[]`) carries a
@@ -43,8 +43,7 @@
 #     gate prints "all threads resolved" over a review surface it never read.
 #
 # WHAT THIS PROVES, AND WHAT IT DOES NOT.
-#   Proves: a decision is recorded, addressable, and auditable for every review
-#   conversation; that deferrals name issues that exist and are issues rather
+#   Proves: a decision is recorded on each qualifying inline thread; that deferrals name issues that exist and are issues rather
 #   than PRs; and that a repo member — not a drive-by account — recorded them.
 #   It does NOT parse the reconciliation post's Decisions table or cross-check
 #   its Thread handles; the table is house format, the coverage clause is teeth.
@@ -77,6 +76,58 @@ if [[ -z "$PR" ]]; then
     exit 2
 fi
 
+# Optional read-only operations used by the trusted review collector. Suppress raw
+# diagnostics in these modes; only validated links or a head-bound formal-state receipt leave the collector.
+MODE=${2:-}
+if [[ -n "$MODE" ]]; then
+    requested=${3:-}
+    EXPECTED_HEAD=${4:-}
+    [[ $# == 4 && "$PR" =~ ^[1-9][0-9]*$ && "$requested" =~ ^[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+$ && "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]] || exit 2
+    case "$MODE" in --maintainer-sources|--formal-state) ;; *) exit 2 ;; esac
+    exec 2>/dev/null
+    export GH_HOST=github.com GH_REPO="github.com/$requested"
+    # GitHub repository identity is case-insensitive. Retain its canonical
+    # spelling for every query, source URL and formal-state receipt.
+    TARGET=$(gh repo view --json nameWithOwner |
+        jq -er --arg requested "$requested" '.nameWithOwner |
+          select(type == "string" and ascii_downcase == ($requested | ascii_downcase))') || exit 2
+    export GH_REPO="github.com/$TARGET"
+    # These operations always obtain live state. Fixture tests supply an offline gh.
+    unset CV_REVIEW_FIXTURE CV_SKIP_EXISTENCE_CHECKS
+elif [[ $# != 1 ]]; then
+    exit 2
+fi
+
+if [[ "$MODE" == --formal-state ]]; then
+    # GitHub supplies the latest opinionated review per writer, including when
+    # branch protection leaves the aggregate reviewDecision null.
+    FORMAL_QUERY='query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
+      repository(owner:$owner,name:$repo){pullRequest(number:$pr){
+        headRefOid reviewDecision latestOpinionatedReviews(writersOnly:true,first:100,after:$endCursor){
+          pageInfo{hasNextPage endCursor} nodes{state}
+        }
+      }}
+    }'
+    if ! verdict=$(gh api graphql --hostname github.com --paginate --slurp \
+        -f owner="${TARGET%/*}" -f repo="${TARGET#*/}" -F pr="$PR" -f query="$FORMAL_QUERY" |
+        jq -er --arg head "$EXPECTED_HEAD" '
+          def valid: .data.repository.pullRequest as $p | (.errors == null)
+            and ($p.headRefOid == $head) and ($p | has("reviewDecision"))
+            and ($p.reviewDecision | IN(null,"APPROVED","REVIEW_REQUIRED","CHANGES_REQUESTED"))
+            and ($p.latestOpinionatedReviews.nodes | type == "array" and all(.[]; .state | IN("APPROVED","DISMISSED","CHANGES_REQUESTED")))
+            and ($p.latestOpinionatedReviews.pageInfo.hasNextPage | type == "boolean");
+          if type != "array" or length == 0 or (all(.[]; valid) | not)
+             or last.data.repository.pullRequest.latestOpinionatedReviews.pageInfo.hasNextPage != false
+          then error("incomplete") else
+            any(.[]; .data.repository.pullRequest | .reviewDecision == "CHANGES_REQUESTED"
+                or any(.latestOpinionatedReviews.nodes[]; .state == "CHANGES_REQUESTED"))
+            | if . then "blocked" else "clear" end end'); then exit 2; fi
+    [[ "$verdict" == clear ]] || exit 1
+    jq -cn --arg repository "$TARGET" --arg pr "$PR" --arg head "$EXPECTED_HEAD" \
+        '{state:"clear",repository:$repository,pr:$pr,head:$head}' || exit 2
+    exit 0
+fi
+
 VALID_DISPOSITIONS="accepted rejected deferred undecided"
 # Set on the live path; may stay empty under CV_REVIEW_FIXTURE. Every use is
 # conditional, so an unset repo degrades to "no -R" rather than tripping set -u.
@@ -101,7 +152,9 @@ else
     # with gh's own code (1), which the caller reads as "blocking violations
     # found" when the truth is "the check could not run". Fail-closed means exit
     # 2 — UNKNOWN — not a 1 that sends the developer hunting a list that is empty.
-    if ! OWNER_REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>&1); then
+    if [[ "$MODE" == --maintainer-sources ]]; then
+        OWNER_REPO=$TARGET
+    elif ! OWNER_REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>&1); then
         echo "STOP: could not resolve the repository: ${OWNER_REPO}" >&2
         echo "      Cannot determine the review surface. Treat as UNKNOWN, not clean." >&2
         exit 2
@@ -142,9 +195,10 @@ query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
 query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$pr){
+      headRefOid
       comments(first:100, after:$endCursor){
         pageInfo{hasNextPage endCursor}
-        nodes{author{__typename login} authorAssociation body}
+        nodes{author{__typename login} authorAssociation body fullDatabaseId updatedAt}
       }
     }
   }
@@ -153,9 +207,10 @@ query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
 query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$pr){
+      headRefOid
       reviews(first:100, after:$endCursor){
         pageInfo{hasNextPage endCursor}
-        nodes{author{__typename login} body}
+        nodes{author{__typename login} authorAssociation body fullDatabaseId updatedAt state}
       }
     }
   }
@@ -201,6 +256,17 @@ query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
         fi
     done
 
+    if [[ "$MODE" == --maintainer-sources ]]; then
+        for connection in comments reviews; do
+            pages=$COMMENT_PAGES
+            [[ "$connection" != reviews ]] || pages=$REVIEW_PAGES
+            jq -e --arg head "$EXPECTED_HEAD" --arg key "$connection" '
+              type == "array" and length > 0 and all(.[];
+                (.errors == null) and (.data.repository.pullRequest as $p | $p.headRefOid == $head
+                and ($p[$key].nodes | type == "array") and ($p[$key].pageInfo.hasNextPage | type == "boolean")))
+              and last.data.repository.pullRequest[$key].pageInfo.hasNextPage == false' <<< "$pages" >/dev/null || exit 2
+        done
+    fi
     # Reassemble the exact shape the assertions (and every fixture) expect. The
     # Each pageInfo flag is the LAST page's own flag. gh stops without an error
     # when a page says hasNextPage:true but gives no usable cursor, so the
@@ -314,7 +380,7 @@ fi
 # branch the gate is judging: a one-line `.bots[]` diff could declare an alias
 # that satisfies coverage for every reviewer, and the PR would clear its own
 # review. The roster that governs a review must come from the branch being
-# merged INTO. `CV_REPO_CONFIG` overrides for tests only.
+# merged INTO. The fleet collector supplies its verified snapshot in CV_REPO_CONFIG.
 ROSTER_JSON='[]'
 ROSTER_SOURCE='(none — login-only matching)'
 if [[ -n "${CV_REPO_CONFIG:-}" ]]; then
@@ -331,9 +397,17 @@ elif git rev-parse --git-dir >/dev/null 2>&1; then
     # silently reads the wrong one, and on a default branch with no roster the
     # output is indistinguishable from a legitimately roster-less repo.
     # /dev-lifecycle knows this from `gh pr view --json baseRefName`.
-    BASE_REF="${CV_BASE_REF:-${GITHUB_BASE_REF:-}}"
-    [[ -n "$BASE_REF" ]] && BASE_REF="refs/remotes/origin/${BASE_REF#origin/}"   # full refname: a local branch or tag named origin/<x> cannot shadow it
-    if [[ -z "$BASE_REF" ]]; then
+    if [[ "$MODE" == --maintainer-sources ]]; then
+        export GIT_NO_REPLACE_OBJECTS=1
+        BASE_REF=$(gh pr view "$PR" --repo "$GH_REPO" --json baseRefOid,headRefOid |
+            jq -er --arg head "$EXPECTED_HEAD" 'select(.headRefOid == $head) | .baseRefOid
+               | select(type == "string" and test("\\A[0-9a-f]{40}\\z"))') || exit 2
+        parent_entry=$(git ls-tree --full-tree "$BASE_REF" -- .claude) || exit 2
+        [[ -z "$parent_entry" || "$parent_entry" == "040000 tree "* ]] || exit 2
+    elif [[ -n "${CV_BASE_REF:-${GITHUB_BASE_REF:-}}" ]]; then
+        BASE_REF="${CV_BASE_REF:-${GITHUB_BASE_REF:-}}"
+        BASE_REF="refs/remotes/origin/${BASE_REF#origin/}"
+    else
         BASE_REF=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null) \
             || BASE_REF="refs/remotes/origin/${CV_DEFAULT_BRANCH:-main}"
     fi
@@ -353,6 +427,9 @@ elif git rev-parse --git-dir >/dev/null 2>&1; then
            ! ROSTER_RAW=$(git cat-file blob "$ROSTER_SOURCE") || [[ -z "$ROSTER_RAW" ]]; then
             echo "STOP: cannot read the reviewer roster at ${ROSTER_SOURCE}." >&2
             exit 2
+        fi
+        if [[ "$MODE" == --maintainer-sources ]]; then
+            ROSTER_RAW=$(jq -ces 'select(length == 1) | .[0] | objects' <<<"$ROSTER_RAW") || exit 2
         fi
     fi
 else
@@ -474,7 +551,7 @@ JQ_ROSTERED='
 # Look up only members recording a decision, once per login. OWNER is GitHub's
 # repository-owner association. Keep the existing exclusion of outside collaborators.
 # In a fixture, permissions are supplied alongside the simulated API response.
-if ! candidates=$(printf '%s' "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'
+if ! candidates=$(printf '%s' "$RAW" | jq -r --arg mode "$MODE" --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'
     .data.repository.pullRequest
     | . as $pr
     | ([.comments.nodes[]?, .reviewThreads.nodes[]?.comments.nodes[]?]
@@ -487,6 +564,11 @@ if ! candidates=$(printf '%s' "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$J
        | select(.resolvedBy.login != .comments.nodes[0].author.login)
        | .resolvedBy.login | select(type == "string" and length > 0)
        | select(endswith("[bot]") or rostered(.) | not)]
+    + (if $mode == "--maintainer-sources" then
+          [$pr.comments.nodes[], $pr.reviews.nodes[] | select(.author.__typename == "User" and .authorAssociation != "OWNER")
+            | select(.body | type == "string" and test("[^[:space:]]"))
+            | select(rostered(.author.login) | not) | .author.login]
+       else [] end)
     | unique[]'); then
     echo "STOP: could not identify review decision authors." >&2
     exit 2
@@ -524,6 +606,25 @@ JQ_DECIDER='def decision_author:
     .author.__typename == "User" and
     (.authorAssociation == "OWNER" or
       (.authorAssociation == "MEMBER" and (.author.login as $login | $writers | index($login) != null)));'
+if [[ "$MODE" == --maintainer-sources ]]; then
+    # The parent gets canonical links and update timestamps, never authored text.
+    # Stage the entire list before emitting it so malformed metadata cannot yield a partial receipt.
+    if ! sources=$(jq -ce --arg target "$TARGET" --arg pr "$PR" --argjson writers "$writers" \
+        --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'
+        def source($anchor):
+          select(.author.__typename == "User" and (rostered(.author.login) | not))
+          | select(.authorAssociation == "OWNER" or (.author.login as $login | $writers | index($login) != null))
+          | if (.body | type) != "string" then error("missing body") else . end
+          | select(.body | test("[^[:space:]]"))
+          | (.fullDatabaseId | tostring) as $id
+          | if ($id | test("\\A[1-9][0-9]*\\z")) and (.updatedAt | type == "string" and test("\\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z\\z"))
+            then {url:("https://github.com/"+$target+"/pull/"+$pr+"#"+$anchor+$id), updatedAt}
+            else error("invalid source identity") end;
+        .data.repository.pullRequest
+        | [.comments.nodes[] | source("issuecomment-")] + [.reviews.nodes[] | select(.state != "PENDING") | source("pullrequestreview-")]' <<< "$RAW"); then exit 2; fi
+    printf '%s\n' "$sources"
+    exit 0
+fi
 THREAD_ROWS=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" --argjson writers "$writers" "$JQ_ROSTERED$JQ_DECIDER"'
   def reviewer: .author.__typename == "Bot" or rostered(.author.login);
   .data.repository.pullRequest.reviewThreads.nodes[]
@@ -774,7 +875,7 @@ if [[ -z "$REQUIRED" ]] && [[ "$RECON_COUNT" -eq 0 ]]; then
     # Nobody reviewed anything. Requiring a post that reconciles nothing is
     # ceremony, and Step 9.1 runs this gate on EVERY PR including ones no bot
     # ever touches. Assertion 1 still governs any human thread on such a PR.
-    echo "INFO: no reviewer posted on this PR; reconciliation post not required."
+    echo "INFO: no bot or rostered reviewer posted; no bot reconciliation post required."
 elif [[ "$RECON_COUNT" -eq 0 ]]; then
     echo "BLOCKING: no /enhanced-pr-review reconciliation post on this PR."
     echo "          Post it per /enhanced-pr-review Phase 3.5 before the merge gate."
@@ -807,7 +908,7 @@ fi
 
 # --- Verdict -----------------------------------------------------------------
 if [[ "$fail" -eq 0 ]]; then
-    echo "✅ Review dispositions complete for PR #${PR} — every in-scope thread carries a decision."
+    echo "✅ Inline thread and bot reconciliation checks passed for PR #${PR}."
     exit 0
 fi
 echo ""

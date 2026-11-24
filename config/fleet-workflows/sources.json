@@ -12,7 +12,7 @@
     "sha256": "ea2ab9aa17d0977815f226553cfb74dd9dda389aa4f895461dee795e900bcf32"
   },
   "dev-lifecycle/SKILL.md": {
-    "sha256": "36baefb1cd9420295ac1ec6970605e05fb3d7170155d2a20053833a156ecf846",
+    "sha256": "f7c0c1132f9936b425a58a79a780afcb8b14737babfc21b7907038bf094b2d83",
     "edits": [
       [13, 13, ""],
       [51, 68, "> source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"],
@@ -52,7 +52,7 @@
     ]
   },
   "enhanced-pr-review/SKILL.md": {
-    "sha256": "5befeeb05df035fcae495ee1b76d7e33c972e23422720a4e5179b5edeca15f91",
+    "sha256": "f0342d43b985619d1398388b0bc240798a4a8a855dd23cf3277a66347202b321",
     "edits": [
       [3, 3, "description: Reconcile bot and independent defensive reviews, quality signals and thread dispositions on the current PR head."],
       [9, 9, ""],
@@ -74,7 +74,10 @@
     ]
   },
   "enhanced-pr-review/check-review-dispositions.sh": {
-    "sha256": "7a786f14bd2cc393bf9b8254dfe92c2bad064905047e7f2bab417459f3efb9f0"
+    "sha256": "7bfeb6b86f7de89cd578fe629a937e1d0e1d484a21c7804a46a4b849b93358c1"
+  },
+  "enhanced-pr-review/references/maintainer-decisions.md": {
+    "sha256": "81a4cc63067048843a2ecebfc84f6694545fd0cb36b3ac3bae4d9abc7b1dba2f"
   },
   "enhanced-pr-review/review-coverage.sh": {
     "sha256": "dd0b2095316256b93dc6bf222dd5393414bcc3987ee026374dc0971ffd77f2ab",

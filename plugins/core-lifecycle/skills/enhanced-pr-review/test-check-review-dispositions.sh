@@ -795,10 +795,20 @@ rpage() { printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"
 paginate_shim() {
     cat > "$TMP/gh" <<'SHIM'
 #!/bin/bash
+canonical_repo=${CV_TEST_CANONICAL_REPO:-example-org/example-repo}
 case "$1 $2" in
-  "repo view") echo "example-org/example-repo"; exit 0 ;;
+  "repo view")
+    if [[ "$*" == "repo view --json nameWithOwner" ]]; then
+      jq -nc --arg repo "$canonical_repo" '{nameWithOwner:$repo}'
+    else
+      echo "$canonical_repo"
+    fi
+    exit 0 ;;
+  "pr view")
+    [[ "$*" == "pr view 999 --repo github.com/$canonical_repo --json baseRefOid,headRefOid" ]] || exit 1
+    cat "$CV_TEST_PAGES/target.json"; exit $? ;;
   "api --include")
-    [[ "$3" == "repos/example-org/example-repo/collaborators/teammate/permission" && "$4" == "--jq" && "$5" == ".permission" ]] || exit 1
+    [[ "$3" == "repos/$canonical_repo/collaborators/teammate/permission" && "$4" == "--jq" && "$5" == ".permission" ]] || exit 1
     case "${TEST_MEMBER_PERMISSION:-}" in
       absent) printf 'HTTP/2.0 404 Not Found\r\n\r\n{}\n'; exit 1 ;;
       denied) printf 'HTTP/2.0 403 Forbidden\r\n\r\n{}\n'; exit 1 ;;
@@ -810,6 +820,7 @@ q=""
 for a in "$@"; do case "$a" in query=*) q="$a" ;; esac; done
 case "$q" in
   *"node(id:"*)        f=threadcomments ;;
+  *latestOpinionatedReviews*) f=formal ;;
   *reviewThreads*)     f=threads ;;
   *"reviews(first"*)   f=reviews ;;
   *)                   f=comments ;;
@@ -1081,6 +1092,180 @@ LONG_FIXTURE=$(jq -cn --argjson reviewer "$BOT_TOP" '
          body:("<!-- cv-review-reconciliation -->\n| Gitar |\n" + ("padding evidence\n" * 8192))}
     ]},reviews:{nodes:[]}}}}}')
 run "large reconciliation body keeps an early reviewer match" 0 "$LONG_FIXTURE"
+
+# Use the live pagination/permission shim for the two metadata-only operations.
+# No inline threads, a writer comment and review, plus ordinary status and bot traffic.
+paginate_shim
+mkdir -p "$TMP/pages"
+oid=1111111111111111111111111111111111111111
+target=example-org/example-repo
+export TEST_MEMBER_PERMISSION=write
+source_node() {
+    local id=$1 login=$2 association=$3 kind=$4 body=$5
+    jq -nc --arg id "$id" --arg login "$login" --arg association "$association" --arg type "$kind" --arg body "$body" \
+       '{fullDatabaseId:$id,author:{__typename:$type,login:$login},authorAssociation:$association,body:$body,updatedAt:"2026-01-01T00:00:00Z",state:"COMMENTED"}'
+}
+fixture_page() {
+    local key=$1 nodes=$2
+    jq -nc --arg sha "$oid" --arg key "$key" --argjson nodes "$nodes" \
+       '[{data:{repository:{pullRequest:{headRefOid:$sha,($key):{pageInfo:{hasNextPage:false},nodes:$nodes}}}}}]'
+}
+writer=$(source_node 101 teammate MEMBER User "Clarify the date in the guide")
+status=$(source_node 102 owner OWNER User "Build finished")
+machine=$(source_node 103 gitar-bot MEMBER User "Automated status")
+bot=$(source_node 104 bot MEMBER Bot "Build result")
+review=$(source_node 105 teammate COLLABORATOR User "The new wording also needs a reference")
+run "human-only comment and review need no separate bot post" 0 \
+    "$(doc '' "$status" | jq --argjson review "$review" '.data.repository.pullRequest.reviews={nodes:[$review]}')"
+fixture_page reviewThreads '[]' > "$TMP/pages/threads.json"
+fixture_page comments "[$writer,$status,$machine,$bot]" > "$TMP/pages/comments.json"
+fixture_page reviews "[$review]" > "$TMP/pages/reviews.json"
+meta_run() {
+    local mode=$1
+    shift
+    CV_TEST_PAGES="$TMP/pages" PATH="$TMP:$PATH" "$SCRIPT" 999 "$mode" "$target" "${1:-$oid}"
+}
+src=$(meta_run --maintainer-sources); got=$?
+if [[ $got != 0 ]] || ! jq -e --arg p "https://github.com/$target/pull/999#" '
+    [.[].url] == [($p+"issuecomment-101"),($p+"issuecomment-102"),($p+"pullrequestreview-105")]
+    and all(.[]; keys == ["updatedAt","url"])' <<< "$src" >/dev/null; then
+    echo "FAIL: source inventory must return writer and owner links only, without raw comments"; exit 1
+fi
+# A second page can carry a decision source added without a head change.
+fixture_page comments "[$status]" | jq --argjson writer "$writer"   '.[0] as $first | [($first | .data.repository.pullRequest.comments.pageInfo={hasNextPage:true,endCursor:"c"}), ($first | .data.repository.pullRequest.comments.nodes=[$writer])]' > "$TMP/pages/comments.json"
+src=$(meta_run --maintainer-sources); got=$?
+[[ $got == 0 ]] && jq -e 'length==3 and (.[1].url|endswith("issuecomment-101"))' <<< "$src" >/dev/null || exit 1
+fixture_page comments "[$writer,$status,$machine,$bot]" > "$TMP/pages/comments.json"
+src=$(meta_run --maintainer-sources 2222222222222222222222222222222222222222); got=$?
+[[ $got == 2 && -z "$src" ]] || exit 1
+for perm in read denied; do
+    export TEST_MEMBER_PERMISSION=$perm
+    src=$(meta_run --maintainer-sources); got=$?
+    case $perm in
+      read) [[ $got == 0 ]] && jq -e 'length==1 and (.[0].url | endswith("issuecomment-102"))' <<< "$src" >/dev/null ;;
+      denied) [[ $got == 2 && -z "$src" ]] ;;
+      *) exit 1 ;;
+    esac || { echo "FAIL: uncertain maintainer authority must not pass"; exit 1; }
+done
+unset TEST_MEMBER_PERMISSION
+formal_fixture() {
+    local aggregate=$1 states=$2
+    jq -nc --arg sha "$oid" --argjson aggregate "$aggregate" --argjson states "$states" \
+      '[{data:{repository:{pullRequest:{headRefOid:$sha,reviewDecision:$aggregate,latestOpinionatedReviews:{pageInfo:{hasNextPage:false},nodes:[$states[]|{state:.}]}}}}}]'
+}
+formal_case() {
+    local name=$1 want=$2 data=$3
+    printf '%s' "$data" > "$TMP/pages/formal.json"
+    meta_run --formal-state >/dev/null; local got=$?
+    [[ "$got" == "$want" ]] || { echo "FAIL: $name (expected $want, got $got)"; exit 1; }
+}
+formal_case 'no applicable aggregate rule' 0 "$(formal_fixture null '[]')"
+formal_case 'current writer requests changes' 1 "$(formal_fixture null '["CHANGES_REQUESTED"]')"
+formal_case 'GitHub aggregate still blocks' 1 "$(formal_fixture '"CHANGES_REQUESTED"' '[]')"
+formal_case 'new approval supersedes earlier opinion' 0 "$(formal_fixture '"APPROVED"' '["APPROVED","DISMISSED"]')"
+formal_case 'missing decision field is unknown' 2 "$(formal_fixture null '[]' | jq 'del(.[0].data.repository.pullRequest.reviewDecision)')"
+formal_case 'moved head is unknown' 2 "$(formal_fixture null '[]' | jq '.[0].data.repository.pullRequest.headRefOid="other"')"
+formal_case 'partial connection is unknown' 2 "$(formal_fixture null '[]' | jq '.[0].data.repository.pullRequest.latestOpinionatedReviews.pageInfo.hasNextPage=true')"
+formal_case 'lookup failure is unknown' 2 'MISSING-FIXTURE-SENTINEL'
+# Exercise the exact ordinary-install commands shipped in the workflow. The
+# checkout retains a successful one-argument ledger and has a different roster
+# on its default revision than on the release revision targeted by the PR.
+installed_compatibility() (
+    set -e
+    local installed=${SCRIPT%/*} base old output status mode manifest
+    local target_dir="$TMP/ordinary-target"
+    mkdir -p "$target_dir/.claude/skills/enhanced-pr-review"
+    local git_variable
+    while IFS= read -r git_variable; do
+        unset "$git_variable"
+    done < <(git rev-parse --local-env-vars)
+    cd "$target_dir"
+    git init -q --template=
+    old=.claude/skills/enhanced-pr-review/check-review-dispositions.sh
+    printf '%s\n' '#!/bin/bash' 'exit 0' > "$old"
+    git add "$old"
+    git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm default
+    git update-ref refs/remotes/origin/main HEAD
+    cp "$TMP/repo-config.json" .claude/repo-config.json
+    git add .claude/repo-config.json
+    git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm release
+    base=$(git rev-parse HEAD)
+    jq -nc --arg base "$base" --arg head "$oid" '{baseRefOid:$base,headRefOid:$head}' > "$TMP/pages/target.json"
+    formal_fixture null '[]' > "$TMP/pages/formal.json"
+    awk '/^# Installed supplemental check$/{emit=1;next} emit && /^```/{exit} emit{print}' \
+        "$installed/references/maintainer-decisions.md" > "$TMP/installed.bash"
+    [[ -s "$TMP/installed.bash" ]]
+    export REVIEW_SKILL_DIR="$installed" PR=999 TARGET_REPO="$target" REVIEWED_SHA="$oid"
+    export CV_TEST_PAGES="$TMP/pages" TEST_MEMBER_PERMISSION=write PATH="$TMP:$PATH"
+    manifest="$installed/../../../../config/fleet-workflows/sources.json"
+    REVIEW_GATE_SHA256=$(jq -er '."enhanced-pr-review/check-review-dispositions.sh".sha256' "$manifest")
+    export REVIEW_GATE_SHA256
+    # Deliberately set a conflicting override; the installed procedure clears it.
+    echo '{}' > "$TMP/unrelated-config.json"
+    export CV_REPO_CONFIG="$TMP/unrelated-config.json"
+    output=$(MODE=--maintainer-sources bash "$TMP/installed.bash")
+    jq -e '[.[].url | split("#")[1]] == ["issuecomment-101","issuecomment-102","pullrequestreview-105"]' <<<"$output" >/dev/null
+    output=$(MODE=--formal-state bash "$TMP/installed.bash")
+    jq -e --arg repo "$target" --arg head "$oid" '. == {repository:$repo,pr:"999",head:$head,state:"clear"}' <<<"$output" >/dev/null
+    export CV_TEST_CANONICAL_REPO=Example-Org/Example-Repo
+    local spelling
+    for spelling in example-org/example-repo eXample-Org/Example-rePo; do
+        output=$(TARGET_REPO="$spelling" MODE=--maintainer-sources bash "$TMP/installed.bash")
+        jq -e --arg prefix "https://github.com/$CV_TEST_CANONICAL_REPO/pull/999#" \
+            'length == 3 and all(.[]; .url | startswith($prefix))' <<<"$output" >/dev/null
+        output=$(TARGET_REPO="$spelling" MODE=--formal-state bash "$TMP/installed.bash")
+        jq -e --arg repo "$CV_TEST_CANONICAL_REPO" --arg head "$oid" \
+            '. == {repository:$repo,pr:"999",head:$head,state:"clear"}' <<<"$output" >/dev/null
+    done
+    for mode in --maintainer-sources --formal-state; do
+        for spelling in Other-Org/Example-Repo Example-Org/Other-Repo; do
+            status=0
+            output=$(TARGET_REPO="$spelling" MODE="$mode" bash "$TMP/installed.bash") || status=$?
+            [[ $status == 2 && -z "$output" ]]
+        done
+    done
+    unset CV_TEST_CANONICAL_REPO
+    fixture_page comments '[]' > "$TMP/pages/comments.json"
+    fixture_page reviews '[]' > "$TMP/pages/reviews.json"
+    output=$(MODE=--maintainer-sources bash "$TMP/installed.bash")
+    [[ "$output" == '[]' ]]
+    formal_fixture null '["CHANGES_REQUESTED"]' > "$TMP/pages/formal.json"
+    status=0
+    MODE=--formal-state bash "$TMP/installed.bash" && status=0 || status=$?
+    [[ $status == 1 ]]
+    jq -nc --arg head "$oid" '{headRefOid:$head,baseRefOid:"0000000000000000000000000000000000000000"}' > "$TMP/pages/target.json"
+    status=0
+    output=$(MODE=--maintainer-sources bash "$TMP/installed.bash") || status=$?
+    [[ $status == 2 && -z "$output" ]]
+    echo null > .claude/repo-config.json
+    git add .claude/repo-config.json
+    git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm malformed
+    base=$(git rev-parse HEAD)
+    jq -nc --arg head "$oid" --arg base "$base" '{headRefOid:$head,baseRefOid:$base}' > "$TMP/pages/target.json"
+    status=0
+    output=$(MODE=--maintainer-sources bash "$TMP/installed.bash") || status=$?
+    [[ $status == 2 && -z "$output" ]]
+    # This consumer's base still clears its original ledger, even with extra args.
+    /bin/bash "$old" "$PR"
+    /bin/bash "$old" "$PR" --formal-state "$target" "$oid"
+    export REVIEW_SKILL_DIR="$target_dir/${old%/*}"
+    for mode in --maintainer-sources --formal-state; do
+        status=0
+        output=$(MODE="$mode" bash "$TMP/installed.bash") || status=$?
+        [[ $status == 2 && -z "$output" ]]
+    done
+    # A legacy package even with its own matching digest cannot produce receipts.
+    REVIEW_GATE_SHA256=$(shasum -a 256 < "$old"); REVIEW_GATE_SHA256=${REVIEW_GATE_SHA256%% *}
+    for mode in --maintainer-sources --formal-state; do
+        status=0
+        output=$(MODE="$mode" bash "$TMP/installed.bash") || status=$?
+        [[ $status == 2 && -z "$output" ]]
+    done
+)
+installed_compatibility
+[[ $? == 0 ]] || { echo 'FAIL: ordinary installed supplemental check'; exit 1; }
+echo 'PASS: installed review with a legacy consumer ledger and a release-branch roster'
+echo 'PASS: linked maintainer source and current formal decision fixtures'
 
 echo ""
 echo "passed: $pass   failed: $fail"

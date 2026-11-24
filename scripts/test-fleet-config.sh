@@ -50,6 +50,13 @@ set -eu
 [[ -z "${CV_REVIEW_FIXTURE:-}${CV_SKIP_EXISTENCE_CHECKS:-}${CV_BASE_REF:-}${CV_DEFAULT_BRANCH:-}${GITHUB_BASE_REF:-}" ]]
 [[ -f "$CV_REPO_CONFIG" && ! -L "$CV_REPO_CONFIG" ]]
 jq -e '.value == "default" and .bots == []' "$CV_REPO_CONFIG" >/dev/null
+if [[ $# == 4 ]]; then
+  [[ "$3" == acme/example && "$4" == 1111111111111111111111111111111111111111 ]]
+  case "$2" in
+    --maintainer-sources) echo '[]'; exit 0 ;;
+    --formal-state) exit 1 ;;
+  esac
+fi
 echo 'synthetic text that must remain local'
 exit "${FIXTURE_GATE_RESULT:-0}"
 GATE
@@ -105,7 +112,7 @@ for repo_arg in '' acme/example; do
   else
     receipt=$(fleet_check_dispositions 12)
   fi
-  [[ "$receipt" == 'Review dispositions verified.' ]]
+  [[ "$receipt" == 'Inline and bot review dispositions verified.' ]]
 done
 for outcome in 1 7; do
   export FIXTURE_GATE_RESULT=$outcome
@@ -113,5 +120,18 @@ for outcome in 1 7; do
   receipt=$(fleet_check_dispositions 12 acme/example 2>&1) || code=$?
   if [[ $outcome == 1 ]]; then [[ $code == 1 ]]; else [[ $code == 2 ]]; fi
   [[ "$receipt" != *'synthetic text'* ]]
+done
+unset FIXTURE_GATE_RESULT
+[[ "$(fleet_check_dispositions 12 acme/example --maintainer-sources 1111111111111111111111111111111111111111)" == '[]' ]]
+code=0
+fleet_check_dispositions 12 acme/example --formal-state 1111111111111111111111111111111111111111 || code=$?
+[[ "$code" == 1 ]]
+# Changing the casing of the bound target must preserve its expected revision.
+RC_TRUSTED_REPO=AcMe/ExAmPlE
+RC_TRUSTED_OID=5555555555555555555555555555555555555555
+for mode in --maintainer-sources --formal-state; do
+  code=0
+  receipt=$(fleet_check_dispositions 12 acme/example "$mode" "$id") || code=$?
+  [[ $code == 2 && -z "$receipt" ]]
 done
 printf '%s\n' 'Fleet configuration and disposition fixtures passed.'
