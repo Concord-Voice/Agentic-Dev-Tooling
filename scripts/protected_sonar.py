@@ -34,6 +34,7 @@ REMOTE = f"https://github.com/{REPO}.git"
 ROOT = Path(__file__).resolve().parents[1]
 CALLER_PATH = ".github/workflows/sonarcloud.yml"
 ARTIFACT, REPORT = "sync-coverage", "sync-coverage.xml"
+SOURCE_DIR = "scripts"  # `source = scripts` in measure-sync-coverage.sh
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 LIVE = ("queued", "in_progress", "requested", "waiting", "pending")
 MAX_API = 2 * 1024 * 1024
@@ -160,19 +161,21 @@ def pr_ok(candidate, pr):
         raise Reject("PR revision moved or is not a same-repository PR to main")
 
 
-def coverage_artifact(api, run_id, started):
+def coverage_artifact(api, run_id, head_sha):
     body = api.request(f"/actions/runs/{run_id}/artifacts?name={ARTIFACT}&per_page=100")
     items = body.get("artifacts") if isinstance(body, dict) else None
     if not isinstance(items, list):
         raise Reject("artifact inventory malformed")
-    # A re-run keeps earlier attempts' artifacts; take only this attempt's.
+    # "Re-run failed jobs" keeps the earlier attempt's coverage, so attempts are not told apart by
+    # time. Every attempt of a run builds the same head commit; bind to that commit and take the
+    # newest artifact.
     matches = [a for a in items if isinstance(a, dict) and a.get("name") == ARTIFACT
-               and timestamp(a.get("created_at")) >= started]
-    if len(matches) != 1:
-        raise Reject("coverage artifact missing or duplicate")
-    meta = matches[0]
+               and (a.get("workflow_run") or {}).get("id") == run_id
+               and (a.get("workflow_run") or {}).get("head_sha") == head_sha]
+    if not matches:
+        raise Reject("coverage artifact missing")
+    meta = max(matches, key=lambda a: (timestamp(a.get("created_at")), a.get("id") if positive(a.get("id")) else 0))
     if (not positive(meta.get("id")) or meta.get("expired") is not False
-            or (meta.get("workflow_run") or {}).get("id") != run_id
             or not positive(meta.get("size_in_bytes")) or meta["size_in_bytes"] > MAX_ZIP):
         raise Reject("coverage artifact provenance invalid")
     return api.request(f"/actions/artifacts/{meta['id']}/zip", MAX_ZIP, binary=True)
@@ -214,8 +217,17 @@ def coverage_report(content, files, base):
         raise Reject("coverage report root invalid")
     try:
         classes = list(root.iter("class"))
-        if not classes or any(safe_path(c.get("filename")) not in files for c in classes):
+        if not classes:
             raise Reject("coverage report names a file outside the PR tree")
+        for c in classes:
+            name = safe_path(c.get("filename"))
+            if name not in files:
+                # coverage.py strips the configured source directory; restore that fixed
+                # prefix, never a path the report itself names.
+                name = f"{SOURCE_DIR}/{name}"
+                if name not in files:
+                    raise Reject("coverage report names a file outside the PR tree")
+            c.set("filename", name)
         for sources in root.findall("sources"):
             root.remove(sources)
         sources = root.makeelement("sources", {})
@@ -312,7 +324,7 @@ def prepare(candidate, directory, report, api, remote=REMOTE):
     run_id, attempt = candidate["caller_run_id"], candidate["caller_run_attempt"]
     run = api.request(f"/actions/runs/{run_id}/attempts/{attempt}")
     check_caller(candidate, run, api.request(f"/pulls/{candidate['pr_number']}"))
-    content = one_zip(coverage_artifact(api, run_id, timestamp(run.get("run_started_at"))))
+    content = one_zip(coverage_artifact(api, run_id, candidate["head_sha"]))
     staging = Path(tempfile.mkdtemp(prefix="protected-sonar-", dir=directory.parent))
     try:
         repo = staging / "analysis"

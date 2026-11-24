@@ -148,6 +148,12 @@ class ReportData(unittest.TestCase):
         with patch.object(ps, "MAX_REPORT", 10), self.assertRaisesRegex(ps.Reject, "ZIP shape"):
             ps.one_zip(zipped())
 
+    def test_restores_the_stripped_source_directory(self):
+        out = ps.coverage_report(report("tool.py"), {"scripts/tool.py"}, Path("/tmp/analysis"))
+        self.assertIn(b'filename="scripts/tool.py"', out)
+        with self.assertRaises(ps.Reject):  # only the fixed prefix is tried
+            ps.coverage_report(report("sub/tool.py"), {"scripts/tool.py"}, Path("/a"))
+
     def test_zip_has_exactly_the_report(self):
         self.assertEqual(ps.one_zip(zipped()), report())
         for data in (zipped("other.xml"), zipped(data=b""), b"not a zip"):
@@ -210,12 +216,12 @@ class Preparation(unittest.TestCase):
     def api(self, pr=None, artifacts=None):
         pr = pr or pr_record(self.head, self.base)
         artifact = {"id": 9, "name": ps.ARTIFACT, "created_at": "2026-11-23T10:05:00Z", "expired": False,
-                    "workflow_run": {"id": 7}, "size_in_bytes": 100}
+                    "workflow_run": {"id": 7, "head_sha": self.head}, "size_in_bytes": 100}
         return FakeApi({"/actions/runs/7/attempts/2": run_record(head_sha=self.head),
                         "/pulls/5": [pr, pr],
                         "/actions/runs/7/artifacts": {"artifacts": artifacts if artifacts is not None else [
                             artifact, {**artifact, "id": 8, "created_at": "2026-11-22T00:00:00Z"}]},
-                        "/actions/artifacts/9/zip": zipped()})
+                        "/actions/artifacts/9/zip": zipped(), "/actions/artifacts/8/zip": zipped()})
 
     def test_prepares_inert_tree_with_trusted_properties(self):
         out, cov = self.tmp / "analysis", self.tmp / "cov.xml"
@@ -247,6 +253,20 @@ class Preparation(unittest.TestCase):
                 api.responses["/actions/runs/7/attempts/2"] = run_record(head_sha=self.base)
             with self.assertRaises(ps.Reject):
                 ps.prepare(candidate, self.tmp / "analysis", self.tmp / "cov.xml", api, remote=self.remote)
+
+    def test_failed_jobs_rerun_keeps_the_earlier_attempts_coverage(self):
+        old = {"id": 8, "name": ps.ARTIFACT, "created_at": "2026-11-22T00:00:00Z", "expired": False,
+               "workflow_run": {"id": 7, "head_sha": self.head}, "size_in_bytes": 100}
+        out = self.tmp / "analysis"
+        ps.prepare(self.candidate, out, self.tmp / "cov.xml", self.api(artifacts=[old]), remote=self.remote)
+        self.assertTrue(out.is_dir())
+
+    def test_rejects_coverage_built_for_another_head(self):
+        other = {"id": 9, "name": ps.ARTIFACT, "created_at": "2026-11-23T10:05:00Z", "expired": False,
+                 "workflow_run": {"id": 7, "head_sha": "c" * 40}, "size_in_bytes": 100}
+        with self.assertRaisesRegex(ps.Reject, "missing"):
+            ps.prepare(self.candidate, self.tmp / "analysis", self.tmp / "cov.xml",
+                       self.api(artifacts=[other]), remote=self.remote)
 
     def test_refuses_existing_outputs(self):
         (self.tmp / "analysis").mkdir()
