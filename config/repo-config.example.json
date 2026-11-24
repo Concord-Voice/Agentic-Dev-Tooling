@@ -51,6 +51,7 @@
       "desktop": "example-org/example-desktop",
       "backend": "example-org/example-backend"
     },
+    "disclosure": "internal",
     "sentinel_prefix": "feedback-triage"
   },
   "version_bump": { "enabled": true, "source_check": "SPA Check", "bump_file": "package.json" },

@@ -96,6 +96,7 @@ assert_phase0_fails '{"feedback_triage":{"routing":{"bad":123}}}' "routing conta
 assert_phase0_fails "{\"feedback_triage\":{\"routing\":[\"$CLIENT_REPO\"]}}" "routing is non-object JSON"
 
 # 6. Phase 6 resolve_alpha_ref: owner/repo#N, repo#N, #N, and bare N
+ME="trusted-bot"
 CANDS="$(printf '%s\n%s\n%s' "$TRACKER_REPO" "$CLIENT_REPO" "$OPS_REPO")"
 
 resolve_alpha_ref "${CLIENT_REPO}#45" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO"
@@ -117,12 +118,17 @@ assert_eq "${ALPHA_REPO}#${ALPHA_NUM}" "example-org/3d-client#89" "digit-leading
 
 # 6c. internal#N resolves via the Refs back-reference; zero or several matches fail closed
 # shellcheck disable=SC2329 # Invoked by resolve_alpha_ref.
+gh_json() { jq -nc --arg a "$1" --arg b "$2" '{author:{login:$a},body:$b}'; }
+# shellcheck disable=SC2329 # Invoked by resolve_alpha_ref.
 gh() {
-  # gh issue view N --repo R --json body --jq ...
+  # gh issue view N --repo R --json author,body
   case "$5" in
-    "$CLIENT_REPO") printf 'Refs %s\n' "$PUB_ISSUE_URL" ;;
-    "$OPS_REPO") [[ "${GH_BOTH:-}" == 1 ]] && printf 'Refs %s\n' "$PUB_ISSUE_URL" || printf 'unrelated\n' ;;
-    *) return 1 ;;
+    "$CLIENT_REPO") gh_json "${GH_CLIENT_AUTHOR:-$ME}" "${GH_CLIENT_BODY:-Refs $PUB_ISSUE_URL}" ;;
+    "$OPS_REPO")
+      [[ "${GH_OPS_FAIL:-}" == 1 ]] && return 1
+      if [[ "${GH_BOTH:-}" == 1 ]]; then gh_json "$ME" "Refs $PUB_ISSUE_URL"; else gh_json "$ME" "unrelated"; fi
+      ;;
+    *) gh_json "$ME" "unrelated" ;;
   esac
 }
 resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 || fail "internal#45 rejected"
@@ -132,6 +138,20 @@ if GH_BOTH=1 resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_R
 fi
 if resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 92; then
   fail "expected internal#N with no back-reference match to fail closed"
+fi
+# 6d. Regression: URL match is number-anchored (issues/91 must not match issues/910), case-insensitive
+if GH_CLIENT_BODY="Refs ${PUB_ISSUE_URL}0" resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
+  fail "expected issues/910 not to satisfy a back-reference to issues/91"
+fi
+GH_CLIENT_BODY="see $(printf '%s' "$PUB_ISSUE_URL" | tr '[:lower:]' '[:upper:]'). Thanks" \
+  resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91 || fail "case/boundary-insensitive match rejected"
+# 6e. Regression: a failed lookup fails the resolution instead of reading as absence
+if GH_OPS_FAIL=1 GH_BOTH=1 resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
+  fail "expected a failed candidate lookup to fail the resolution"
+fi
+# 6f. Regression: a back-reference authored by someone other than \$ME is ignored
+if GH_CLIENT_AUTHOR="attacker" resolve_alpha_ref 'internal#45' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO" 91; then
+  fail "expected an untrusted-author back-reference to be ignored"
 fi
 unset -f gh
 
@@ -145,15 +165,23 @@ if resolve_alpha_ref 'app-client#10' "$TRACKER_REPO" "$AMBIG_CANDS" "$PUBLIC_REP
   fail "expected resolve_alpha_ref to reject ambiguous repo#N basename across orgs"
 fi
 
+# 7b. Legacy owner/repo#N and repo#N never resolve outside $CANDIDATE_TRACKERS
+if resolve_alpha_ref "evil-org/other#5" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO"; then
+  fail "expected owner/repo#N outside candidates to be rejected"
+fi
+if resolve_alpha_ref 'unknown-repo#5' "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO"; then
+  fail "expected repo#N basename outside candidates to be rejected"
+fi
+
 if resolve_alpha_ref "${CLIENT_REPO}#abc" "$TRACKER_REPO" "$CANDS" "$PUBLIC_REPO"; then
   fail "expected resolve_alpha_ref to reject non-numeric issue number"
 fi
 
 # 8. Crash-recovery jq filter syntax & epic label extraction check
-JQ_FILTER="$(awk '/select\(\(\.body \/\/ ""\) \| contains\(\$pub_url\)\)/{gsub(/^ *'\''|'\''[^'\'']*$/, ""); print; exit}' "$SKILL_MD")"
+JQ_FILTER="$(awk '/split\(\$pub_url/{gsub(/^ *'\''|'\''[^'\'']*$/, ""); print; exit}' "$SKILL_MD")"
 [[ -n "$JQ_FILTER" ]] || fail "could not extract crash-recovery jq filter from $SKILL_MD"
-jq_out="$(printf '%s' "[{\"number\":4370,\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[{\"name\":\"type: epic\"}]},{\"number\":999,\"body\":\"unrelated #91\",\"labels\":[]}]" \
-  | jq -r --arg repo "$TRACKER_REPO" --arg pub_url "$PUB_ISSUE_URL" "$JQ_FILTER")"
+jq_out="$(printf '%s' "[{\"number\":4370,\"author\":{\"login\":\"Trusted-Bot\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[{\"name\":\"type: epic\"}]},{\"number\":999,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"unrelated #91\",\"labels\":[]},{\"number\":1000,\"author\":{\"login\":\"trusted-bot\"},\"body\":\"Refs ${PUB_ISSUE_URL}0\",\"labels\":[]},{\"number\":1001,\"author\":{\"login\":\"attacker\"},\"body\":\"Refs $PUB_ISSUE_URL\",\"labels\":[]}]" \
+  | jq -r --arg repo "$TRACKER_REPO" --arg pub_url "$PUB_ISSUE_URL" --arg me "$ME" "$JQ_FILTER")"
 expected_jq="$(printf '%s#4370\ttrue' "$TRACKER_REPO")"
 assert_eq "$jq_out" "$expected_jq" "crash-recovery jq filter mismatch"
 

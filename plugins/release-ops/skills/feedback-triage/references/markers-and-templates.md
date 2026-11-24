@@ -140,10 +140,10 @@ Apply `release_display` at **every** user-facing render of `release`: the Known 
 
 The marker is an HTML comment on a **public** issue, and anyone can read a comment's raw body. So the marker is a public surface too: it never holds an `owner/` slug, and when private repository names are withheld it never holds the repo name either. Phase 6 resolves `repo#N` by basename and `internal#N` by the tracker issue's `Refs` back-reference, both against `$CANDIDATE_TRACKERS`.
 
-| disclosure policy | marker `alpha` (written) | public `alpha_display` |
+| `.feedback_triage.disclosure` | marker `alpha` (written) | public `alpha_display` |
 |---|---|---|
-| repo names shown | `repo#N` | `repo#N` |
-| private repos withheld | `internal#N` | `internal#N` |
+| `repo` (names shown) | `repo#N` | `repo#N` |
+| `internal` (names withheld; default) | `internal#N` | `internal#N` |
 
 Legacy markers (`owner/repo#N`, `#N`) are still read. On the next marker write, rewrite them to the form above.
 
