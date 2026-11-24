@@ -37,7 +37,7 @@ last_synced: 2026-06-20
 | `schema` | marker version, for future migration | `1` |
 | `reports` | total user reports folded into this survivor (Σ of members) | `3` |
 | `consolidated` | comma-list of dupe issue numbers closed into this one | `18,27` |
-| `alpha` | tracker issue as `repo#N`, or opaque `internal#N` when private repo names are withheld; never an `owner/` slug (legacy `owner/repo#N` / `#N` are still read); empty until Phase 4 | `example-repo-private#1234` |
+| `alpha` | tracker issue as `repo#N` (`.feedback_triage.disclosure: repo`) or opaque `internal#N` (`internal`, the default); never an `owner/` slug (legacy `owner/repo#N` / `#N` are still read); empty until Phase 4 | `internal#1234` |
 | `state` | `untriaged \| tracked \| in-progress \| fixed \| declined` | `tracked` |
 | `release` | release window string, or `future` | `v0.2.0-Beta` |
 | `fixed_in` | version the fix shipped in (only when `state: fixed`) | `v0.2.1` |
@@ -57,11 +57,11 @@ last_synced: 2026-06-20
 ME="${FT_ME:-$(gh api user --jq .login 2>/dev/null)}"
 [ -n "$ME" ] || { echo "cannot tell which login this routine runs as; set FT_ME" >&2; exit 1; }
 # gh shows a bot as app/<name> and REST as <name>[bot]; both sides use the [bot] form and
-# are compared exactly, so the user `my-app` never passes as the App `my-app[bot]`.
+# are compared case-insensitively (GitHub logins are), so the user `my-app` never passes as the App `my-app[bot]`.
 case "$ME" in app/*) ME="${ME#app/}[bot]" ;; esac
 # `gh api --jq` takes no --arg, so pipe to jq for the identity filter.
 gh api "repos/$PUBLIC/issues/$N/comments" --paginate \
-  | jq -c --arg me "$ME" --arg s "<!-- $SP:status v1 -->" '.[] | select((.user.login | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end) == $me and (.body | startswith($s))) | {id, body}' \
+  | jq -c --arg me "$ME" --arg s "<!-- $SP:status v1 -->" '.[] | select((.user.login | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end | ascii_downcase) == ($me | ascii_downcase) and (.body | startswith($s))) | {id, body}' \
   > /tmp/ft-managed.jsonl
 # More than one is ambiguous: leave this issue for a human and move to the next one.
 [ "$(grep -c '"id"' /tmp/ft-managed.jsonl)" -le 1 ] || { echo "more than one managed comment on #$N; skipping it for a human to fix" >&2; continue; }
@@ -138,7 +138,7 @@ Apply `release_display` at **every** user-facing render of `release`: the Known 
 
 ## Public tracker-ref display (`alpha_display`)
 
-The marker is an HTML comment on a **public** issue, and anyone can read a comment's raw body. So the marker is a public surface too: it never holds an `owner/` slug, and when private repository names are withheld it never holds the repo name either. Phase 6 resolves `repo#N` by basename and `internal#N` by the tracker issue's `Refs` back-reference, both against `$CANDIDATE_TRACKERS`.
+The marker is an HTML comment on a **public** issue, and anyone can read a comment's raw body. So the marker is a public surface too: it never holds an `owner/` slug, and with `.feedback_triage.disclosure: internal` (the default) it never holds the repo name either. Phase 6 resolves `repo#N` by basename and `internal#N` by the tracker issue's last-line `Refs` back-reference, both against `$CANDIDATE_TRACKERS`.
 
 | `.feedback_triage.disclosure` | marker `alpha` (written) | public `alpha_display` |
 |---|---|---|

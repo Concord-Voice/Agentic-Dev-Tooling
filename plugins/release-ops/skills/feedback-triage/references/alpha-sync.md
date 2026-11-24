@@ -15,7 +15,7 @@ When `.claude/repo-config.json` defines `.feedback_triage.routing` (`surface -> 
     echo "digest: failed to link $SIBLING_REPO#$CHILD_NUM under $PARENT_REPO#$PARENT_NUM (check for existing parent or permissions)"
   fi
   ```
-  Record the parent epic's ref in the public `alpha:` field as `repo#NNN` (or `internal#NNN` when private repo names are withheld; never `owner/`), only after its children are reconciled (SKILL.md Phase 4 step 2), and include `Refs https://github.com/$PUBLIC/issues/<N>` on the parent epic only. Child sub-issues reference the parent (`Parent: $PARENT_REPO#$PARENT_NUM`) rather than repeating the bare public `Refs` URL so crash-recovery searches remain unambiguous (and never use cross-repo `Closes`).
+  Record the parent epic's ref in the public `alpha:` field as `repo#NNN` (or `internal#NNN` when `.feedback_triage.disclosure` is `internal`, the default; never `owner/`), only after its children are reconciled (SKILL.md Phase 4 step 2), and include `Refs https://github.com/$PUBLIC/issues/<N>` on the parent epic only. Child sub-issues in a private candidate repo reference the parent (`Parent: $PARENT_REPO#$PARENT_NUM`) rather than repeating the bare public `Refs` URL so crash-recovery searches remain unambiguous (and never use cross-repo `Closes`). A child in a **public** repo must not name a private parent, since the slug would leak, and it must not carry a `Refs <public URL>` line either: that line is a binding, and a parent and child that share an issue number across candidate repos would both satisfy the opaque `internal#N` marker, so Phase 6 would never resolve it. Give the child `Report: $PUBLIC#<N>` instead, which is not part of the trailing block grammar; the parent epic is the only binding.
 
 ## Dispatch contract
 
@@ -23,9 +23,9 @@ Dispatch `/issue-creation` (it is model-invocable — no `disable-model-invocati
 
 - **Topic / title sketch:** the user's title with the `[Bug Report]`/`[Feature Request]` prefix stripped (e.g. `Reacting to a message with an emoji doesn't work`).
 - **Body seed** handed to `/issue-creation`'s Pre-Spec:
-  - The public report's `## Description` (verbatim, fenced).
+  - The public report's `## Description` (fenced), with every `https://github.com/` rewritten to `https[:]//github.com/`, so a reporter cannot plant a URL that a later search would read as a back-reference.
   - `Demand: <reports> user report(s)` — the prioritization signal.
-  - `Refs https://github.com/$PUBLIC/issues/<N>` — the back-reference (full URL, **not** a bare `#N`, and **not** `Closes` — cross-repo `Closes` is wrong here and a bare number could auto-link the wrong issue).
+  - `Refs https://github.com/$PUBLIC/issues/<N>` — the back-reference (full URL, **not** a bare `#N`, and **not** `Closes` — cross-repo `Closes` is wrong here and a bare number could auto-link the wrong issue). It MUST sit in the **trailing block** at the very end of the body, after the Description and the `Demand:` line: Phase 4 and Phase 6 trust only consecutive `Refs <public URL>` lines (or `<!-- feedback-triage:ref <URL> -->`) there. When a later survivor reuses this tracker issue (adjacency), append its own `Refs` line to that block, never anywhere else. After `/issue-creation` returns, re-read the body and, if anything but those lines follows the `Demand:` line, edit the body so the block ends it.
 - **Pre-answered metadata** (see mappings below) so `/issue-creation` doesn't have to guess.
 
 `/issue-creation` then runs its own adjacency scan — so a feedback item that matches an existing tracker issue or epic is attached/cross-referenced rather than duplicated. That dedup-against-the-tracker is exactly why we route through it instead of `gh issue create`.
