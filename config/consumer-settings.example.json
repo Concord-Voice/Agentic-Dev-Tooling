@@ -51,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/protect-sensitive.sh",
+            "command": "\"${CLAUDE_PROJECT_DIR:-.}\"/.claude/hooks/protect-sensitive.sh",
             "timeout": 5
           }
         ]
@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/destructive-commands.sh",
+            "command": "\"${CLAUDE_PROJECT_DIR:-.}\"/.claude/hooks/destructive-commands.sh",
             "timeout": 5
           }
         ]
@@ -71,7 +71,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/protect-env-files.sh",
+            "command": "\"${CLAUDE_PROJECT_DIR:-.}\"/.claude/hooks/protect-env-files.sh",
             "timeout": 5
           }
         ]
@@ -81,7 +81,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/protect-applied-migrations.sh",
+            "command": "\"${CLAUDE_PROJECT_DIR:-.}\"/.claude/hooks/protect-applied-migrations.sh",
             "timeout": 5
           }
         ]
@@ -111,7 +111,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/auto-format.sh",
+            "command": "\"${CLAUDE_PROJECT_DIR:-.}\"/.claude/hooks/auto-format.sh",
             "timeout": 30
           }
         ]
@@ -121,7 +121,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/test-reminder.sh",
+            "command": "\"${CLAUDE_PROJECT_DIR:-.}\"/.claude/hooks/test-reminder.sh",
             "timeout": 5
           }
         ]
@@ -133,12 +133,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/detect-secrets.sh",
+            "command": "\"${CLAUDE_PROJECT_DIR:-.}\"/.claude/hooks/detect-secrets.sh",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": ".claude/hooks/issue-creation-nudge.sh",
+            "command": "\"${CLAUDE_PROJECT_DIR:-.}\"/.claude/hooks/issue-creation-nudge.sh",
             "timeout": 5
           }
         ]

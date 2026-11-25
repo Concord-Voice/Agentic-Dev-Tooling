@@ -194,17 +194,33 @@ install_claude() {
   local had_existing_hooks
   had_existing_hooks="$(jq '((.hooks // {}) | [.[] | length] | add // 0) > 0' "$settings")"
 
-  # base.settings.json wires hooks with paths already relative to the project root
-  # (".claude/hooks/<name>.sh"), matching exactly where the loop above installs them
-  # (<root>/.claude/hooks/<name>.sh) -- Claude Code runs hook commands with cwd at the
-  # project root, so no path rewrite is needed for --project. --user is different: those
-  # relative commands resolve against whatever project is active at hook-run time, not
-  # $HOME, so they're inert there. For --user we rewrite any ".claude/hooks/..." command
-  # (base- or adopter-supplied) to the absolute path they were just installed at.
+  # Hook commands must not be bare relative paths. Claude Code runs a hook with cwd set to
+  # Claude's CURRENT directory, and that follows Claude into a worktree or after a `cd`, so
+  # ".claude/hooks/x.sh" resolves against whichever repo Claude is in at the moment: it runs
+  # that repo's copy of the hook, or fails when the repo has none. ${CLAUDE_PROJECT_DIR} stays
+  # at the root where the session started, which is where the loop above installed them.
+  # So --project writes every ".claude/hooks/..." command (base- or adopter-supplied, with or
+  # without a leading interpreter such as `python3`) as "${CLAUDE_PROJECT_DIR:-.}"/.claude/hooks/...,
+  # which also repairs an older install on re-run. --user writes the absolute install path
+  # instead, because $HOME is not the project root. `norm` maps all three forms to the bare
+  # relative one, so dedupe and matcher widening see one hook, not three.
   merged_settings="$(mktemp "$dot/.settings.XXXXXXXX")"
   if jq -s --arg abs_prefix "$root/.claude/hooks/" --argjson userscope "$([[ "$USER_SCOPE" = 1 ]] && echo true || echo false)" '
-    # --user rewrote earlier commands to absolute paths, so compare in relative form.
-    def norm: if type == "string" and startswith($abs_prefix) then ".claude/hooks/" + ltrimstr($abs_prefix) else . end;
+    # Compare in bare relative form: earlier installs wrote relative, absolute (--user) or
+    # ${CLAUDE_PROJECT_DIR} commands, optionally after an interpreter word. Only BALANCED
+    # forms are recognised: the variable quoted on its own ("$X"/ "${X}"/ "${X:-.}"/), bare
+    # ($X/ ${X}/ ${X:-.}/), or the whole path quoted ("$X/.claude/hooks/f", closing quote
+    # dropped with it). Matching each quote or brace on its own left a stray quote behind,
+    # which no shell can parse, and let a broken ${X/... form pass as the base hook.
+    # Anything unbalanced is left exactly as written.
+    def pdvar: "(?:\\$CLAUDE_PROJECT_DIR|\\$\\{CLAUDE_PROJECT_DIR(?::-\\.)?\\})";
+    def norm: if type != "string" then . else
+      (if startswith($abs_prefix) then ".claude/hooks/" + ltrimstr($abs_prefix) else . end)
+      | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/(?<p>[^\"[:space:]]*)\""; "\(.i).claude/hooks/\(.p)")
+      | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?:\"" + pdvar + "\"|" + pdvar + ")/\\.claude/hooks/"; "\(.i).claude/hooks/")
+      end;
+    def anchor($to): if type == "string"
+      then sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\\.claude/hooks/"; "\(.i)\($to)") else . end;
     (.[0]) as $adopter | (.[1]) as $base |
     ($base * $adopter) as $shallow |
     ( ($base.hooks // {}) as $bh | ($adopter.hooks // {}) as $ah |
@@ -236,15 +252,10 @@ install_claude() {
       }) | from_entries)
     ) as $mergedhooks |
     ($shallow + { hooks: $mergedhooks }) as $merged |
-    if $userscope then
-      $merged | .hooks |= with_entries(.value |= map(
-        .hooks |= map(
-          if (.command | type) == "string" and (.command | startswith(".claude/hooks/"))
-          then .command |= sub("^\\.claude/hooks/"; $abs_prefix)
-          else . end
-        )
-      ))
-    else $merged end
+    (if $userscope then $abs_prefix else "\"${CLAUDE_PROJECT_DIR:-.}\"/.claude/hooks/" end) as $to |
+    $merged | .hooks |= with_entries(.value |= map(
+      .hooks |= map(if has("command") then .command |= (norm | anchor($to)) else . end)
+    ))
   ' "$settings" "$base" > "$merged_settings"; then
     mv "$merged_settings" "$settings"
   else
