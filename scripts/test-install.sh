@@ -102,7 +102,9 @@ done
 # --project hook commands are anchored at the session root, never bare relative: hooks run in
 # Claude's CURRENT directory, which follows it into worktrees (see install.sh).
 P='"${CLAUDE_PROJECT_DIR:-.}"/.claude/hooks/'
-wired="$(jq -r '[.hooks[][].hooks[].command] | .[]' "$tmp/.claude/settings.json")"
+# Every hook command in a settings.json, one per line.
+HOOK_CMDS='[.hooks[][].hooks[].command] | .[]'
+wired="$(jq -r "$HOOK_CMDS" "$tmp/.claude/settings.json")"
 printf '%s\n' "$wired" | grep -qxF "${P}issue-creation-nudge.sh" \
   || fail "issue-creation-nudge.sh is installed but not wired (UserPromptSubmit)"
 printf '%s\n' "$wired" | grep -qxF "${P}protect-applied-migrations.sh" \
@@ -120,7 +122,7 @@ for pj in "$HERE/plugins"/*/hooks/hooks.json; do
   while IFS= read -r cmd; do
     script="${cmd##*/}"; script="${script%\"}"
     [ -f "$(dirname "$pj")/$script" ] || fail "$pj references a missing script: $script"
-  done < <(jq -r '[.hooks[][].hooks[].command] | .[]' "$pj")
+  done < <(jq -r "$HOOK_CMDS" "$pj")
 done
 
 # Skill hygiene: scaffold-* dirs hold only SKILL.md.template (no real SKILL.md) and must be
@@ -134,7 +136,7 @@ done
 
 # Wired hook commands must resolve to a script that actually exists at the installed location
 # (root/.claude/hooks/<name>.sh) -- not a stale $CLAUDE_PROJECT_DIR/hooks/... path.
-hookcmds="$(jq -r '[.hooks[][].hooks[].command] | .[]' "$tmp/.claude/settings.json")"
+hookcmds="$(jq -r "$HOOK_CMDS" "$tmp/.claude/settings.json")"
 printf '%s\n' "$hookcmds" | grep -q 'CLAUDE_PROJECT_DIR/hooks/' && fail "hook command still points at an unadapted \$CLAUDE_PROJECT_DIR/hooks/ path"
 while IFS= read -r cmd; do
   case "$cmd" in
@@ -200,10 +202,10 @@ cat > "$legacy/.claude/settings.json" <<'JSON'
   {"matcher":"Read","hooks":[{"type":"command","command":"python3 .claude/hooks/copilot-read-deny.py"}]}]}}
 JSON
 "$HERE/install.sh" claude --project "$legacy" >/dev/null
-legacy_cmds="$(jq -r '[.hooks[][].hooks[].command] | .[]' "$legacy/.claude/settings.json")"
+legacy_cmds="$(jq -r "$HOOK_CMDS" "$legacy/.claude/settings.json")"
 printf '%s\n' "$legacy_cmds" | grep -qxF "python3 ${P}copilot-read-deny.py" \
   || fail "re-install did not anchor an interpreter-prefixed relative hook command"
-[ "$(printf '%s\n' "$legacy_cmds" | grep -cF 'protect-env-files.sh')" = 1 ] \
+[[ "$(printf '%s\n' "$legacy_cmds" | grep -cF 'protect-env-files.sh')" == 1 ]] \
   || fail "re-install duplicated protect-env-files.sh instead of anchoring the existing entry"
 printf '%s\n' "$legacy_cmds" | grep -qE '^(python3 )?\.claude/hooks/' \
   && fail "re-install left a bare relative hook command"
@@ -225,7 +227,7 @@ printf '%s\n' "$user_out" | grep -q "user scope skips" || fail "--user did not d
 [ -f "$fake_home/.claude/repo-config.reference.md" ] || fail "--user should still install the repo-config reference"
 [ -d "$fake_home/.claude/skills/dev-lifecycle" ] || fail "--user should still install skills"
 
-user_hookcmds="$(jq -r '[.hooks[][].hooks[].command] | .[]' "$fake_home/.claude/settings.json")"
+user_hookcmds="$(jq -r "$HOOK_CMDS" "$fake_home/.claude/settings.json")"
 while IFS= read -r cmd; do
   case "$cmd" in
     "$fake_home"/.claude/hooks/*) [ -f "$cmd" ] || fail "--user hook command points at a nonexistent script: $cmd" ;;
