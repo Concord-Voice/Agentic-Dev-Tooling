@@ -1,11 +1,17 @@
 """Regression tests for tier/readiness separation and fail-closed tier admission."""
+from contextlib import redirect_stdout
 from copy import deepcopy
+import io
+import json
 from pathlib import Path
 import runpy
+from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-classify = runpy.run_path(str(ROOT / "plugins/release-ops/skills/weekly-deps/classify.py"))["classify"]
+CLASSIFIER = ROOT / "plugins/release-ops/skills/weekly-deps/classify.py"
+classify = runpy.run_path(str(CLASSIFIER))["classify"]
 
 
 class RiskPolicy(unittest.TestCase):
@@ -89,6 +95,20 @@ class RiskPolicy(unittest.TestCase):
         self.assertFalse(result["eligible_policy"])
         self.pr["members"][1]["release"] = "unknown"
         self.assertEqual(self.classify()["tier"], "UNKNOWN")
+
+    def test_cli_preserves_pr_identity_and_policy_decision(self):
+        identity = "example/product#12"
+        self.pr["members"][0].update(old="v1.0.0", new="v1.1.0")
+        with TemporaryDirectory() as cache:
+            config = Path(cache) / "config.json"
+            evidence = Path(cache) / "evidence.json"
+            config.write_text(json.dumps(self.config))
+            evidence.write_text(json.dumps({identity: self.pr}))
+            args = [str(CLASSIFIER), str(config), str(evidence)]
+            output = io.StringIO()
+            with patch("sys.argv", args), redirect_stdout(output):
+                runpy.run_path(str(CLASSIFIER), run_name="__main__")
+        self.assertEqual(json.loads(output.getvalue()), {identity: self.classify()})
 
     def test_explicit_c_rule_does_not_require_parseable_version(self):
         self.config["weekly_deps"]["tiers"]["C"] = {"packaging": {"packages": ["lint"]}}
