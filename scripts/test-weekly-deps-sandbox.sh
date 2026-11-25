@@ -35,3 +35,5 @@ assert run('absent','').stdout == ''
 assert run('present','not-json').returncode != 0
 print('ALL PASS')
 PY
+
+python3 -I -B "$ROOT/scripts/test-weekly-deps-risk-policy.py"
