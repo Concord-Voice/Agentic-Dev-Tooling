@@ -99,14 +99,17 @@ done
 
 # I5: both previously-orphaned hooks must be wired, not just shipped as files. They existed
 # in plugins/guardrails/hooks/ but no settings entry ever invoked them.
+# --project hook commands are anchored at the session root, never bare relative: hooks run in
+# Claude's CURRENT directory, which follows it into worktrees (see install.sh).
+P='"${CLAUDE_PROJECT_DIR:-.}"/.claude/hooks/'
 wired="$(jq -r '[.hooks[][].hooks[].command] | .[]' "$tmp/.claude/settings.json")"
-printf '%s\n' "$wired" | grep -qx ".claude/hooks/issue-creation-nudge.sh" \
+printf '%s\n' "$wired" | grep -qxF "${P}issue-creation-nudge.sh" \
   || fail "issue-creation-nudge.sh is installed but not wired (UserPromptSubmit)"
-printf '%s\n' "$wired" | grep -qx ".claude/hooks/protect-applied-migrations.sh" \
+printf '%s\n' "$wired" | grep -qxF "${P}protect-applied-migrations.sh" \
   || fail "protect-applied-migrations.sh is installed but not wired (PreToolUse Edit)"
-jq -e '[.hooks.UserPromptSubmit[].hooks[].command] | index(".claude/hooks/issue-creation-nudge.sh") != null' \
+jq -e --arg c "${P}issue-creation-nudge.sh" '[.hooks.UserPromptSubmit[].hooks[].command] | index($c) != null' \
   "$tmp/.claude/settings.json" >/dev/null || fail "issue-creation-nudge.sh wired to the wrong event"
-jq -e '[.hooks.PreToolUse[] | select(.matcher | test("Edit")) | .hooks[].command] | index(".claude/hooks/protect-applied-migrations.sh") != null' \
+jq -e --arg c "${P}protect-applied-migrations.sh" '[.hooks.PreToolUse[] | select(.matcher | test("Edit")) | .hooks[].command] | index($c) != null' \
   "$tmp/.claude/settings.json" >/dev/null || fail "protect-applied-migrations.sh wired without an Edit matcher"
 
 # I6a: the marketplace route registers hooks from each plugin's own hooks/hooks.json, not
@@ -135,10 +138,11 @@ hookcmds="$(jq -r '[.hooks[][].hooks[].command] | .[]' "$tmp/.claude/settings.js
 printf '%s\n' "$hookcmds" | grep -q 'CLAUDE_PROJECT_DIR/hooks/' && fail "hook command still points at an unadapted \$CLAUDE_PROJECT_DIR/hooks/ path"
 while IFS= read -r cmd; do
   case "$cmd" in
-    .claude/hooks/*)
-      script="${cmd#.claude/hooks/}"
+    "$P"*)
+      script="${cmd#"$P"}"
       [ -f "$tmp/.claude/hooks/$script" ] || fail "wired hook command has no installed script: $cmd"
       ;;
+    .claude/hooks/*) fail "--project left a bare relative hook command (resolves against Claude's cwd, not the root): $cmd" ;;
     *) fail "unexpected hook command shape: $cmd" ;;
   esac
 done <<EOF
@@ -181,7 +185,28 @@ JSON
 "$HERE/install.sh" claude --project "$custom_target" >/dev/null
 merged_cmds="$(jq -r '[.hooks.PreToolUse[].hooks[].command] | .[]' "$custom_target/.claude/settings.json")"
 printf '%s\n' "$merged_cmds" | grep -qx "my-custom-hook.sh" || fail "adopter's pre-existing custom hook was dropped by the merge"
-printf '%s\n' "$merged_cmds" | grep -qx ".claude/hooks/destructive-commands.sh" || fail "base guardrail hook was dropped by the merge"
+printf '%s\n' "$merged_cmds" | grep -qxF "${P}destructive-commands.sh" || fail "base guardrail hook was dropped by the merge"
+
+# Regression: an install written before hook paths were anchored has bare relative commands,
+# including one behind an interpreter. Seen live: a session that started at an org root and moved
+# into a repo worktree ran that repo's protect-env-files.sh for Bash calls, and failed every Read
+# on `python3 .claude/hooks/copilot-read-deny.py`, which the repo did not have. A re-install must
+# anchor both, without duplicating the base hook it already had.
+legacy="$tmp/legacy-relative-target"
+mkdir -p "$legacy/.claude"; git -C "$legacy" init -q
+cat > "$legacy/.claude/settings.json" <<'JSON'
+{"hooks":{"PreToolUse":[
+  {"matcher":"Read|Grep|Edit|Write|Bash","hooks":[{"type":"command","command":".claude/hooks/protect-env-files.sh"}]},
+  {"matcher":"Read","hooks":[{"type":"command","command":"python3 .claude/hooks/copilot-read-deny.py"}]}]}}
+JSON
+"$HERE/install.sh" claude --project "$legacy" >/dev/null
+legacy_cmds="$(jq -r '[.hooks[][].hooks[].command] | .[]' "$legacy/.claude/settings.json")"
+printf '%s\n' "$legacy_cmds" | grep -qxF "python3 ${P}copilot-read-deny.py" \
+  || fail "re-install did not anchor an interpreter-prefixed relative hook command"
+[ "$(printf '%s\n' "$legacy_cmds" | grep -cF 'protect-env-files.sh')" = 1 ] \
+  || fail "re-install duplicated protect-env-files.sh instead of anchoring the existing entry"
+printf '%s\n' "$legacy_cmds" | grep -qE '^(python3 )?\.claude/hooks/' \
+  && fail "re-install left a bare relative hook command"
 
 # IMPORTANT 3: --user scope hook commands must be absolute, not the relative ".claude/hooks/..."
 # form used for --project -- a relative command in ~/.claude/settings.json resolves against
