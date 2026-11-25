@@ -20,11 +20,14 @@ fi
 
 # All hook command strings, regardless of event/matcher nesting. A "${CLAUDE_PROJECT_DIR}"
 # prefix is stripped, so an install written before or after install.sh anchored its hook
-# paths compares equal to the base (same normalization as install.sh's `norm`).
+# paths compares equal to the base (same normalization as install.sh's `norm`: balanced
+# forms only, so a hook whose path cannot expand still reports as drift).
 cmds() {
   local settings_file="$1"
-  jq -r '[.hooks[]?[]?.hooks[]?.command | strings
-          | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"?\\$\\{?CLAUDE_PROJECT_DIR(?::-\\.)?\\}?\"?/\\.claude/hooks/"; "\(.i).claude/hooks/")]
+  jq -r 'def pdvar: "(?:\\$CLAUDE_PROJECT_DIR|\\$\\{CLAUDE_PROJECT_DIR(?::-\\.)?\\})";
+         [.hooks[]?[]?.hooks[]?.command | strings
+          | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/(?<p>[^\"[:space:]]*)\""; "\(.i).claude/hooks/\(.p)")
+          | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?:\"" + pdvar + "\"|" + pdvar + ")/\\.claude/hooks/"; "\(.i).claude/hooks/")]
          | sort | unique[]' "$settings_file" 2>/dev/null
 }
 missing=0

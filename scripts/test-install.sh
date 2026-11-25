@@ -210,6 +210,49 @@ printf '%s\n' "$legacy_cmds" | grep -qxF "python3 ${P}copilot-read-deny.py" \
 printf '%s\n' "$legacy_cmds" | grep -qE '^(python3 )?\.claude/hooks/' \
   && fail "re-install left a bare relative hook command"
 
+# Regression: adopters who already wrote ${CLAUDE_PROJECT_DIR} commands, in any balanced shape,
+# must come out anchored, parseable and deduped against the base hook. An earlier norm matched
+# each quote on its own, so a whole-path-quoted command kept its closing quote, no shell could
+# parse it, and a blocking hook that cannot parse blocks every call. An unbalanced form must be
+# left exactly as written, never passed off as the base hook.
+shapes="$tmp/project-dir-shapes-target"
+mkdir -p "$shapes/.claude"; git -C "$shapes" init -q
+cat > "$shapes/.claude/settings.json" <<'JSON'
+{"hooks":{"PreToolUse":[
+  {"matcher":"Bash","hooks":[{"type":"command","command":"\"$CLAUDE_PROJECT_DIR/.claude/hooks/destructive-commands.sh\""}]},
+  {"matcher":"Read|Grep|Edit|Write|Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/protect-env-files.sh"}]},
+  {"matcher":"Edit|Write|Bash","hooks":[{"type":"command","command":"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-sensitive.sh"}]},
+  {"matcher":"Edit|Write","hooks":[{"type":"command","command":"${CLAUDE_PROJECT_DIR}/.claude/hooks/protect-applied-migrations.sh"}]},
+  {"matcher":"Read","hooks":[{"type":"command","command":"python3 \"${CLAUDE_PROJECT_DIR}/.claude/hooks/my-read.py\""}]},
+  {"matcher":"Read","hooks":[{"type":"command","command":"${CLAUDE_PROJECT_DIR/.claude/hooks/my-broken.sh"}]}]}}
+JSON
+"$HERE/install.sh" claude --project "$shapes" >/dev/null
+shape_cmds="$(jq -r "$HOOK_CMDS" "$shapes/.claude/settings.json")"
+for h in destructive-commands.sh protect-env-files.sh protect-sensitive.sh protect-applied-migrations.sh; do
+  [[ "$(printf '%s\n' "$shape_cmds" | grep -cF "$h")" == 1 ]] || fail "project-dir shape for $h was duplicated or dropped"
+  printf '%s\n' "$shape_cmds" | grep -qxF "${P}$h" || fail "project-dir shape for $h was not anchored to the canonical form"
+done
+printf '%s\n' "$shape_cmds" | grep -qxF "python3 ${P}my-read.py" || fail "whole-path-quoted interpreter command was not anchored"
+printf '%s\n' "$shape_cmds" | grep -qxF '${CLAUDE_PROJECT_DIR/.claude/hooks/my-broken.sh' \
+  || fail "an unbalanced project-dir form was rewritten instead of left as written"
+while IFS= read -r cmd; do
+  [[ "$cmd" == *my-broken.sh ]] && continue
+  bash -n -c "$cmd" 2>/dev/null || fail "re-install produced a hook command no shell can parse: $cmd"
+done <<EOF
+$shape_cmds
+EOF
+
+# drift-check must not count a hook whose path cannot expand as present.
+drift_ok="$tmp/drift-ok.json"; drift_bad="$tmp/drift-bad.json"
+cp "$tmp/.claude/settings.json" "$drift_ok"
+jq --arg bad '${CLAUDE_PROJECT_DIR/.claude/hooks/destructive-commands.sh' \
+  '(.hooks.PreToolUse[].hooks[] | select(.command | endswith("destructive-commands.sh")) | .command) |= $bad' \
+  "$drift_ok" > "$drift_bad"
+"$HERE/scripts/drift-check.sh" "$HERE/config/base.settings.json" "$drift_ok" >/dev/null \
+  || fail "drift-check reported drift on a freshly installed settings.json"
+"$HERE/scripts/drift-check.sh" "$HERE/config/base.settings.json" "$drift_bad" >/dev/null \
+  && fail "drift-check accepted an unbalanced \${CLAUDE_PROJECT_DIR/... hook as the base hook"
+
 # IMPORTANT 3: --user scope hook commands must be absolute, not the relative ".claude/hooks/..."
 # form used for --project -- a relative command in ~/.claude/settings.json resolves against
 # whatever project is active at hook-run time, not $HOME, so it would be inert. Override HOME to

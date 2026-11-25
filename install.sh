@@ -207,10 +207,17 @@ install_claude() {
   merged_settings="$(mktemp "$dot/.settings.XXXXXXXX")"
   if jq -s --arg abs_prefix "$root/.claude/hooks/" --argjson userscope "$([[ "$USER_SCOPE" = 1 ]] && echo true || echo false)" '
     # Compare in bare relative form: earlier installs wrote relative, absolute (--user) or
-    # ${CLAUDE_PROJECT_DIR} commands, optionally after an interpreter word.
+    # ${CLAUDE_PROJECT_DIR} commands, optionally after an interpreter word. Only BALANCED
+    # forms are recognised: the variable quoted on its own ("$X"/ "${X}"/ "${X:-.}"/), bare
+    # ($X/ ${X}/ ${X:-.}/), or the whole path quoted ("$X/.claude/hooks/f", closing quote
+    # dropped with it). Matching each quote or brace on its own left a stray quote behind,
+    # which no shell can parse, and let a broken ${X/... form pass as the base hook.
+    # Anything unbalanced is left exactly as written.
+    def pdvar: "(?:\\$CLAUDE_PROJECT_DIR|\\$\\{CLAUDE_PROJECT_DIR(?::-\\.)?\\})";
     def norm: if type != "string" then . else
       (if startswith($abs_prefix) then ".claude/hooks/" + ltrimstr($abs_prefix) else . end)
-      | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"?\\$\\{?CLAUDE_PROJECT_DIR(?::-\\.)?\\}?\"?/\\.claude/hooks/"; "\(.i).claude/hooks/")
+      | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/(?<p>[^\"[:space:]]*)\""; "\(.i).claude/hooks/\(.p)")
+      | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?:\"" + pdvar + "\"|" + pdvar + ")/\\.claude/hooks/"; "\(.i).claude/hooks/")
       end;
     def anchor($to): if type == "string"
       then sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\\.claude/hooks/"; "\(.i)\($to)") else . end;
