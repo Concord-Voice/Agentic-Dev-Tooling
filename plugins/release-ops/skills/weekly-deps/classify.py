@@ -7,8 +7,8 @@ import sys
 
 
 BUMP_RANK = {"patch": 0, "minor": 1, "major": 2}
-RULE_FIELDS = {"groups", "ungrouped", "packages", "ecosystems", "directories",
-               "dependency_type", "max_bump"}
+LIST_FIELDS = ("groups", "packages", "ecosystems", "directories")
+RULE_FIELDS = {*LIST_FIELDS, "ungrouped", "dependency_type", "max_bump"}
 
 
 def matches(values, patterns):
@@ -16,8 +16,15 @@ def matches(values, patterns):
                                 for value in values)
 
 
+def prerelease_order(label):
+    return tuple((0, int(part)) if part.isdigit() else (1, part)
+                 for part in label[1:].split("."))
+
+
 def bump_shape(before, after):
     def version(text):
+        if not isinstance(text, str) or len(text) > 128:
+            return None
         match = re.fullmatch(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?"
                              r"(?:\+[0-9A-Za-z.-]+)?", text or "")
         return (*map(int, match.groups()[:3]), match[4]) if match else None
@@ -27,6 +34,9 @@ def bump_shape(before, after):
         return None
     if old[:3] > new[:3] or old == new:
         return None
+    if old[:3] == new[:3] and new[3]:
+        if old[3] is None or prerelease_order(old[3]) >= prerelease_order(new[3]):
+            return None
     if old[3] or new[3] or old[0] != new[0]:
         return "major"
     if old[1] != new[1]:
@@ -36,10 +46,22 @@ def bump_shape(before, after):
     return "patch"
 
 
-def rule_matches(tier, rule, pr, bumps):
-    if not rule or rule.keys() - RULE_FIELDS:
+def has_pattern_list(value):
+    return isinstance(value, list) and bool(value) and all(
+        isinstance(pattern, str) and bool(pattern.strip()) for pattern in value
+    )
+
+
+def valid_rule(rule):
+    if not isinstance(rule, dict) or rule.keys() - RULE_FIELDS:
         return False
-    if not (rule.get("groups") or rule.get("ungrouped") is True or rule.get("packages")):
+    if any(key in rule and not has_pattern_list(rule[key]) for key in LIST_FIELDS):
+        return False
+    return bool(rule.get("groups") or rule.get("ungrouped") is True or rule.get("packages"))
+
+
+def rule_matches(tier, rule, pr, bumps):
+    if not valid_rule(rule):
         return False
     members = pr["members"]
     group = pr.get("group")
@@ -106,6 +128,9 @@ def complete_evidence(pr, assessed):
 
 def advisory_tier(advisory, assessed):
     severity = advisory.get("severity")
+    refs = ("advisory_id", "advisory_source", "live_exposure_receipt")
+    if not all(isinstance(advisory.get(ref), str) and advisory[ref].strip() for ref in refs):
+        return None
     if (any(bump != "patch" for _, bump, _ in assessed)
             or advisory.get("applies_to_exact_versions") is not True
             or advisory.get("exposed_in_live_production") is not True):
@@ -136,8 +161,14 @@ def classify(config, pr):
     """Use maintainer-verified facts. CI, approval, base and conflict are separate."""
     policy = config.get("weekly_deps", {})
     configured = policy.get("critical_packages", [])
+    extra = policy.get("security_sensitive_extra", [])
+    members = [
+        {**member, "security_sensitive": True}
+        if matches([member["package"]], extra) else member
+        for member in pr["members"]
+    ]
     assessed = [(member, bump_shape(member.get("old"), member.get("new")),
-                 critical_surface(member, configured)) for member in pr["members"]]
+                 critical_surface(member, configured)) for member in members]
     bumps = [bump for _, bump, _ in assessed]
     rules = policy.get("tiers", {})
     explicit_c = any(rule_matches("C", rule, pr, bumps) for rule in rules.get("C", {}).values())

@@ -391,7 +391,7 @@ The group name and the package list are separate tests on purpose. A group can h
 
 **With `.weekly_deps.tiers == {}` (the safe default), no package matches any group, so every bump falls through to Tier C (manual deep review).** This is intentional: a repo that hasn't declared its tier data gets conservative, never-fast-merged behavior rather than an unsafe fast-track. Repositories with `weekly_deps.risk_policy: evidence-v1` follow the [evidence-based policy](references/risk-policy.md) for tier and confidence instead of the legacy classification below and in Phase 3.5. Use its separate readiness gates.
 
-**The major-bump override is universal and always applies, regardless of config:**
+**The following major-bump override applies to every PR under the legacy policy.**
 
 > **Any major-version bump (`X.Y.Z → X+1.0.0`) → Tier C**, regardless of which group the package belongs to. The dependabot group label / config group is a *starting* signal, not the final answer. Always check the version shape before final tier assignment.
 
@@ -748,7 +748,7 @@ For grouped PRs (`chore: bump the X group ...`), the lookup runs once per packag
 
 ### 3.5 Confidence assessment
 
-Combine the signals from 3.1–3.4 plus the tier from Phase 2 plus the bumped-package identity into a single confidence label per PR. The label drives Phase 3.6 (whether to request Copilot review) and Phase 4 (whether to fast-merge or hold for triage).
+For the legacy policy, combine the signals from 3.1–3.4 plus the tier from Phase 2 plus the bumped-package identity into a single confidence label per PR. The label drives Phase 3.6 (whether to request Copilot review) and Phase 4 (whether to fast-merge or hold for triage). The [evidence-based policy](references/risk-policy.md) keeps readiness separate from tiering.
 
 Confidence is biased toward false-positives. The cost of an unnecessary Copilot review is low (a few minutes of bot time the user already pays for via subscription); the cost of a missed regression in a security-sensitive bump is potentially much higher.
 

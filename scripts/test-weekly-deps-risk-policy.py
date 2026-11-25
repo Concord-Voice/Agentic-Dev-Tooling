@@ -67,7 +67,10 @@ class RiskPolicy(unittest.TestCase):
     def test_emergency_requires_live_evidence_and_respects_c_overrides(self):
         self.pr["members"][0].update(package="critical-service", surface="critical", new="1.1.1")
         self.pr["advisory"] = {"severity": "high", "applies_to_exact_versions": True,
-                               "exposed_in_live_production": False}
+                               "exposed_in_live_production": False,
+                               "advisory_id": "GHSA-example",
+                               "advisory_source": "official advisory record",
+                               "live_exposure_receipt": "verified deployment receipt"}
         self.assertEqual(self.classify()["tier"], "UNKNOWN")
         self.pr["advisory"]["exposed_in_live_production"] = True
         self.assertEqual(self.classify()["tier"], "A")
@@ -103,6 +106,31 @@ class RiskPolicy(unittest.TestCase):
         with patch("sys.argv", [str(CLASSIFIER)]), patch("sys.stdin", evidence), redirect_stdout(output):
             runpy.run_path(str(CLASSIFIER), run_name="__main__")
         self.assertEqual(json.loads(output.getvalue()), {identity: self.classify()})
+
+    def test_incomplete_or_invalid_input_cannot_authorize_automatic_handling(self):
+        rule = self.config["weekly_deps"]["tiers"]["A"]["lint"]
+        rule["packages"] = "lint"
+        self.assertFalse(self.classify()["eligible_policy"])
+        member = self.pr["members"][0]
+        for old, new in (("1.1.0", "1.1.0-beta.3"), ("1.1.0-rc.2", "1.1.0-rc.1"),
+                         ("1.1.0", None)):
+            member.update(old=old, new=new)
+            self.assertEqual(self.classify()["tier"], "UNKNOWN")
+        member.update(old="1.1.0-rc.2", new="1.1.0-rc.10")
+        self.assertEqual(self.classify()["tier"], "B")
+
+    def test_emergency_requires_named_advisory_and_live_receipts(self):
+        self.pr["members"][0]["new"] = "1.1.1"
+        self.pr["advisory"] = {"severity": "critical", "applies_to_exact_versions": True,
+                               "exposed_in_live_production": True}
+        self.assertEqual(self.classify()["tier"], "UNKNOWN")
+
+    def test_consumer_security_overlay_overrides_false_input(self):
+        self.config["weekly_deps"]["security_sensitive_extra"] = ["lint"]
+        self.pr["members"][0]["new"] = "1.1.1"
+        self.assertTrue(self.classify()["security_review_required"])
+        self.pr["members"][0]["release"] = "unknown"
+        self.assertEqual(self.classify()["tier"], "C")
 
     def test_explicit_c_rule_does_not_require_parseable_version(self):
         self.config["weekly_deps"]["tiers"]["C"] = {"packaging": {"packages": ["lint"]}}

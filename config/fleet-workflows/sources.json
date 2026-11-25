@@ -162,7 +162,7 @@
     ]
   },
   "weekly-deps/SKILL.md": {
-    "sha256": "9a9debdedc6068bbbc9e30347c262d193e228e24b8d5c03c11ee14f0dcfbfc5d",
+    "sha256": "35dfc38a7b867b8727754dad68bd551b76f0b06a9f10c730f6eeb5f3b0a94225",
     "edits": [
       [60, 77, "source \"${FLEET_SKILLS:?}/_shared/repo-config.sh\" && fleet_load_config \"$RC_OID\" || { echo \"Unknown default-branch configuration\" >&2; return 1 2>/dev/null || exit 1; }"],
       [86, 87, "# Fixed fleet Tier C review.\nDEEP_REVIEW_SKILL=/enhanced-pr-review"],
@@ -191,9 +191,9 @@
     "sha256": "e985c16e52b38d2e9f8f9ee72b3206ce3ed951d8dfcfa2fa2481fa8db8603e20"
   },
   "weekly-deps/references/risk-policy.md": {
-    "sha256": "d39f5d7ffaf0dacb3a24661a8e2b89079e68b1495012b05302849ab0db335c95"
+    "sha256": "87a041846e6c08f11a30584a202aa17f7e6c26d4ff7cf7ff5647f775b1d7b05f"
   },
   "weekly-deps/classify.py": {
-    "sha256": "f348ab5117c4ccb02e3bad33b88c1cfe76a94b018b46c5e10cebffb5167e843e"
+    "sha256": "8149298363f26bc24988b9840b920b9d8a82c5c4425cbb68518b3908ac809a95"
   }
 }
