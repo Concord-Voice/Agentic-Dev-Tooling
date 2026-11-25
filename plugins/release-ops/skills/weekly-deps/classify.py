@@ -21,22 +21,26 @@ def prerelease_order(label):
                  for part in label[1:].split("."))
 
 
-def bump_shape(before, after):
-    def version(text):
-        if not isinstance(text, str) or len(text) > 128:
-            return None
-        match = re.fullmatch(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?"
-                             r"(?:\+[0-9A-Za-z.-]+)?", text or "")
-        return (*map(int, match.groups()[:3]), match[4]) if match else None
+def parse_version(text):
+    if not isinstance(text, str) or len(text) > 128:
+        return None
+    match = re.fullmatch(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?"
+                         r"(?:\+[0-9A-Za-z.-]+)?", text)
+    return (*map(int, match.groups()[:3]), match[4]) if match else None
 
-    old, new = version(before), version(after)
-    if old is None or new is None:
+
+def version_increases(old, new):
+    if old[:3] != new[:3]:
+        return old[:3] < new[:3]
+    if new[3] is None:
+        return old[3] is not None
+    return old[3] is not None and prerelease_order(old[3]) < prerelease_order(new[3])
+
+
+def bump_shape(before, after):
+    old, new = parse_version(before), parse_version(after)
+    if old is None or new is None or not version_increases(old, new):
         return None
-    if old[:3] > new[:3] or old == new:
-        return None
-    if old[:3] == new[:3] and new[3]:
-        if old[3] is None or prerelease_order(old[3]) >= prerelease_order(new[3]):
-            return None
     if old[3] or new[3] or old[0] != new[0]:
         return "major"
     if old[1] != new[1]:
