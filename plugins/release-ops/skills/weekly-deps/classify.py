@@ -56,16 +56,18 @@ def has_pattern_list(value):
     )
 
 
-def valid_rule(rule):
+def valid_rule(tier, rule):
     if not isinstance(rule, dict) or rule.keys() - RULE_FIELDS:
         return False
     if any(key in rule and not has_pattern_list(rule[key]) for key in LIST_FIELDS):
         return False
-    return bool(rule.get("groups") or rule.get("ungrouped") is True or rule.get("packages"))
+    if "dependency_type" in rule and rule["dependency_type"] not in ("development", "production"):
+        return False
+    return tier == "C" or bool(rule.get("groups") or rule.get("ungrouped") is True or rule.get("packages"))
 
 
 def rule_matches(tier, rule, pr, bumps):
-    if not valid_rule(rule):
+    if not valid_rule(tier, rule):
         return False
     members = pr["members"]
     group = pr.get("group")

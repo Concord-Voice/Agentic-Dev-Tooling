@@ -137,6 +137,26 @@ class RiskPolicy(unittest.TestCase):
         self.pr["members"][0]["new"] = "unversioned"
         self.assertEqual(self.classify()["tier"], "C")
 
+    def test_explicit_c_rules_accept_directory_only_or_ecosystem_only_scope(self):
+        tiers = self.config["weekly_deps"]["tiers"]
+        for scope in ({"directories": ["client"]}, {"ecosystems": ["npm"]}):
+            with self.subTest(scope=scope):
+                tiers["C"] = {"protected scope": scope}
+                result = self.classify()
+                self.assertEqual(result["tier"], "C")
+                self.assertEqual(result["matching_rules"], ["protected scope"])
+                self.assertFalse(result["eligible_policy"])
+
+    def test_invalid_dependency_type_cannot_admit_untyped_package(self):
+        rule = self.config["weekly_deps"]["tiers"]["A"]["lint"]
+        del self.pr["members"][0]["dependency_type"]
+        for dependency_type in (None, "unexpected"):
+            with self.subTest(dependency_type=dependency_type):
+                rule["dependency_type"] = dependency_type
+                result = self.classify()
+                self.assertEqual(result["tier"], "A")
+                self.assertFalse(result["eligible_policy"])
+
 
 if __name__ == "__main__":
     unittest.main()
