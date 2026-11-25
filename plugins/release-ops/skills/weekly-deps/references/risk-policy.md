@@ -24,6 +24,12 @@ Apply C overrides first, including to expedited security proposals. Evaluate all
 
 A/B rules are scoped authorization criteria in the trusted repository config. Match the computed A or B against the configured rule for that tier. The allowed fields keep their usual meanings. `max_bump: "major"` is available for covered routine packages in Tier B. Match package, directory, ecosystem and type against the whole diff. An unmatched risk tier stays A or B with policy eligibility denied. A verified live security patch may qualify without a package rule, but retains the security review requirement. A label may identify an input PR and cannot override the calculated tier. Use legacy label demotion only under the legacy policy.
 
+## Record confidence and readiness
+
+Record confidence after the upstream community and artifact-integrity checks in Phases 3.3 and 3.4. With complete favorable evidence, use HIGH for Tier A and MEDIUM for Tier B. A negative signal that still needs resolution gives LOW. An unavailable signal or failed lookup gives UNKNOWN. Use LOW for Tier C and UNKNOWN when the tier evidence is incomplete. Hold LOW and UNKNOWN, and recalculate after obtaining new evidence. Confirmed dependency risk changes the tier to C. The independent security review still applies to sensitive packages and verified live security patches.
+
+Record failed or pending CI, branch ancestry, merge conflicts, lockstep, and required reviews as readiness gates. Report both confidence and readiness next to the risk tier. The offline classifier computes the risk tier and scoped policy match from inspected facts. Confidence also relies on the recorded external checks.
+
 ## Dry run
 
 Use the checked-in `classify.py` from the same verified tooling edition as this reference.
