@@ -91,11 +91,11 @@ def rule_matches(tier, rule, pr, bumps):
 def bundled_change(policy, pr):
     if pr.get("ecosystem") == "docker" or pr.get("bundled_engine") is True:
         return True
-    names = [member["package"] for member in pr["members"]]
-    if pr.get("group"):
-        names.append(pr["group"])
     patterns = policy.get("bundled_engines", [])
-    return any(matches([name], patterns) for name in names)
+    if any(matches([member["package"]], patterns) for member in pr["members"]):
+        return True
+    group = pr.get("group")
+    return bool(group and matches([group], policy.get("bundled_engine_groups", [])))
 
 
 def critical_surface(member, configured):

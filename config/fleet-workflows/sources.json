@@ -191,9 +191,9 @@
     "sha256": "e985c16e52b38d2e9f8f9ee72b3206ce3ed951d8dfcfa2fa2481fa8db8603e20"
   },
   "weekly-deps/references/risk-policy.md": {
-    "sha256": "8fe61a2d11514ea1e130aaa4cff230771ffb38349fbd208cc7ad3b6c6ced30fd"
+    "sha256": "7a0dd14bae38a9031e36fdb611acd303e2d36345c60bf54f287518bccd59e44b"
   },
   "weekly-deps/classify.py": {
-    "sha256": "bdff25441a2fd0d1a439d2250268144bd2bd2c42a56fe5033e7b8dfb15e49e7e"
+    "sha256": "6d185807acb9f33f09941816bcece550d2a63f493ef1fcc091fc823cb62a123a"
   }
 }

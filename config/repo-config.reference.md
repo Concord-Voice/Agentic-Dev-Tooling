@@ -70,7 +70,8 @@ Read it with `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has
 | `weekly_deps.tiers` | `{A,B,C}` → map(rule name → rule) | `{}` → every bump treated Tier C (manual) | weekly-deps Phase 2 |
 | `weekly_deps.tiers.<T>.<rule>` | `{groups[],ungrouped,packages[],ecosystems[],directories[],dependency_type,max_bump}` | — ; all given fields must hold; a PR that no rule matches is Tier C | weekly-deps Phase 2 |
 | `weekly_deps.label_rules[]` | `{label,tier,demote_to,demote_max_packages}` | `[]` → no label reclassification | weekly-deps Phase 2 |
-| `weekly_deps.bundled_engines` | string[] (package globs or Dependabot group names) | `[]` (added to the built-in bundled-engine class; always Tier C) | weekly-deps Phase 2 |
+| `weekly_deps.bundled_engines` | string[] (package globs, plus Dependabot group names in legacy mode) | `[]` (always Tier C on match) | weekly-deps Phase 2 |
+| `weekly_deps.bundled_engine_groups` | string[] (Dependabot group globs, evidence-v1 only) | `[]` (always Tier C on match) | weekly-deps Phase 2 |
 | `weekly_deps.lockstep_sets` | string[][] (package globs per set) | `[]` → only the same-version heuristic flags split pairs | weekly-deps Phase 2 |
 | `weekly_deps.security_sensitive_extra` | string[] | `[]` (merged over shared default list) | weekly-deps |
 | `weekly_deps.signal3_repo_map` | map | `{}` | weekly-deps community signal |

@@ -90,6 +90,12 @@ class RiskPolicy(unittest.TestCase):
         self.pr["members"][0]["package"] = "electron"
         self.assertEqual(self.classify()["tier"], "C")
 
+    def test_engine_package_and_group_names_have_separate_matches(self):
+        self.pr["group"] = "electron"
+        self.assertEqual(self.classify()["tier"], "A")
+        self.config["weekly_deps"]["bundled_engine_groups"] = ["electron"]
+        self.assertEqual(self.classify()["tier"], "C")
+
     def test_scope_applies_to_every_member_without_becoming_a_risk_tier(self):
         self.pr["members"] += [{**self.pr["members"][0], "package": "unknown-to-policy"}]
         result = self.classify()
