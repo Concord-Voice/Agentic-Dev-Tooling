@@ -29,10 +29,11 @@ A/B rules are scoped authorization criteria in the trusted repository config. Ma
 Use the checked-in `classify.py` from the same verified tooling edition as this reference.
 
 ```bash
-python3 -I -B /path/to/weekly-deps/classify.py \
-  /path/to/verified-repo-config.json /path/to/verified-pr-evidence.json
+jq -n --slurpfile config "$VERIFIED_CONFIG" --slurpfile records "$VERIFIED_EVIDENCE" \
+  '{config: $config[0], records: $records[0]}' |
+  python3 -I -B /path/to/weekly-deps/classify.py
 ```
 
-The evidence file is a JSON object keyed by fully qualified PR identity. Each record has `ecosystem`, optional `group`, `directories`, verified flags `bundled_engine`, `surprise_diff`, `footprint_verified`, `confirmed_risk`, and `members` with `package`, resolved `old` and `new`, optional `dependency_type`, `surface` (routine, critical, or unknown), `release`, and `security_sensitive`. The optional `advisory` object records `severity` (lowercase), `applies_to_exact_versions` and `exposed_in_live_production`. Keep the underlying sources alongside those facts. The script has no network or mutation capability. Its output is a decision aid, and `eligible_policy` alone grants no merge permission.
+The classifier reads JSON on stdin and does not open caller-provided paths. The evidence file is a JSON object keyed by fully qualified PR identity. Each record has `ecosystem`, optional `group`, `directories`, verified flags `bundled_engine`, `surprise_diff`, `footprint_verified`, `confirmed_risk`, and `members` with `package`, resolved `old` and `new`, optional `dependency_type`, `surface` (routine, critical, or unknown), `release`, and `security_sensitive`. The optional `advisory` object records `severity` (lowercase), `applies_to_exact_versions` and `exposed_in_live_production`. Keep the underlying sources alongside those facts. The script has no network or mutation capability. Its output is a decision aid, and `eligible_policy` alone grants no merge permission.
 
 Dry-run the full affected batch before the first merge after a policy change. For each PR, attach current CI and Sonar results, current base ancestry and mergeability, lockstep and licensing dispositions if applicable, and required review and approval evidence. Hold any unmet gate visibly at its original tier. Refresh that evidence at the exact head and base before every squash merge, and serialize changes that share a lockfile. Route unresolved B risk to review. Route C to the enhanced review and exact-head validation path before accepting an operator decision. Preserve existing repository protection and review requirements for all security patches.

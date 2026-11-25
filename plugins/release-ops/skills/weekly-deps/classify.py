@@ -2,8 +2,8 @@
 import argparse
 from fnmatch import fnmatchcase
 import json
-from pathlib import Path
 import re
+import sys
 
 
 BUMP_RANK = {"patch": 0, "minor": 1, "major": 2}
@@ -60,86 +60,100 @@ def rule_matches(tier, rule, pr, bumps):
     )
 
 
+def bundled_change(policy, pr):
+    if pr.get("ecosystem") == "docker" or pr.get("bundled_engine") is True:
+        return True
+    names = [member["package"] for member in pr["members"]]
+    if pr.get("group"):
+        names.append(pr["group"])
+    patterns = policy.get("bundled_engines", [])
+    return any(matches([name], patterns) for name in names)
+
+
+def critical_surface(member, configured):
+    return (member.get("surface") == "critical"
+            or member.get("security_sensitive") is True
+            or matches([member["package"]], configured))
+
+
+def deep_review_reason(policy, pr, assessed, explicit_c):
+    if bundled_change(policy, pr):
+        return "Bundled engine or image changed"
+    if pr.get("surprise_diff") is True:
+        return "Unexpected dependency diff footprint"
+    if (pr.get("confirmed_risk") is True
+            or any(member.get("release") == "breaking" for member, _, _ in assessed)):
+        return "Confirmed breaking change or dependency risk"
+    if explicit_c:
+        return "Matched an explicit Tier C rule"
+    if any(core and (bump == "major" or member.get("release") != "clear")
+           for member, bump, core in assessed):
+        return "Critical-surface major or unresolved release risk"
+    return None
+
+
+def complete_evidence(pr, assessed):
+    if not assessed or pr.get("footprint_verified") is not True:
+        return False
+    flags = ("bundled_engine", "surprise_diff", "confirmed_risk")
+    if any(pr.get(flag) is not False for flag in flags):
+        return False
+    return all(bump is not None and member.get("release") == "clear"
+               and member.get("surface") in ("routine", "critical")
+               and type(member.get("security_sensitive")) is bool
+               for member, bump, _ in assessed)
+
+
+def advisory_tier(advisory, assessed):
+    severity = advisory.get("severity")
+    if (any(bump != "patch" for _, bump, _ in assessed)
+            or advisory.get("applies_to_exact_versions") is not True
+            or advisory.get("exposed_in_live_production") is not True):
+        return None
+    return {"medium": "B", "high": "A", "critical": "A"}.get(severity)
+
+
+def risk_decision(policy, pr, assessed, explicit_c):
+    if policy.get("risk_policy") != "evidence-v1":
+        return "UNKNOWN", "Evidence-based policy is not enabled", False
+    risk = deep_review_reason(policy, pr, assessed, explicit_c)
+    if risk:
+        return "C", risk, False
+    if not complete_evidence(pr, assessed):
+        return "UNKNOWN", "Tier evidence is incomplete", False
+    advisory = pr.get("advisory")
+    if advisory:
+        tier = advisory_tier(advisory, assessed)
+        if not tier:
+            return "UNKNOWN", "Security patch needs verified version and live exposure evidence", False
+        return tier, f"Verified live {advisory['severity']} security patch", True
+    if any(bump == ("minor" if core else "major") for _, bump, core in assessed):
+        return "B", "Critical minor or routine major with clear release evidence", False
+    return "A", "Routine patch/minor or critical patch with clear release evidence", False
+
+
 def classify(config, pr):
     """Use maintainer-verified facts. CI, approval, base and conflict are separate."""
     policy = config.get("weekly_deps", {})
-    members = pr["members"]
-    packages = [member["package"] for member in members]
-    bumps = [bump_shape(member.get("old"), member.get("new")) for member in members]
-    security_review = any(member.get("security_sensitive") is True for member in members)
-    rule_matches_by_tier = {
-        tier: [name for name, rule in policy.get("tiers", {}).get(tier, {}).items()
-               if rule_matches(tier, rule, pr, bumps)]
-        for tier in ("A", "B", "C")
-    }
-
-    def result(tier, reason, *, emergency=False):
-        return {"tier": tier, "reason": reason,
-                "matching_rules": rule_matches_by_tier.get(tier, []),
-                "eligible_policy": tier in ("A", "B") and (
-                    emergency or bool(rule_matches_by_tier[tier])),
-                "security_review_required": security_review or emergency}
-
-    if policy.get("risk_policy") != "evidence-v1":
-        return result("UNKNOWN", "Evidence-based policy is not enabled")
-    engine_patterns = policy.get("bundled_engines", [])
-    group = pr.get("group")
-    if (pr.get("ecosystem") == "docker" or pr.get("bundled_engine") is True
-            or any(matches([package], engine_patterns) for package in packages)
-            or (group and matches([group], engine_patterns))):
-        return result("C", "Bundled engine or image changed")
-    if pr.get("surprise_diff") is True:
-        return result("C", "Unexpected dependency diff footprint")
-    if pr.get("confirmed_risk") is True or any(m.get("release") == "breaking" for m in members):
-        return result("C", "Confirmed breaking change or dependency risk")
-    if rule_matches_by_tier["C"]:
-        return result("C", "Matched an explicit Tier C rule")
-
-    critical = [
-        member.get("surface") == "critical"
-        or member.get("security_sensitive") is True
-        or matches([member["package"]], policy.get("critical_packages", []))
-        for member in members
-    ]
-    if any(core and (bump == "major" or member.get("release") != "clear")
-           for member, core, bump in zip(members, critical, bumps)):
-        return result("C", "Critical-surface major or unresolved release risk")
-    if (not members or pr.get("footprint_verified") is not True
-            or pr.get("bundled_engine") is not False
-            or pr.get("surprise_diff") is not False
-            or pr.get("confirmed_risk") is not False
-            or any(bump is None or member.get("release") != "clear"
-                   or member.get("surface") not in ("routine", "critical")
-                   or type(member.get("security_sensitive")) is not bool
-                   for member, bump in zip(members, bumps))):
-        return result("UNKNOWN", "Tier evidence is incomplete")
-
-    advisory = pr.get("advisory") or {}
-    severity = advisory.get("severity")
-    if (
-        all(bump == "patch" for bump in bumps)
-        and advisory.get("applies_to_exact_versions") is True
-        and advisory.get("exposed_in_live_production") is True
-        and severity in ("medium", "high", "critical")
-    ):
-        tier = "A" if severity in ("high", "critical") else "B"
-        return result(tier, f"Verified live {severity} security patch", emergency=True)
-    if advisory:
-        return result("UNKNOWN", "Security patch needs verified version and live exposure evidence")
-
-    if any(bump == ("minor" if core else "major")
-           for bump, core in zip(bumps, critical)):
-        return result("B", "Critical minor or routine major with clear release evidence")
-    return result("A", "Routine patch/minor or critical patch with clear release evidence")
+    configured = policy.get("critical_packages", [])
+    assessed = [(member, bump_shape(member.get("old"), member.get("new")),
+                 critical_surface(member, configured)) for member in pr["members"]]
+    bumps = [bump for _, bump, _ in assessed]
+    rules = policy.get("tiers", {})
+    explicit_c = any(rule_matches("C", rule, pr, bumps) for rule in rules.get("C", {}).values())
+    tier, reason, emergency = risk_decision(policy, pr, assessed, explicit_c)
+    matching = [name for name, rule in rules.get(tier, {}).items()
+                if rule_matches(tier, rule, pr, bumps)]
+    sensitive = any(member.get("security_sensitive") is True for member, _, _ in assessed)
+    return {"tier": tier, "reason": reason, "matching_rules": matching,
+            "eligible_policy": tier in ("A", "B") and (emergency or bool(matching)),
+            "security_review_required": sensitive or emergency}
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("config", type=Path)
-    parser.add_argument("evidence", type=Path)
-    args = parser.parse_args()
-    config = json.loads(args.config.read_text())
-    records = json.loads(args.evidence.read_text())
+    argparse.ArgumentParser(description=__doc__).parse_args()
+    evidence = json.load(sys.stdin)
+    config, records = evidence["config"], evidence["records"]
     print(json.dumps({key: classify(config, pr) for key, pr in records.items()}, indent=2))
 
 

@@ -5,7 +5,6 @@ import io
 import json
 from pathlib import Path
 import runpy
-from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
@@ -99,15 +98,10 @@ class RiskPolicy(unittest.TestCase):
     def test_cli_preserves_pr_identity_and_policy_decision(self):
         identity = "example/product#12"
         self.pr["members"][0].update(old="v1.0.0", new="v1.1.0")
-        with TemporaryDirectory() as cache:
-            config = Path(cache) / "config.json"
-            evidence = Path(cache) / "evidence.json"
-            config.write_text(json.dumps(self.config))
-            evidence.write_text(json.dumps({identity: self.pr}))
-            args = [str(CLASSIFIER), str(config), str(evidence)]
-            output = io.StringIO()
-            with patch("sys.argv", args), redirect_stdout(output):
-                runpy.run_path(str(CLASSIFIER), run_name="__main__")
+        evidence = io.StringIO(json.dumps({"config": self.config, "records": {identity: self.pr}}))
+        output = io.StringIO()
+        with patch("sys.argv", [str(CLASSIFIER)]), patch("sys.stdin", evidence), redirect_stdout(output):
+            runpy.run_path(str(CLASSIFIER), run_name="__main__")
         self.assertEqual(json.loads(output.getvalue()), {identity: self.classify()})
 
     def test_explicit_c_rule_does_not_require_parseable_version(self):

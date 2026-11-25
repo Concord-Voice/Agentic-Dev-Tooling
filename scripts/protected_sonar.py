@@ -34,7 +34,7 @@ REMOTE = f"https://github.com/{REPO}.git"
 ROOT = Path(__file__).resolve().parents[1]
 CALLER_PATH = ".github/workflows/sonarcloud.yml"
 ARTIFACT, REPORT = "sync-coverage", "sync-coverage.xml"
-SOURCE_DIR = "scripts"  # `source = scripts` in measure-sync-coverage.sh
+SOURCE_DIR = "scripts"  # Compatibility with legacy coverage reports rooted at scripts/.
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 LIVE = ("queued", "in_progress", "requested", "waiting", "pending")
 MAX_API = 2 * 1024 * 1024
