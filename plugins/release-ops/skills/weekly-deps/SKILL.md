@@ -389,7 +389,7 @@ To classify a PR: test it against every rule. If rules of more than one tier mat
 
 The group name and the package list are separate tests on purpose. A group can hold members of different risk: a rule with `groups` and `packages` together admits the group only while all its members are in the low-risk list, and the same group with one other member falls through to Tier C.
 
-**With `.weekly_deps.tiers == {}` (the safe default), no package matches any group, so every bump falls through to Tier C (manual deep review).** This is intentional: a repo that hasn't declared its tier data gets conservative, never-fast-merged behavior rather than an unsafe fast-track.
+**With `.weekly_deps.tiers == {}` (the safe default), no package matches any group, so every bump falls through to Tier C (manual deep review).** This is intentional: a repo that hasn't declared its tier data gets conservative, never-fast-merged behavior rather than an unsafe fast-track. Repositories with `weekly_deps.risk_policy: evidence-v1` follow the [evidence-based policy](references/risk-policy.md) for tier and confidence instead of the legacy classification below and in Phase 3.5. Use its separate readiness gates.
 
 **The major-bump override is universal and always applies, regardless of config:**
 
@@ -921,7 +921,7 @@ Post one record per reviewed SHA. First look for your own unedited `cv-review-co
 
 ---
 
-## Phase 4: PROCESS
+## Phase 4: PROCESS — when evidence-v1 is enabled, apply its tier and policy eligibility before the existing readiness and approval checks
 
 Work through tiers in the proposed order. Within each tier, walk PRs sequentially **within each lockfile group**, but across lockfile groups you can interleave (different directories don't contend).
 

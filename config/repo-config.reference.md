@@ -135,3 +135,6 @@ Tier data is per repository. The shared skill ships none, and `/weekly-deps --or
 | `max_bump` | `patch` or `minor` (default `minor`). Ignored in tier C. |
 
 Rules that cannot be switched off by this data: a major bump is Tier C; a bundled-engine package (including every `docker` bump) is Tier C; a package on the security-sensitive list is LOW confidence; a PR that no rule matches is Tier C. If rules of two tiers match one PR, the higher-risk tier wins. A tier A or B rule with none of `groups`, `ungrouped` and `packages` is ignored.
+
+
+Repositories can set `weekly_deps.risk_policy` to `"evidence-v1"` to opt into [evidence-based dependency tiers](../plugins/release-ops/skills/weekly-deps/references/risk-policy.md). The policy calculates risk independently of CI, review, and mergeability. A rule in the computed tier authorizes that package scope only. The opt-in supports `max_bump: "major"` for Tier B routine updates and a `weekly_deps.critical_packages` list of package globs. The bundled-engine, confirmed-risk, and sensitive review requirements still apply.
