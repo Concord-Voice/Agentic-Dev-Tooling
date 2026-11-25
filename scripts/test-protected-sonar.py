@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -58,6 +59,48 @@ class WorkflowTokenScope(unittest.TestCase):
         self.assertNotIn("SONAR_TOKEN", install)
         self.assertNotIn("ref: ${{", found["sonarcloud"])
         self.assertIn("github.ref != 'refs/heads/main'", found["reject-disabled-dispatch"])
+
+
+    def test_dispatch_waits_only_for_registration_of_the_exact_id(self):
+        _, found = jobs()
+        caller = textwrap.dedent(found["protected-sonar"].split("        run: |\n", 1)[1])
+        mock = """
+gh() {
+  case "$1 $2" in
+    'api -X') echo dispatch >> "$calls"; echo 123 ;;
+    'api repos/example/project/actions/runs/123')
+      echo lookup >> "$calls"
+      case "$scenario" in
+        transient) if [ "$(grep -c lookup "$calls")" -eq 1 ]; then echo 'HTTP 404' >&2; return 1; fi; echo 123 ;;
+        denied) echo 'HTTP 403' >&2; return 1 ;;
+        permanent) echo 'HTTP 404' >&2; return 1 ;;
+        mismatched) echo 124 ;;
+        scan_failed) echo 123 ;;
+      esac ;;
+    'run watch') echo watch >> "$calls"; [[ "$3" == 123 && "$scenario" != scan_failed ]] ;;
+    *) return 99 ;;
+  esac
+}
+sleep() { :; }
+"""
+        cases = (
+            ("transient", 0, ["lookup", "lookup", "watch"]),
+            ("denied", 1, ["lookup"]),
+            ("permanent", 1, ["lookup"] * 10),
+            ("mismatched", 1, ["lookup"]),
+            ("scan_failed", 1, ["lookup", "watch"]),
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            calls = Path(folder) / "calls"
+            for scenario, status, expected in cases:
+                with self.subTest(scenario=scenario):
+                    calls.write_text("")
+                    env = {**ps.os.environ, "calls": str(calls), "scenario": scenario, "GH_REPO": "example/project",
+                           "RUN_ID": "1", "RUN_ATTEMPT": "1", "PR_NUMBER": "2", "HEAD_SHA": HEAD,
+                           "BASE_SHA": BASE, "GITHUB_STEP_SUMMARY": str(Path(folder) / "summary")}
+                    result = subprocess.run(["bash", "-c", mock + caller], env=env, capture_output=True)
+                    self.assertEqual(result.returncode, status, result.stdout)
+                    self.assertEqual(calls.read_text().splitlines(), ["dispatch", *expected])
 
 
 def run_record(**overrides):

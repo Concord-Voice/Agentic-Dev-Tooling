@@ -114,7 +114,23 @@ jobs:
             exit 1
           fi
           echo "Protected SonarCloud run: https://github.com/$GH_REPO/actions/runs/$child" >> "$GITHUB_STEP_SUMMARY"
-          gh run watch "$child" --exit-status --interval 20
+          # A successful dispatch can reply before the run endpoint is readable.
+          # Wait for this exact ID to register without sending another dispatch.
+          for (( registration_attempt=1; registration_attempt<=10; registration_attempt++ )); do
+            if registered="$(gh api "repos/$GH_REPO/actions/runs/$child" --jq '.id' 2>&1)"; then
+              if [[ "$registered" != "$child" ]]; then
+                echo "::error::Protected SonarCloud run ID did not match the dispatch receipt."
+                exit 1
+              fi
+              gh run watch "$child" --exit-status --interval 20
+              exit
+            fi
+            if [[ "$registered" != *"HTTP 404"* ]] || (( registration_attempt == 10 )); then
+              echo "::error::Could not verify registration of the dispatched SonarCloud run."
+              exit 1
+            fi
+            sleep 2
+          done
 
   reject-disabled-dispatch:
     name: Reject non-main dispatch
