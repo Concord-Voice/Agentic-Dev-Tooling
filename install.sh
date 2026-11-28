@@ -199,11 +199,10 @@ install_claude() {
   # ".claude/hooks/x.sh" resolves against whichever repo Claude is in at the moment: it runs
   # that repo's copy of the hook, or fails when the repo has none. ${CLAUDE_PROJECT_DIR} stays
   # at the root where the session started, which is where the loop above installed them.
-  # So --project writes every ".claude/hooks/..." command (base- or adopter-supplied, with or
-  # without a leading interpreter such as `python3`) as "${CLAUDE_PROJECT_DIR:-.}"/.claude/hooks/...,
-  # which also repairs an older install on re-run. --user writes the absolute install path
-  # instead, because $HOME is not the project root. `norm` maps all three forms to the bare
-  # relative one, so dedupe and matcher widening see one hook, not three.
+  # Project installs anchor managed hooks and legacy relative paths at ${CLAUDE_PROJECT_DIR}.
+  # Adopter commands that already quote the whole project path keep that quoting.
+  # User installs anchor supported hook paths at the absolute install root.
+  # Compare recognized spellings in relative form for deduplication and matcher widening.
   merged_settings="$(mktemp "$dot/.settings.XXXXXXXX")"
   if jq -s --arg abs_prefix "$root/.claude/hooks/" --argjson userscope "$([[ "$USER_SCOPE" = 1 ]] && echo true || echo false)" '
     # Compare in bare relative form: earlier installs wrote relative, absolute (--user) or
@@ -212,15 +211,57 @@ install_claude() {
     # ($X/ ${X}/ ${X:-.}/), or the whole path quoted ("$X/.claude/hooks/f", closing quote
     # dropped with it). Matching each quote or brace on its own left a stray quote behind,
     # which no shell can parse, and let a broken ${X/... form pass as the base hook.
-    # Anything unbalanced is left exactly as written.
+    # Whole-path normalization identifies managed commands. Rendering preserves
+    # the full quoted word for custom paths.
     def pdvar: "(?:\\$CLAUDE_PROJECT_DIR|\\$\\{CLAUDE_PROJECT_DIR(?::-\\.)?\\})";
+    def quoted_project_prefix:
+      # Keep the legacy single-word prefix. Recognize extra words only for the
+      # supported shell flags or literal env assignments. The -c option takes source text.
+      "\\A(?<i>(?:(?:(?:bash|sh)(?:[[:blank:]]+-[eux]+)+"
+      + "|env(?:[[:blank:]]+[A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9_./=+@%:-]*)+"
+      + "|[A-Za-z0-9_.-]+)[[:blank:]]+)?)\""
+      + pdvar + "/\\.claude/hooks/";
+    # Adjacent shell operators end the quoted word. Attached word fragments do not.
+    def word_end: "(?=[[:blank:];|&<>]|\\n|\\z)";
+    def user_anchor:
+      $abs_prefix | if test("\\A[A-Za-z0-9_./-]+\\z") then . else @sh end;
+    def norm_user_anchor:
+      # Older installers recognized a raw absolute path only as the command.
+      if startswith($abs_prefix) then ".claude/hooks/" + ltrimstr($abs_prefix)
+      elif $userscope then
+        # Match the installer-generated user path after an optional interpreter.
+        ((match("\\A[A-Za-z0-9_.-]+ +") | .string) // "") as $interpreter |
+        ($interpreter + user_anchor) as $prefix |
+        if startswith($prefix) then $interpreter + ".claude/hooks/" + ltrimstr($prefix) else . end
+      else .
+      end;
+    def project_relative:
+      sub("\\A(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?:\"" + pdvar + "\"|" + pdvar + ")/\\.claude/hooks/"; "\(.i).claude/hooks/");
     def norm: if type != "string" then . else
-      (if startswith($abs_prefix) then ".claude/hooks/" + ltrimstr($abs_prefix) else . end)
-      | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/(?<p>[^\"[:space:]]*)\""; "\(.i).claude/hooks/\(.p)")
-      | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?:\"" + pdvar + "\"|" + pdvar + ")/\\.claude/hooks/"; "\(.i).claude/hooks/")
+      norm_user_anchor
+      | sub(quoted_project_prefix + "(?<p>(?:(?:\\.|[A-Za-z0-9_-][A-Za-z0-9_.-]*)/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*)\"" + word_end;
+            "\(.i).claude/hooks/\(.p | split("/") | map(select(. != ".")) | join("/"))")
+      | project_relative
       end;
     def anchor($to): if type == "string"
       then sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\\.claude/hooks/"; "\(.i)\($to)") else . end;
+    def user_literal_command:
+      # In a double-quoted shell word, these characters can escape or expand.
+      sub("(?<original>" + quoted_project_prefix + "(?<p>[^\"$\\x5c`![:cntrl:]]+)\")" + word_end;
+          # A literal ./ segment stays within the same directory.
+          if (.p | split("/") | .[-1] != "." and all(.[]; length > 0 and . != ".."))
+          then "\(.i)\(($abs_prefix + .p) | @sh)"
+          else .original
+          end);
+    def render($to; $managed):
+      if type != "string" then .
+      else norm as $normalized |
+        if ($managed | index($normalized)) != null then $normalized | anchor($to)
+        elif test(quoted_project_prefix) then
+          if $userscope then user_literal_command else . end
+        else (if $userscope then project_relative else $normalized end) | anchor($to)
+        end
+      end;
     (.[0]) as $adopter | (.[1]) as $base |
     ($base * $adopter) as $shallow |
     ( ($base.hooks // {}) as $bh | ($adopter.hooks // {}) as $ah |
@@ -252,9 +293,10 @@ install_claude() {
       }) | from_entries)
     ) as $mergedhooks |
     ($shallow + { hooks: $mergedhooks }) as $merged |
-    (if $userscope then $abs_prefix else "\"${CLAUDE_PROJECT_DIR:-.}\"/.claude/hooks/" end) as $to |
+    (if $userscope then user_anchor else "\"${CLAUDE_PROJECT_DIR:-.}\"/.claude/hooks/" end) as $to |
+    [$base.hooks[]?[]?.hooks[]?.command | norm] as $managed |
     $merged | .hooks |= with_entries(.value |= map(
-      .hooks |= map(if has("command") then .command |= (norm | anchor($to)) else . end)
+      .hooks |= map(if has("command") then .command |= render($to; $managed) else . end)
     ))
   ' "$settings" "$base" > "$merged_settings"; then
     mv "$merged_settings" "$settings"
