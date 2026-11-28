@@ -2,7 +2,7 @@
 
 The installer rewrites whole-path-quoted adopter hooks. Path characters such as parentheses then reach Bash unquoted.
 
-Recognize managed hooks for deduplication and drift checks. Preserve whole-path quoting and literal arguments to custom commands in project settings. In user settings, shell-quote a complete literal hook path using the absolute install root. Preserve simple `sh` or `bash` flags (`-e`, `-u`, `-x`), literal `env` assignments, and following command text. Leave unsupported forms untouched, including `bash -c` shell programs.
+Use managed-hook comparison for deduplication and matcher widening. The existing drift checks still validate managed-hook presence. Preserve whole-path quoting and literal arguments to custom commands in project settings. In user settings, shell-quote a complete literal hook path using the absolute install root. Preserve simple `sh` or `bash` flags (`-e`, `-u`, `-x`), literal `env` assignments, and following command text. Leave unsupported forms untouched, including `bash -c` shell programs.
 
 ## Acceptance criteria
 

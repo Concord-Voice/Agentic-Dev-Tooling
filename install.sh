@@ -199,11 +199,10 @@ install_claude() {
   # ".claude/hooks/x.sh" resolves against whichever repo Claude is in at the moment: it runs
   # that repo's copy of the hook, or fails when the repo has none. ${CLAUDE_PROJECT_DIR} stays
   # at the root where the session started, which is where the loop above installed them.
-  # So --project writes every ".claude/hooks/..." command (base- or adopter-supplied, with or
-  # without a leading interpreter such as `python3`) as "${CLAUDE_PROJECT_DIR:-.}"/.claude/hooks/...,
-  # which also repairs an older install on re-run. --user writes the absolute install path
-  # instead, because $HOME is not the project root. `norm` maps all three forms to the bare
-  # relative one, so dedupe and matcher widening see one hook, not three.
+  # Project installs anchor managed hooks and legacy relative paths at ${CLAUDE_PROJECT_DIR}.
+  # Adopter commands that already quote the whole project path keep that quoting.
+  # User installs anchor supported hook paths at the absolute install root.
+  # Compare recognized spellings in relative form for deduplication and matcher widening.
   merged_settings="$(mktemp "$dot/.settings.XXXXXXXX")"
   if jq -s --arg abs_prefix "$root/.claude/hooks/" --argjson userscope "$([[ "$USER_SCOPE" = 1 ]] && echo true || echo false)" '
     # Compare in bare relative form: earlier installs wrote relative, absolute (--user) or
@@ -216,7 +215,8 @@ install_claude() {
     # the full quoted word for custom paths.
     def pdvar: "(?:\\$CLAUDE_PROJECT_DIR|\\$\\{CLAUDE_PROJECT_DIR(?::-\\.)?\\})";
     def quoted_project_prefix:
-      # These prefixes take a filename. In particular, sh and bash -c take source text.
+      # Keep the legacy single-word prefix. Recognize extra words only for the
+      # supported shell flags or literal env assignments. The -c option takes source text.
       "\\A(?<i>(?:(?:(?:bash|sh)(?:[[:blank:]]+-[eux]+)+"
       + "|env(?:[[:blank:]]+[A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9_./=+@%:-]*)+"
       + "|[A-Za-z0-9_.-]+)[[:blank:]]+)?)\""
