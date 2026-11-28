@@ -227,6 +227,10 @@ cat > "$shapes/.claude/settings.json" <<'JSON'
   {"matcher":"Read","hooks":[{"type":"command","command":"python3 \"${CLAUDE_PROJECT_DIR}/.claude/hooks/my-read(legacy).py\""}]},
   {"matcher":"Read","hooks":[{"type":"command","command":"${CLAUDE_PROJECT_DIR/.claude/hooks/my-broken.sh"}]}]}}
 JSON
+jq --arg cmd "$shapes/.claude/hooks/my-absolute.sh" '
+    .hooks.PreToolUse += [{matcher:"Read", hooks:[{type:"command", command:$cmd}]}]' \
+  "$shapes/.claude/settings.json" > "$shapes/.claude/local-settings.json"
+mv "$shapes/.claude/local-settings.json" "$shapes/.claude/settings.json"
 "$HERE/install.sh" claude --project "$shapes" >/dev/null
 shape_cmds="$(jq -r "$HOOK_CMDS" "$shapes/.claude/settings.json")"
 for h in destructive-commands.sh protect-env-files.sh protect-sensitive.sh protect-applied-migrations.sh; do
@@ -237,6 +241,8 @@ printf '%s\n' "$shape_cmds" | grep -qxF 'python3 "${CLAUDE_PROJECT_DIR}/.claude/
   || fail "already anchored custom command was rewritten"
 printf '%s\n' "$shape_cmds" | grep -qxF 'python3 "${CLAUDE_PROJECT_DIR}/.claude/hooks/my-read(legacy).py"' \
   || fail "whole-path quoting was lost for a hook path containing parentheses"
+printf '%s\n' "$shape_cmds" | grep -qxF "${P}my-absolute.sh" \
+  || fail "a legacy absolute project hook was not re-anchored"
 printf '%s\n' "$shape_cmds" | grep -qxF '${CLAUDE_PROJECT_DIR/.claude/hooks/my-broken.sh' \
   || fail "an unbalanced project-dir form was rewritten instead of left as written"
 while IFS= read -r cmd; do

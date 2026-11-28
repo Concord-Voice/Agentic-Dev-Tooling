@@ -257,7 +257,7 @@ install_claude() {
         if ($managed | index($normalized)) != null then $normalized | anchor($to)
         elif test(quoted_project_prefix) then
           if $userscope then user_literal_command else . end
-        else project_relative | anchor($to)
+        else (if $userscope then project_relative else $normalized end) | anchor($to)
         end
       end;
     (.[0]) as $adopter | (.[1]) as $base |
