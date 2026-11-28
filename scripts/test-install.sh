@@ -306,6 +306,7 @@ cat > "$quoted_home/.claude/settings.json" <<'JSON'
 {"hooks":{"PostToolUse":[
   {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/.format.sh\""}]},
   {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/format(legacy).sh\""}]},
+  {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/.format.sh\"; printf 'suffix\\n'"}]},
   {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/./.format.sh\""}]},
   {"matcher":"Bash","hooks":[{"type":"command","command":"bash .claude/hooks/.format.sh"}]}
 ]}}
@@ -328,6 +329,11 @@ for install in first refresh; do
     [[ "$(env -u CLAUDE_PROJECT_DIR bash -c "$actual")" == 'custom hook' ]] \
       || fail "$install custom hook did not resolve without CLAUDE_PROJECT_DIR"
   done
+  expected="$(jq -nr --arg path "$quoted_home/.claude/hooks/.format.sh" '$path | @sh')"'; printf '\''suffix\n'\'''
+  actual="$(jq -r --arg command "$expected" '.hooks.PostToolUse[].hooks[].command | select(. == $command)' "$quoted_home/.claude/settings.json")"
+  [[ "$actual" == "$expected" ]] || fail "$install lost a quoted hook followed by a shell separator"
+  [[ "$(env -u CLAUDE_PROJECT_DIR bash -c "$actual")" == $'custom hook\nsuffix' ]] \
+    || fail "$install changed the behavior of a quoted hook followed by a shell separator"
 done
 
 # A user-selected dotfiles root can be a symlink. Keep its lock keys and hook

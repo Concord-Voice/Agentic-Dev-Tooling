@@ -215,6 +215,10 @@ install_claude() {
     # Whole-path normalization identifies managed commands. Rendering preserves
     # the full quoted word for custom paths.
     def pdvar: "(?:\\$CLAUDE_PROJECT_DIR|\\$\\{CLAUDE_PROJECT_DIR(?::-\\.)?\\})";
+    def quoted_project_prefix:
+      "\\A(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/";
+    # Adjacent shell operators end the quoted word. Attached word fragments do not.
+    def word_end: "(?=[[:blank:];|&<>]|\\n|\\z)";
     def user_anchor:
       $abs_prefix | if test("^[A-Za-z0-9_./-]+$") then . else @sh end;
     def norm_user_anchor:
@@ -229,15 +233,14 @@ install_claude() {
       end;
     def norm: if type != "string" then . else
       norm_user_anchor
-      | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/(?<p>(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*)\"(?=[[:blank:]]|$)"; "\(.i).claude/hooks/\(.p)")
+      | sub(quoted_project_prefix + "(?<p>(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*)\"" + word_end;
+            "\(.i).claude/hooks/\(.p)")
       | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?:\"" + pdvar + "\"|" + pdvar + ")/\\.claude/hooks/"; "\(.i).claude/hooks/")
       end;
     def anchor($to): if type == "string"
       then sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\\.claude/hooks/"; "\(.i)\($to)") else . end;
-    def quoted_project_prefix:
-      "^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/";
     def user_literal_command:
-      sub("(?<original>" + quoted_project_prefix + "(?<p>[A-Za-z0-9_./() -]+)\")(?=[[:blank:]]|$)";
+      sub("(?<original>" + quoted_project_prefix + "(?<p>[A-Za-z0-9_./() -]+)\")" + word_end;
           # Only re-anchor complete literal path components.
           if (.p | split("/") | all(length > 0 and . != "." and . != ".."))
           then "\(.i)\(($abs_prefix + .p) | @sh)"
