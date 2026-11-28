@@ -217,11 +217,18 @@ install_claude() {
     def pdvar: "(?:\\$CLAUDE_PROJECT_DIR|\\$\\{CLAUDE_PROJECT_DIR(?::-\\.)?\\})";
     def user_anchor:
       $abs_prefix | if test("^[A-Za-z0-9_./-]+$") then . else @sh end;
+    def norm_user_anchor:
+      . as $original |
+      (capture("\\A(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?<path>[^[:cntrl:]]+)\\z") // null) as $word |
+      user_anchor as $quoted |
+      if $word != null and ($word.path | startswith($quoted))
+      then $word.i + ".claude/hooks/" + ($word.path | ltrimstr($quoted))
+      elif $word != null and ($word.path | startswith($abs_prefix))
+      then $word.i + ".claude/hooks/" + ($word.path | ltrimstr($abs_prefix))
+      else $original
+      end;
     def norm: if type != "string" then . else
-      (user_anchor as $user_anchor |
-       if startswith($user_anchor) then ".claude/hooks/" + ltrimstr($user_anchor)
-       elif startswith($abs_prefix) then ".claude/hooks/" + ltrimstr($abs_prefix)
-       else . end)
+      norm_user_anchor
       | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/(?<p>(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*)\"(?=[[:blank:]]|$)"; "\(.i).claude/hooks/\(.p)")
       | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?:\"" + pdvar + "\"|" + pdvar + ")/\\.claude/hooks/"; "\(.i).claude/hooks/")
       end;
