@@ -228,8 +228,9 @@ install_claude() {
       user_anchor as $quoted |
       if ($command | startswith($quoted))
       then $interpreter + ".claude/hooks/" + ($command | ltrimstr($quoted))
-      elif ($command | startswith($abs_prefix))
-      then $interpreter + ".claude/hooks/" + ($command | ltrimstr($abs_prefix))
+      # Older installers normalized only a raw absolute command at the start.
+      elif startswith($abs_prefix)
+      then ".claude/hooks/" + ltrimstr($abs_prefix)
       else $original
       end;
     def project_relative:
