@@ -2,7 +2,7 @@
 
 The installer rewrites whole-path-quoted adopter hooks. Path characters such as parentheses then reach Bash unquoted.
 
-Normalize a whole-path-quoted command only when the relative suffix uses shell-safe path characters. Apply the same recognizer in drift detection. Preserve the established split anchor for standard managed hooks.
+Use the safe matcher to recognize managed hooks for deduplication and drift checks. Keep a custom whole-path-quoted command intact in project settings. For user settings, replace the project anchor with the literal absolute install root inside the original quotes. Leave unsupported forms untouched.
 
 ## Acceptance criteria
 

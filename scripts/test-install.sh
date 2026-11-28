@@ -233,7 +233,8 @@ for h in destructive-commands.sh protect-env-files.sh protect-sensitive.sh prote
   [[ "$(printf '%s\n' "$shape_cmds" | grep -cF "$h")" == 1 ]] || fail "project-dir shape for $h was duplicated or dropped"
   printf '%s\n' "$shape_cmds" | grep -qxF "${P}$h" || fail "project-dir shape for $h was not anchored to the canonical form"
 done
-printf '%s\n' "$shape_cmds" | grep -qxF "python3 ${P}my-read.py" || fail "whole-path-quoted interpreter command was not anchored"
+printf '%s\n' "$shape_cmds" | grep -qxF 'python3 "${CLAUDE_PROJECT_DIR}/.claude/hooks/my-read.py"' \
+  || fail "already anchored custom command was rewritten"
 printf '%s\n' "$shape_cmds" | grep -qxF 'python3 "${CLAUDE_PROJECT_DIR}/.claude/hooks/my-read(legacy).py"' \
   || fail "whole-path quoting was lost for a hook path containing parentheses"
 printf '%s\n' "$shape_cmds" | grep -qxF '${CLAUDE_PROJECT_DIR/.claude/hooks/my-broken.sh' \
@@ -246,13 +247,18 @@ $shape_cmds
 EOF
 
 # drift-check must not count a hook whose path cannot expand as present.
-drift_ok="$tmp/drift-ok.json"; drift_bad="$tmp/drift-bad.json"
+drift_ok="$tmp/drift-ok.json"; drift_bad="$tmp/drift-bad.json"; drift_quoted="$tmp/drift-quoted.json"
 cp "$tmp/.claude/settings.json" "$drift_ok"
+jq --arg quoted '"${CLAUDE_PROJECT_DIR}/.claude/hooks/destructive-commands.sh"' \
+  '(.hooks.PreToolUse[].hooks[] | select(.command | endswith("destructive-commands.sh")) | .command) = $quoted' \
+  "$drift_ok" > "$drift_quoted"
 jq --arg bad '${CLAUDE_PROJECT_DIR/.claude/hooks/destructive-commands.sh' \
   '(.hooks.PreToolUse[].hooks[] | select(.command | endswith("destructive-commands.sh")) | .command) |= $bad' \
   "$drift_ok" > "$drift_bad"
 "$HERE/scripts/drift-check.sh" "$HERE/config/base.settings.json" "$drift_ok" >/dev/null \
   || fail "drift-check reported drift on a freshly installed settings.json"
+"$HERE/scripts/drift-check.sh" "$HERE/config/base.settings.json" "$drift_quoted" >/dev/null \
+  || fail "drift-check did not recognize a whole-quoted managed command"
 "$HERE/scripts/drift-check.sh" "$HERE/config/base.settings.json" "$drift_bad" >/dev/null \
   && fail "drift-check accepted an unbalanced \${CLAUDE_PROJECT_DIR/... hook as the base hook"
 
@@ -288,6 +294,30 @@ n1="$(jq '[.hooks[][].hooks[]] | length' "$fake_home/.claude/settings.json")"
 HOME="$fake_home" "$HERE/install.sh" claude --user >/dev/null
 n2="$(jq '[.hooks[][].hooks[]] | length' "$fake_home/.claude/settings.json")"
 [ "$n1" = "$n2" ] || fail "--user re-run duplicated hooks ($n1 -> $n2)"
+
+# User installs substitute the absolute root without splitting a custom quoted word.
+quoted_home="$tmp/quoted user home"
+mkdir -p "$quoted_home/.claude/hooks"
+for name in '.format.sh' 'format(legacy).sh'; do
+  printf '#!/usr/bin/env bash\nprintf "custom hook\\n"\n' > "$quoted_home/.claude/hooks/$name"
+  chmod +x "$quoted_home/.claude/hooks/$name"
+done
+cat > "$quoted_home/.claude/settings.json" <<'JSON'
+{"hooks":{"PostToolUse":[
+  {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/.format.sh\""}]},
+  {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/format(legacy).sh\""}]}
+]}}
+JSON
+for install in first refresh; do
+  HOME="$quoted_home" "$HERE/install.sh" claude --user >/dev/null
+  for name in '.format.sh' 'format(legacy).sh'; do
+    expected="\"$quoted_home/.claude/hooks/$name\""
+    actual="$(jq -r --arg command "$expected" '.hooks.PostToolUse[].hooks[].command | select(. == $command)' "$quoted_home/.claude/settings.json")"
+    [[ "$actual" == "$expected" ]] || fail "$install lost the absolute quoted custom hook: $name"
+    [[ "$(env -u CLAUDE_PROJECT_DIR bash -c "$actual")" == 'custom hook' ]] \
+      || fail "$install custom hook did not resolve without CLAUDE_PROJECT_DIR"
+  done
+done
 
 # A user-selected dotfiles root can be a symlink. Keep its lock keys and hook
 # commands stable across refreshes, while treating nested links as local.

@@ -212,7 +212,8 @@ install_claude() {
     # ($X/ ${X}/ ${X:-.}/), or the whole path quoted ("$X/.claude/hooks/f", closing quote
     # dropped with it). Matching each quote or brace on its own left a stray quote behind,
     # which no shell can parse, and let a broken ${X/... form pass as the base hook.
-    # Keep whole-path quotes for custom suffixes or compound shell words.
+    # Whole-path normalization identifies managed commands. Rendering preserves
+    # the full quoted word for custom paths.
     def pdvar: "(?:\\$CLAUDE_PROJECT_DIR|\\$\\{CLAUDE_PROJECT_DIR(?::-\\.)?\\})";
     def norm: if type != "string" then . else
       (if startswith($abs_prefix) then ".claude/hooks/" + ltrimstr($abs_prefix) else . end)
@@ -221,6 +222,23 @@ install_claude() {
       end;
     def anchor($to): if type == "string"
       then sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\\.claude/hooks/"; "\(.i)\($to)") else . end;
+    def quoted_project_prefix:
+      "^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/";
+    def quoted_project_word:
+      quoted_project_prefix + "(?:[^\"\\\\]|\\\\.)*\"(?=[[:blank:]]|$)";
+    def literal_double_quote:
+      explode | map(if IN(34, 36, 92, 96) then [92, .] else [.] end) | flatten | implode;
+    def render($to; $managed):
+      if type != "string" then .
+      elif test(quoted_project_word) then
+        norm as $normalized |
+        if ($managed | index($normalized)) != null then $normalized | anchor($to)
+        elif $userscope then
+          sub(quoted_project_prefix; "\(.i)\"\($abs_prefix | literal_double_quote)")
+        else .
+        end
+      else norm | anchor($to)
+      end;
     (.[0]) as $adopter | (.[1]) as $base |
     ($base * $adopter) as $shallow |
     ( ($base.hooks // {}) as $bh | ($adopter.hooks // {}) as $ah |
@@ -253,8 +271,9 @@ install_claude() {
     ) as $mergedhooks |
     ($shallow + { hooks: $mergedhooks }) as $merged |
     (if $userscope then $abs_prefix else "\"${CLAUDE_PROJECT_DIR:-.}\"/.claude/hooks/" end) as $to |
+    [$base.hooks[]?[]?.hooks[]?.command | norm] as $managed |
     $merged | .hooks |= with_entries(.value |= map(
-      .hooks |= map(if has("command") then .command |= (norm | anchor($to)) else . end)
+      .hooks |= map(if has("command") then .command |= render($to; $managed) else . end)
     ))
   ' "$settings" "$base" > "$merged_settings"; then
     mv "$merged_settings" "$settings"
