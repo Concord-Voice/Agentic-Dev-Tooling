@@ -26,7 +26,7 @@ cmds() {
   local settings_file="$1"
   jq -r 'def pdvar: "(?:\\$CLAUDE_PROJECT_DIR|\\$\\{CLAUDE_PROJECT_DIR(?::-\\.)?\\})";
          [.hooks[]?[]?.hooks[]?.command | strings
-          | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/(?<p>(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*)\"(?=[[:blank:]]|$)"; "\(.i).claude/hooks/\(.p)")
+          | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/(?<p>[^\"[:space:]]*)\""; "\(.i).claude/hooks/\(.p)")
           | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?:\"" + pdvar + "\"|" + pdvar + ")/\\.claude/hooks/"; "\(.i).claude/hooks/")]
          | sort | unique[]' "$settings_file" 2>/dev/null
 }

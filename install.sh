@@ -220,15 +220,16 @@ install_claude() {
     # Adjacent shell operators end the quoted word. Attached word fragments do not.
     def word_end: "(?=[[:blank:];|&<>]|\\n|\\z)";
     def user_anchor:
-      $abs_prefix | if test("^[A-Za-z0-9_./-]+$") then . else @sh end;
+      $abs_prefix | if test("\\A[A-Za-z0-9_./-]+\\z") then . else @sh end;
     def norm_user_anchor:
       . as $original |
-      (capture("\\A(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?<path>[^[:cntrl:]]+)\\z") // null) as $word |
+      ((match("\\A[A-Za-z0-9_.-]+ +") | .string) // "") as $interpreter |
+      ltrimstr($interpreter) as $command |
       user_anchor as $quoted |
-      if $word != null and ($word.path | startswith($quoted))
-      then $word.i + ".claude/hooks/" + ($word.path | ltrimstr($quoted))
-      elif $word != null and ($word.path | startswith($abs_prefix))
-      then $word.i + ".claude/hooks/" + ($word.path | ltrimstr($abs_prefix))
+      if ($command | startswith($quoted))
+      then $interpreter + ".claude/hooks/" + ($command | ltrimstr($quoted))
+      elif ($command | startswith($abs_prefix))
+      then $interpreter + ".claude/hooks/" + ($command | ltrimstr($abs_prefix))
       else $original
       end;
     def norm: if type != "string" then . else
