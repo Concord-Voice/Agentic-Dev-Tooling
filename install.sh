@@ -216,22 +216,22 @@ install_claude() {
     # the full quoted word for custom paths.
     def pdvar: "(?:\\$CLAUDE_PROJECT_DIR|\\$\\{CLAUDE_PROJECT_DIR(?::-\\.)?\\})";
     def quoted_project_prefix:
-      "\\A(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/";
+      # Preserve literal interpreter flags and environment assignments.
+      "\\A(?<i>(?:[A-Za-z0-9_.-]+(?:[[:blank:]]+[A-Za-z0-9_./=+@%:-]+)*[[:blank:]]+)?)\""
+      + pdvar + "/\\.claude/hooks/";
     # Adjacent shell operators end the quoted word. Attached word fragments do not.
     def word_end: "(?=[[:blank:];|&<>]|\\n|\\z)";
     def user_anchor:
       $abs_prefix | if test("\\A[A-Za-z0-9_./-]+\\z") then . else @sh end;
     def norm_user_anchor:
-      . as $original |
-      ((match("\\A[A-Za-z0-9_.-]+ +") | .string) // "") as $interpreter |
-      ltrimstr($interpreter) as $command |
-      user_anchor as $quoted |
-      if ($command | startswith($quoted))
-      then $interpreter + ".claude/hooks/" + ($command | ltrimstr($quoted))
-      # Older installers normalized only a raw absolute command at the start.
-      elif startswith($abs_prefix)
-      then ".claude/hooks/" + ltrimstr($abs_prefix)
-      else $original
+      # Older installers recognized a raw absolute path only as the command.
+      if startswith($abs_prefix) then ".claude/hooks/" + ltrimstr($abs_prefix)
+      elif $userscope then
+        # Match the installer-generated user path after an optional interpreter.
+        ((match("\\A[A-Za-z0-9_.-]+ +") | .string) // "") as $interpreter |
+        ($interpreter + user_anchor) as $prefix |
+        if startswith($prefix) then $interpreter + ".claude/hooks/" + ltrimstr($prefix) else . end
+      else .
       end;
     def project_relative:
       sub("\\A(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?:\"" + pdvar + "\"|" + pdvar + ")/\\.claude/hooks/"; "\(.i).claude/hooks/");

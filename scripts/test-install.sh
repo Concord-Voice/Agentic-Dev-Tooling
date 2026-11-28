@@ -227,8 +227,12 @@ cat > "$shapes/.claude/settings.json" <<'JSON'
   {"matcher":"Read","hooks":[{"type":"command","command":"python3 \"${CLAUDE_PROJECT_DIR}/.claude/hooks/my-read(legacy).py\""}]},
   {"matcher":"Read","hooks":[{"type":"command","command":"${CLAUDE_PROJECT_DIR/.claude/hooks/my-broken.sh"}]}]}}
 JSON
-jq --arg cmd "$shapes/.claude/hooks/my-absolute.sh" '
-    .hooks.PreToolUse += [{matcher:"Read", hooks:[{type:"command", command:$cmd}]}]' \
+custom_absolute_arg="echo $shapes/.claude/hooks/my-absolute.sh"
+jq --arg cmd "$shapes/.claude/hooks/my-absolute.sh" --arg custom "$custom_absolute_arg" '
+    .hooks.PreToolUse += [
+      {matcher:"Read", hooks:[{type:"command", command:$cmd}]},
+      {matcher:"Read", hooks:[{type:"command", command:$custom}]}
+    ]' \
   "$shapes/.claude/settings.json" > "$shapes/.claude/local-settings.json"
 mv "$shapes/.claude/local-settings.json" "$shapes/.claude/settings.json"
 "$HERE/install.sh" claude --project "$shapes" >/dev/null
@@ -243,6 +247,8 @@ printf '%s\n' "$shape_cmds" | grep -qxF 'python3 "${CLAUDE_PROJECT_DIR}/.claude/
   || fail "whole-path quoting was lost for a hook path containing parentheses"
 printf '%s\n' "$shape_cmds" | grep -qxF "${P}my-absolute.sh" \
   || fail "a legacy absolute project hook was not re-anchored"
+printf '%s\n' "$shape_cmds" | grep -qxF "$custom_absolute_arg" \
+  || fail "project install rewrote an absolute argument to a custom command"
 printf '%s\n' "$shape_cmds" | grep -qxF '${CLAUDE_PROJECT_DIR/.claude/hooks/my-broken.sh' \
   || fail "an unbalanced project-dir form was rewritten instead of left as written"
 while IFS= read -r cmd; do
@@ -313,6 +319,8 @@ cat > "$quoted_home/.claude/settings.json" <<'JSON'
   {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/.format.sh\""}]},
   {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/format(legacy).sh\""}]},
   {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/format+extra@team.sh\""}]},
+  {"matcher":"Bash","hooks":[{"type":"command","command":"bash -e \"${CLAUDE_PROJECT_DIR}/.claude/hooks/.format.sh\""}]},
+  {"matcher":"Bash","hooks":[{"type":"command","command":"env HOOK_MODE=check \"${CLAUDE_PROJECT_DIR}/.claude/hooks/.format.sh\""}]},
   {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/.format.sh\"; printf 'suffix\\n'"}]},
   {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/./.format.sh\""}]},
   {"matcher":"Bash","hooks":[{"type":"command","command":"bash .claude/hooks/.format.sh"}]}
@@ -348,6 +356,14 @@ for install in first refresh; do
     [[ "$actual" == "$expected" ]] || fail "$install lost the absolute quoted custom hook: $name"
     [[ "$(env -u CLAUDE_PROJECT_DIR bash -c "$actual")" == 'custom hook' ]] \
       || fail "$install custom hook did not resolve without CLAUDE_PROJECT_DIR"
+  done
+  literal_path="$(jq -nr --arg path "$quoted_home/.claude/hooks/.format.sh" '$path | @sh')"
+  for prefix in 'bash -e' 'env HOOK_MODE=check'; do
+    expected="$prefix $literal_path"
+    jq -e --arg command "$expected" '[.hooks.PostToolUse[].hooks[].command | select(. == $command)] | length == 1' \
+      "$quoted_home/.claude/settings.json" >/dev/null || fail "$install did not re-anchor a quoted hook after $prefix"
+    [[ "$(env -u CLAUDE_PROJECT_DIR bash -c "$expected")" == 'custom hook' ]] \
+      || fail "$install custom hook after $prefix did not resolve without CLAUDE_PROJECT_DIR"
   done
   expected="$(jq -nr --arg path "$quoted_home/.claude/hooks/.format.sh" '$path | @sh')"'; printf '\''suffix\n'\'''
   actual="$(jq -r --arg command "$expected" '.hooks.PostToolUse[].hooks[].command | select(. == $command)' "$quoted_home/.claude/settings.json")"
