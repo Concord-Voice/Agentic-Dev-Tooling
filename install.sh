@@ -215,8 +215,13 @@ install_claude() {
     # Whole-path normalization identifies managed commands. Rendering preserves
     # the full quoted word for custom paths.
     def pdvar: "(?:\\$CLAUDE_PROJECT_DIR|\\$\\{CLAUDE_PROJECT_DIR(?::-\\.)?\\})";
+    def user_anchor:
+      $abs_prefix | if test("^[A-Za-z0-9_./-]+$") then . else @sh end;
     def norm: if type != "string" then . else
-      (if startswith($abs_prefix) then ".claude/hooks/" + ltrimstr($abs_prefix) else . end)
+      (user_anchor as $user_anchor |
+       if startswith($user_anchor) then ".claude/hooks/" + ltrimstr($user_anchor)
+       elif startswith($abs_prefix) then ".claude/hooks/" + ltrimstr($abs_prefix)
+       else . end)
       | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/(?<p>(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*)\"(?=[[:blank:]]|$)"; "\(.i).claude/hooks/\(.p)")
       | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?:\"" + pdvar + "\"|" + pdvar + ")/\\.claude/hooks/"; "\(.i).claude/hooks/")
       end;
@@ -224,17 +229,15 @@ install_claude() {
       then sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\\.claude/hooks/"; "\(.i)\($to)") else . end;
     def quoted_project_prefix:
       "^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/";
-    def quoted_project_word:
-      quoted_project_prefix + "(?:[^\"\\\\]|\\\\.)*\"(?=[[:blank:]]|$)";
-    def literal_double_quote:
-      explode | map(if IN(34, 36, 92, 96) then [92, .] else [.] end) | flatten | implode;
+    def quoted_project_literal:
+      quoted_project_prefix + "(?<p>[^\"\\\\$\\x60[:cntrl:]]+)\"(?=[[:blank:]]|$)";
     def render($to; $managed):
       if type != "string" then .
-      elif test(quoted_project_word) then
+      elif test(quoted_project_prefix) then
         norm as $normalized |
         if ($managed | index($normalized)) != null then $normalized | anchor($to)
         elif $userscope then
-          sub(quoted_project_prefix; "\(.i)\"\($abs_prefix | literal_double_quote)")
+          sub(quoted_project_literal; "\(.i)\(($abs_prefix + .p) | @sh)")
         else .
         end
       else norm | anchor($to)
@@ -270,7 +273,7 @@ install_claude() {
       }) | from_entries)
     ) as $mergedhooks |
     ($shallow + { hooks: $mergedhooks }) as $merged |
-    (if $userscope then $abs_prefix else "\"${CLAUDE_PROJECT_DIR:-.}\"/.claude/hooks/" end) as $to |
+    (if $userscope then user_anchor else "\"${CLAUDE_PROJECT_DIR:-.}\"/.claude/hooks/" end) as $to |
     [$base.hooks[]?[]?.hooks[]?.command | norm] as $managed |
     $merged | .hooks |= with_entries(.value |= map(
       .hooks |= map(if has("command") then .command |= render($to; $managed) else . end)

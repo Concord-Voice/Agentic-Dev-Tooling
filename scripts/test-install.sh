@@ -296,7 +296,7 @@ n2="$(jq '[.hooks[][].hooks[]] | length' "$fake_home/.claude/settings.json")"
 [ "$n1" = "$n2" ] || fail "--user re-run duplicated hooks ($n1 -> $n2)"
 
 # User installs substitute the absolute root without splitting a custom quoted word.
-quoted_home="$tmp/quoted user home"
+quoted_home="$tmp/quoted user's home"
 mkdir -p "$quoted_home/.claude/hooks"
 for name in '.format.sh' 'format(legacy).sh'; do
   printf '#!/usr/bin/env bash\nprintf "custom hook\\n"\n' > "$quoted_home/.claude/hooks/$name"
@@ -310,8 +310,11 @@ cat > "$quoted_home/.claude/settings.json" <<'JSON'
 JSON
 for install in first refresh; do
   HOME="$quoted_home" "$HERE/install.sh" claude --user >/dev/null
+  expected_base="$(jq -nr --arg path "$quoted_home/.claude/hooks/" '$path | @sh')destructive-commands.sh"
+  jq -e --arg command "$expected_base" '[.hooks.PreToolUse[].hooks[].command | select(. == $command)] | length == 1' \
+    "$quoted_home/.claude/settings.json" >/dev/null || fail "$install lost the managed hook or duplicated it"
   for name in '.format.sh' 'format(legacy).sh'; do
-    expected="\"$quoted_home/.claude/hooks/$name\""
+    expected="$(jq -nr --arg path "$quoted_home/.claude/hooks/$name" '$path | @sh')"
     actual="$(jq -r --arg command "$expected" '.hooks.PostToolUse[].hooks[].command | select(. == $command)' "$quoted_home/.claude/settings.json")"
     [[ "$actual" == "$expected" ]] || fail "$install lost the absolute quoted custom hook: $name"
     [[ "$(env -u CLAUDE_PROJECT_DIR bash -c "$actual")" == 'custom hook' ]] \
