@@ -232,11 +232,13 @@ install_claude() {
       then $interpreter + ".claude/hooks/" + ($command | ltrimstr($abs_prefix))
       else $original
       end;
+    def project_relative:
+      sub("\\A(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?:\"" + pdvar + "\"|" + pdvar + ")/\\.claude/hooks/"; "\(.i).claude/hooks/");
     def norm: if type != "string" then . else
       norm_user_anchor
       | sub(quoted_project_prefix + "(?<p>(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*)\"" + word_end;
             "\(.i).claude/hooks/\(.p)")
-      | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?:\"" + pdvar + "\"|" + pdvar + ")/\\.claude/hooks/"; "\(.i).claude/hooks/")
+      | project_relative
       end;
     def anchor($to): if type == "string"
       then sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\\.claude/hooks/"; "\(.i)\($to)") else . end;
@@ -250,14 +252,12 @@ install_claude() {
           end);
     def render($to; $managed):
       if type != "string" then .
-      elif test(quoted_project_prefix) then
-        norm as $normalized |
+      else norm as $normalized |
         if ($managed | index($normalized)) != null then $normalized | anchor($to)
-        elif $userscope then
-          user_literal_command
-        else .
+        elif test(quoted_project_prefix) then
+          if $userscope then user_literal_command else . end
+        else project_relative | anchor($to)
         end
-      else norm | anchor($to)
       end;
     (.[0]) as $adopter | (.[1]) as $base |
     ($base * $adopter) as $shallow |

@@ -312,6 +312,12 @@ cat > "$quoted_home/.claude/settings.json" <<'JSON'
   {"matcher":"Bash","hooks":[{"type":"command","command":"bash .claude/hooks/.format.sh"}]}
 ]}}
 JSON
+# An arbitrary shell word that resembles a raw legacy install path must remain intact.
+custom_absolute="printf $quoted_home/.claude/hooks/.format.sh'"
+bash -n -c "$custom_absolute"
+jq --arg cmd "$custom_absolute" '.hooks.PostToolUse += [{matcher:"Bash", hooks:[{type:"command", command:$cmd}]}]' \
+  "$quoted_home/.claude/settings.json" > "$quoted_home/.claude/local-settings.json"
+mv "$quoted_home/.claude/local-settings.json" "$quoted_home/.claude/settings.json"
 for install in first refresh; do
   HOME="$quoted_home" "$HERE/install.sh" claude --user >/dev/null
   expected_base="$(jq -nr --arg path "$quoted_home/.claude/hooks/" '$path | @sh')destructive-commands.sh"
@@ -321,6 +327,8 @@ for install in first refresh; do
   jq -e --arg original '"${CLAUDE_PROJECT_DIR}/.claude/hooks/./.format.sh"' \
     '[.hooks.PostToolUse[].hooks[].command | select(. == $original)] | length == 1' \
     "$quoted_home/.claude/settings.json" >/dev/null || fail "$install rewrote an unsupported path"
+  jq -e --arg command "$custom_absolute" '[.hooks.PostToolUse[].hooks[].command | select(. == $command)] | length == 1' \
+    "$quoted_home/.claude/settings.json" >/dev/null || fail "$install changed an adopter-supplied absolute command"
   jq -e --arg command "$expected_base" '[.hooks.PreToolUse[].hooks[].command | select(. == $command)] | length == 1' \
     "$quoted_home/.claude/settings.json" >/dev/null || fail "$install lost the managed hook or duplicated it"
   for name in '.format.sh' 'format(legacy).sh' 'format+extra@team.sh'; do
