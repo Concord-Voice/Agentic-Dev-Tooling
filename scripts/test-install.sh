@@ -298,7 +298,7 @@ n2="$(jq '[.hooks[][].hooks[]] | length' "$fake_home/.claude/settings.json")"
 # User installs substitute the absolute root without splitting a custom quoted word.
 quoted_home="$tmp/quoted user's home"
 mkdir -p "$quoted_home/.claude/hooks"
-for name in '.format.sh' 'format(legacy).sh'; do
+for name in '.format.sh' 'format(legacy).sh' 'format+extra@team.sh'; do
   printf '#!/usr/bin/env bash\nprintf "custom hook\\n"\n' > "$quoted_home/.claude/hooks/$name"
   chmod +x "$quoted_home/.claude/hooks/$name"
 done
@@ -306,6 +306,7 @@ cat > "$quoted_home/.claude/settings.json" <<'JSON'
 {"hooks":{"PostToolUse":[
   {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/.format.sh\""}]},
   {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/format(legacy).sh\""}]},
+  {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/format+extra@team.sh\""}]},
   {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/.format.sh\"; printf 'suffix\\n'"}]},
   {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/./.format.sh\""}]},
   {"matcher":"Bash","hooks":[{"type":"command","command":"bash .claude/hooks/.format.sh"}]}
@@ -322,7 +323,7 @@ for install in first refresh; do
     "$quoted_home/.claude/settings.json" >/dev/null || fail "$install rewrote an unsupported path"
   jq -e --arg command "$expected_base" '[.hooks.PreToolUse[].hooks[].command | select(. == $command)] | length == 1' \
     "$quoted_home/.claude/settings.json" >/dev/null || fail "$install lost the managed hook or duplicated it"
-  for name in '.format.sh' 'format(legacy).sh'; do
+  for name in '.format.sh' 'format(legacy).sh' 'format+extra@team.sh'; do
     expected="$(jq -nr --arg path "$quoted_home/.claude/hooks/$name" '$path | @sh')"
     actual="$(jq -r --arg command "$expected" '.hooks.PostToolUse[].hooks[].command | select(. == $command)' "$quoted_home/.claude/settings.json")"
     [[ "$actual" == "$expected" ]] || fail "$install lost the absolute quoted custom hook: $name"

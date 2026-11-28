@@ -240,7 +240,8 @@ install_claude() {
     def anchor($to): if type == "string"
       then sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\\.claude/hooks/"; "\(.i)\($to)") else . end;
     def user_literal_command:
-      sub("(?<original>" + quoted_project_prefix + "(?<p>[A-Za-z0-9_./() -]+)\")" + word_end;
+      # In a double-quoted shell word, these characters can escape or expand.
+      sub("(?<original>" + quoted_project_prefix + "(?<p>[^\"$\\x5c`![:cntrl:]]+)\")" + word_end;
           # Only re-anchor complete literal path components.
           if (.p | split("/") | all(length > 0 and . != "." and . != ".."))
           then "\(.i)\(($abs_prefix + .p) | @sh)"
