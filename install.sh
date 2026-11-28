@@ -239,8 +239,8 @@ install_claude() {
       sub("\\A(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?:\"" + pdvar + "\"|" + pdvar + ")/\\.claude/hooks/"; "\(.i).claude/hooks/");
     def norm: if type != "string" then . else
       norm_user_anchor
-      | sub(quoted_project_prefix + "(?<p>(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*)\"" + word_end;
-            "\(.i).claude/hooks/\(.p)")
+      | sub(quoted_project_prefix + "(?<p>(?:(?:\\.|[A-Za-z0-9_-][A-Za-z0-9_.-]*)/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*)\"" + word_end;
+            "\(.i).claude/hooks/\(.p | split("/") | map(select(. != ".")) | join("/"))")
       | project_relative
       end;
     def anchor($to): if type == "string"

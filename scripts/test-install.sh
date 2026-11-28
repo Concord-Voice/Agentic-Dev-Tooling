@@ -334,7 +334,10 @@ bash -n -c "$custom_absolute"
 legacy_base="$quoted_home/.claude/hooks/destructive-commands.sh"
 jq --arg cmd "$custom_absolute" --arg legacy "$legacy_base" '
     .hooks.PostToolUse += [{matcher:"Bash", hooks:[{type:"command", command:$cmd}]}] |
-    .hooks.PreToolUse = [{matcher:"Bash", hooks:[{type:"command", command:$legacy}]}]' \
+    .hooks.PreToolUse = [
+      {matcher:"Bash", hooks:[{type:"command", command:$legacy}]},
+      {matcher:"Read", hooks:[{type:"command", command:"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/./protect-env-files.sh\""}]}
+    ]' \
   "$quoted_home/.claude/settings.json" > "$quoted_home/.claude/local-settings.json"
 mv "$quoted_home/.claude/local-settings.json" "$quoted_home/.claude/settings.json"
 for install in first refresh; do
@@ -352,6 +355,8 @@ for install in first refresh; do
     "$quoted_home/.claude/settings.json" >/dev/null || fail "$install lost the managed hook or duplicated it"
   jq -e --arg command "$legacy_base" '[.hooks.PreToolUse[].hooks[].command | select(. == $command)] | length == 0' \
     "$quoted_home/.claude/settings.json" >/dev/null || fail "$install retained the old raw managed hook"
+  jq -e '[.hooks.PreToolUse[].hooks[].command | select(contains("protect-env-files.sh"))] | length == 1' \
+    "$quoted_home/.claude/settings.json" >/dev/null || fail "$install duplicated a managed hook with a literal ./ segment"
   for name in '.format.sh' './.format.sh' 'format(legacy).sh' 'format+extra@team.sh'; do
     expected="$(jq -nr --arg path "$quoted_home/.claude/hooks/$name" '$path | @sh')"
     actual="$(jq -r --arg command "$expected" '.hooks.PostToolUse[].hooks[].command | select(. == $command)' "$quoted_home/.claude/settings.json")"
