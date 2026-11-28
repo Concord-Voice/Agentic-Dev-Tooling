@@ -224,6 +224,7 @@ cat > "$shapes/.claude/settings.json" <<'JSON'
   {"matcher":"Edit|Write|Bash","hooks":[{"type":"command","command":"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-sensitive.sh"}]},
   {"matcher":"Edit|Write","hooks":[{"type":"command","command":"${CLAUDE_PROJECT_DIR}/.claude/hooks/protect-applied-migrations.sh"}]},
   {"matcher":"Read","hooks":[{"type":"command","command":"python3 \"${CLAUDE_PROJECT_DIR}/.claude/hooks/my-read.py\""}]},
+  {"matcher":"Read","hooks":[{"type":"command","command":"python3 \"${CLAUDE_PROJECT_DIR}/.claude/hooks/my-read(legacy).py\""}]},
   {"matcher":"Read","hooks":[{"type":"command","command":"${CLAUDE_PROJECT_DIR/.claude/hooks/my-broken.sh"}]}]}}
 JSON
 "$HERE/install.sh" claude --project "$shapes" >/dev/null
@@ -233,6 +234,8 @@ for h in destructive-commands.sh protect-env-files.sh protect-sensitive.sh prote
   printf '%s\n' "$shape_cmds" | grep -qxF "${P}$h" || fail "project-dir shape for $h was not anchored to the canonical form"
 done
 printf '%s\n' "$shape_cmds" | grep -qxF "python3 ${P}my-read.py" || fail "whole-path-quoted interpreter command was not anchored"
+printf '%s\n' "$shape_cmds" | grep -qxF 'python3 "${CLAUDE_PROJECT_DIR}/.claude/hooks/my-read(legacy).py"' \
+  || fail "whole-path quoting was lost for a hook path containing parentheses"
 printf '%s\n' "$shape_cmds" | grep -qxF '${CLAUDE_PROJECT_DIR/.claude/hooks/my-broken.sh' \
   || fail "an unbalanced project-dir form was rewritten instead of left as written"
 while IFS= read -r cmd; do

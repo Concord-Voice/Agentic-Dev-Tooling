@@ -216,7 +216,7 @@ install_claude() {
     def pdvar: "(?:\\$CLAUDE_PROJECT_DIR|\\$\\{CLAUDE_PROJECT_DIR(?::-\\.)?\\})";
     def norm: if type != "string" then . else
       (if startswith($abs_prefix) then ".claude/hooks/" + ltrimstr($abs_prefix) else . end)
-      | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/(?<p>[^\"[:space:]]*)\""; "\(.i).claude/hooks/\(.p)")
+      | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/(?<p>[A-Za-z0-9_./-]+)\""; "\(.i).claude/hooks/\(.p)")
       | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?:\"" + pdvar + "\"|" + pdvar + ")/\\.claude/hooks/"; "\(.i).claude/hooks/")
       end;
     def anchor($to): if type == "string"
