@@ -216,8 +216,10 @@ install_claude() {
     # the full quoted word for custom paths.
     def pdvar: "(?:\\$CLAUDE_PROJECT_DIR|\\$\\{CLAUDE_PROJECT_DIR(?::-\\.)?\\})";
     def quoted_project_prefix:
-      # Preserve literal interpreter flags and environment assignments.
-      "\\A(?<i>(?:[A-Za-z0-9_.-]+(?:[[:blank:]]+[A-Za-z0-9_./=+@%:-]+)*[[:blank:]]+)?)\""
+      # These prefixes take a filename. In particular, sh and bash -c take source text.
+      "\\A(?<i>(?:(?:(?:bash|sh)(?:[[:blank:]]+-[eux]+)+"
+      + "|env(?:[[:blank:]]+[A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9_./=+@%:-]*)+"
+      + "|[A-Za-z0-9_.-]+)[[:blank:]]+)?)\""
       + pdvar + "/\\.claude/hooks/";
     # Adjacent shell operators end the quoted word. Attached word fragments do not.
     def word_end: "(?=[[:blank:];|&<>]|\\n|\\z)";
