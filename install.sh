@@ -230,7 +230,10 @@ install_claude() {
     def quoted_project_prefix:
       "^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/";
     def quoted_project_literal:
-      quoted_project_prefix + "(?<p>[^\"\\\\$\\x60[:cntrl:]]+)\"(?=[[:blank:]]|$)";
+      # Convert only literal path components. Preserve commands with shell
+      # expansion, traversal, or unsupported quoting as authored.
+      "(?!\\.{1,2}(?:/|\"))[A-Za-z0-9_.() -]+" as $part |
+      quoted_project_prefix + "(?<p>(?:" + $part + "/)*" + $part + ")\"(?=[[:blank:]]|$)";
     def render($to; $managed):
       if type != "string" then .
       elif test(quoted_project_prefix) then
