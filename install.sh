@@ -248,8 +248,8 @@ install_claude() {
     def user_literal_command:
       # In a double-quoted shell word, these characters can escape or expand.
       sub("(?<original>" + quoted_project_prefix + "(?<p>[^\"$\\x5c`![:cntrl:]]+)\")" + word_end;
-          # Only re-anchor complete literal path components.
-          if (.p | split("/") | all(length > 0 and . != "." and . != ".."))
+          # A literal ./ segment stays within the same directory.
+          if (.p | split("/") | .[-1] != "." and all(.[]; length > 0 and . != ".."))
           then "\(.i)\(($abs_prefix + .p) | @sh)"
           else .original
           end);

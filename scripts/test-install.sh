@@ -324,6 +324,7 @@ cat > "$quoted_home/.claude/settings.json" <<'JSON'
   {"matcher":"Bash","hooks":[{"type":"command","command":"env HOOK_MODE=check \"${CLAUDE_PROJECT_DIR}/.claude/hooks/.format.sh\""}]},
   {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/.format.sh\"; printf 'suffix\\n'"}]},
   {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/./.format.sh\""}]},
+  {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/../.format.sh\""}]},
   {"matcher":"Bash","hooks":[{"type":"command","command":"bash .claude/hooks/.format.sh"}]}
 ]}}
 JSON
@@ -342,7 +343,7 @@ for install in first refresh; do
   expected_interpreter="bash $(jq -nr --arg path "$quoted_home/.claude/hooks/" '$path | @sh').format.sh"
   jq -e --arg command "$expected_interpreter" '[.hooks.PostToolUse[].hooks[].command | select(. == $command)] | length == 1' \
     "$quoted_home/.claude/settings.json" >/dev/null || fail "$install lost or duplicated the interpreter hook"
-  jq -e --arg original '"${CLAUDE_PROJECT_DIR}/.claude/hooks/./.format.sh"' \
+  jq -e --arg original '"${CLAUDE_PROJECT_DIR}/.claude/hooks/../.format.sh"' \
     '[.hooks.PostToolUse[].hooks[].command | select(. == $original)] | length == 1' \
     "$quoted_home/.claude/settings.json" >/dev/null || fail "$install rewrote an unsupported path"
   jq -e --arg command "$custom_absolute" '[.hooks.PostToolUse[].hooks[].command | select(. == $command)] | length == 1' \
@@ -351,7 +352,7 @@ for install in first refresh; do
     "$quoted_home/.claude/settings.json" >/dev/null || fail "$install lost the managed hook or duplicated it"
   jq -e --arg command "$legacy_base" '[.hooks.PreToolUse[].hooks[].command | select(. == $command)] | length == 0' \
     "$quoted_home/.claude/settings.json" >/dev/null || fail "$install retained the old raw managed hook"
-  for name in '.format.sh' 'format(legacy).sh' 'format+extra@team.sh'; do
+  for name in '.format.sh' './.format.sh' 'format(legacy).sh' 'format+extra@team.sh'; do
     expected="$(jq -nr --arg path "$quoted_home/.claude/hooks/$name" '$path | @sh')"
     actual="$(jq -r --arg command "$expected" '.hooks.PostToolUse[].hooks[].command | select(. == $command)' "$quoted_home/.claude/settings.json")"
     [[ "$actual" == "$expected" ]] || fail "$install lost the absolute quoted custom hook: $name"

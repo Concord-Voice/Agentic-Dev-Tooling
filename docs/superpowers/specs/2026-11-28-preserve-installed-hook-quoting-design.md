@@ -6,4 +6,4 @@ Use managed-hook comparison for deduplication and matcher widening. The existing
 
 ## Acceptance criteria
 
-Extend the installer fixture with a quoted filename containing parentheses and user hooks with literal command prefixes. Verify fresh installs and refreshes with the project variable unset. Keep canonical deduplication, legacy direct project anchoring, and malformed path cases passing.
+Extend the installer fixture with a quoted filename containing parentheses and user hooks with literal command prefixes. Verify fresh installs and refreshes with the project variable unset, including a literal `./` segment. Preserve parent-relative commands as written. Keep canonical deduplication, legacy direct project anchoring, and malformed path cases passing.
