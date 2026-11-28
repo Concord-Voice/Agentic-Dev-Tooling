@@ -229,18 +229,20 @@ install_claude() {
       then sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\\.claude/hooks/"; "\(.i)\($to)") else . end;
     def quoted_project_prefix:
       "^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/";
-    def quoted_project_literal:
-      # Convert only literal path components. Preserve commands with shell
-      # expansion, traversal, or unsupported quoting as authored.
-      "(?!\\.{1,2}(?:/|\"))[A-Za-z0-9_.() -]+" as $part |
-      quoted_project_prefix + "(?<p>(?:" + $part + "/)*" + $part + ")\"(?=[[:blank:]]|$)";
+    def user_literal_command:
+      sub("(?<original>" + quoted_project_prefix + "(?<p>[A-Za-z0-9_./() -]+)\")(?=[[:blank:]]|$)";
+          # Only re-anchor complete literal path components.
+          if (.p | split("/") | all(length > 0 and . != "." and . != ".."))
+          then "\(.i)\(($abs_prefix + .p) | @sh)"
+          else .original
+          end);
     def render($to; $managed):
       if type != "string" then .
       elif test(quoted_project_prefix) then
         norm as $normalized |
         if ($managed | index($normalized)) != null then $normalized | anchor($to)
         elif $userscope then
-          sub(quoted_project_literal; "\(.i)\(($abs_prefix + .p) | @sh)")
+          user_literal_command
         else .
         end
       else norm | anchor($to)

@@ -305,12 +305,16 @@ done
 cat > "$quoted_home/.claude/settings.json" <<'JSON'
 {"hooks":{"PostToolUse":[
   {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/.format.sh\""}]},
-  {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/format(legacy).sh\""}]}
+  {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/format(legacy).sh\""}]},
+  {"matcher":"Bash","hooks":[{"type":"command","command":"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/./.format.sh\""}]}
 ]}}
 JSON
 for install in first refresh; do
   HOME="$quoted_home" "$HERE/install.sh" claude --user >/dev/null
   expected_base="$(jq -nr --arg path "$quoted_home/.claude/hooks/" '$path | @sh')destructive-commands.sh"
+  jq -e --arg original '"${CLAUDE_PROJECT_DIR}/.claude/hooks/./.format.sh"' \
+    '[.hooks.PostToolUse[].hooks[].command | select(. == $original)] | length == 1' \
+    "$quoted_home/.claude/settings.json" >/dev/null || fail "$install rewrote an unsupported path"
   jq -e --arg command "$expected_base" '[.hooks.PreToolUse[].hooks[].command | select(. == $command)] | length == 1' \
     "$quoted_home/.claude/settings.json" >/dev/null || fail "$install lost the managed hook or duplicated it"
   for name in '.format.sh' 'format(legacy).sh'; do
