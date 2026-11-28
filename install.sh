@@ -212,11 +212,11 @@ install_claude() {
     # ($X/ ${X}/ ${X:-.}/), or the whole path quoted ("$X/.claude/hooks/f", closing quote
     # dropped with it). Matching each quote or brace on its own left a stray quote behind,
     # which no shell can parse, and let a broken ${X/... form pass as the base hook.
-    # Anything unbalanced is left exactly as written.
+    # Keep whole-path quotes for custom suffixes or compound shell words.
     def pdvar: "(?:\\$CLAUDE_PROJECT_DIR|\\$\\{CLAUDE_PROJECT_DIR(?::-\\.)?\\})";
     def norm: if type != "string" then . else
       (if startswith($abs_prefix) then ".claude/hooks/" + ltrimstr($abs_prefix) else . end)
-      | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/(?<p>[A-Za-z0-9_./-]+)\""; "\(.i).claude/hooks/\(.p)")
+      | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)\"" + pdvar + "/\\.claude/hooks/(?<p>(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*)\"(?=[[:blank:]]|$)"; "\(.i).claude/hooks/\(.p)")
       | sub("^(?<i>(?:[A-Za-z0-9_.-]+ +)?)(?:\"" + pdvar + "\"|" + pdvar + ")/\\.claude/hooks/"; "\(.i).claude/hooks/")
       end;
     def anchor($to): if type == "string"
